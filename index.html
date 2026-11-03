@@ -250,7 +250,7 @@ const LEVEL_WORDS = {};
 for (const l of LEVELS) for (const [ko, pos, gloss] of l.vocab) if (!LEVEL_WORDS[ko]) LEVEL_WORDS[ko] = { lemma: ko, pos, gloss, level: l.id };
 
 /* ---------- estado guardado ---------- */
-const DEFAULT_SET = { chatModel: 'claude-haiku-5-5', defModel: 'claude-opus-5-5', autoSpeak: true, inlineGloss: true, autoDefine: true, autoSend: true, rate: 0.9, voice: '', theme: '' };
+const DEFAULT_SET = { chatModel: 'claude-haiku-5-5', defModel: 'claude-opus-5-5', autoSpeak: true, inlineGloss: true, autoDefine: false, autoSend: true, rate: 0.9, voice: '', theme: '' };
 const S = Object.assign({}, DEFAULT_SET, load('hab-set', {}));
 const KEYS = Object.assign({ anthropic: '', openai: '', workspace: '' }, load('hab-keys', {}));
 let DICT = load('hab-dict', {});
@@ -258,6 +258,8 @@ let CONV = load('hab-conv', null);   // { level, topic, msgs: [...] }
 let LISTEN = false;                  // modo escucha: el coreano queda borroso hasta tocarlo
 const saveSet = () => save('hab-set', S), saveKeys = () => save('hab-keys', KEYS), saveDict = () => save('hab-dict', DICT);
 const saveConv = () => { if (CONV) CONV.msgs = CONV.msgs.slice(-200); save('hab-conv', CONV); };
+// (desde la v2 el modelo caro se usa solo cuando el estudiante lo pide)
+if (!S.v2) { S.autoDefine = false; S.v2 = true; saveSet(); }
 if (S.theme) document.documentElement.dataset.theme = S.theme;
 
 /* ---------- hangul: descomponer, componer y romanizar ---------- */
@@ -438,6 +440,9 @@ const CHAT_SCHEMA = obj({ reply: obj({ ko: STR, es: STR, tokens: TOKENS }), stud
 const ENTRY = obj({ query: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, meaning: STR, explanation: STR, hanja: STR, irregular: STR,
   conjugations: { type: 'array', items: obj({ form: STR, label: STR }) }, examples: { type: 'array', items: obj({ ko: STR, es: STR }) }, in_context: STR });
 const DEF_SCHEMA = obj({ entries: { type: 'array', items: ENTRY } });
+const SENT_SCHEMA = obj({ translation: STR, literal: STR,
+  words: { type: 'array', items: obj({ t: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, explanation: STR }) },
+  grammar: { type: 'array', items: obj({ point: STR, explanation: STR }) }, tip: STR });
 
 /* ---------- instrucciones ---------- */
 function chatSystem(levelId){
@@ -468,6 +473,15 @@ function chatSystem(levelId){
     ...(free ? [] : ['', 'VOCABULARIO (de este nivel y de los anteriores):', vocab, '', 'GRAMÁTICA (de este nivel y de los anteriores):', grammar])
   ].join('\n');
 }
+const SENT_SYSTEM = [
+  'Eres un profesor experto de coreano para hispanohablantes. Explicas una frase coreana a un estudiante, en español, de forma clara y breve.',
+  '- translation: traducción natural al español.',
+  '- literal: traducción literal palabra por palabra que muestre el orden coreano (p. ej. «yo-TEMA escuela-A voy»).',
+  '- words: cada palabra de la frase en orden (sin signos de puntuación): t es la palabra tal como aparece; lemma, su forma de diccionario (verbos y adjetivos con -다, sustantivos sin partícula); gloss, el significado en 1 a 4 palabras; explanation, en una frase, qué forma tiene aquí y qué aporta (partícula, conjugación, matiz).',
+  '- grammar: los 1 a 3 puntos gramaticales clave de la frase, cada uno con una explicación corta y cómo se forma.',
+  '- tip: un consejo breve para usar la frase o algo parecido (o "").',
+  'Sé exacto.'
+].join('\n');
 const DEF_SYSTEM = [
   'Eres un profesor experto de coreano para hispanohablantes y escribes un diccionario de aprendizaje preciso.',
   'Recibes una lista de términos. Cada término puede ser una palabra coreana conjugada o con partícula, una forma de diccionario, una expresión, o una palabra en español (en ese caso da la palabra coreana más común para ese significado). A veces viene la oración donde apareció.',
@@ -575,9 +589,9 @@ function mergeEntry(x, surface, form){
   DICT[lemma] = e;
   return e;
 }
-async function define(items){
+async function define(items, model = S.defModel){
   const user = 'TÉRMINOS:\n' + items.map((it, i) => `${i + 1}. «${it.term}»` + (it.lemma ? ` (forma de diccionario probable: ${it.lemma})` : '') + (it.sentence ? ` — en la oración: «${it.sentence}»` : '')).join('\n');
-  const out = await ask(S.defModel, DEF_SYSTEM, user, DEF_SCHEMA, { effort: 'medium', maxTokens: 16000, ms: 120000 });
+  const out = await ask(model, DEF_SYSTEM, user, DEF_SCHEMA, { effort: 'low', maxTokens: 16000, ms: 120000 });
   return out.entries || [];
 }
 const pendingDefs = new Set();
@@ -592,6 +606,35 @@ async function defineInBackground(m){
     saveDict(); refreshSheet();
   } catch (e) { console.warn('definiciones:', e.message); }
   finally { lemmas.forEach(l => pendingDefs.delete(l)); }
+}
+
+/* ---------- explicar una frase (modelo caro, solo cuando se pide) ---------- */
+async function explainSentence(m){
+  m.explBusy = true; m.explErr = ''; renderAll();
+  try {
+    const x = await ask(S.defModel, SENT_SYSTEM, 'FRASE: «' + m.ko + '»', SENT_SCHEMA, { effort: 'low', maxTokens: 12000, ms: 120000 });
+    m.expl = x; m.showExpl = true;
+    // las palabras explicadas quedan en el diccionario (sin contar como vistas otra vez)
+    for (const w of x.words || []) {
+      const lemma = (w.lemma || '').trim(); if (!lemma || !/[\uAC00-\uD7A3]/.test(lemma) || w.pos === 'puntuación' || w.pos === 'partícula' || (w.pos === 'nombre propio' && !LEVEL_WORDS[lemma])) continue;
+      const e = DICT[lemma] || (DICT[lemma] = { lemma, pos: w.pos, gloss: w.gloss, status: 'nueva', seen: 1, forms: {}, added: Date.now(), source: 'explicación', level: LEVEL_WORDS[lemma]?.level || null, detailed: false });
+      if (!e.gloss) e.gloss = w.gloss;
+      e.forms = e.forms || {};
+      if (w.t && w.t !== lemma) e.forms[w.t] = e.forms[w.t] || w.explanation;
+      if (!e.sentence) e.sentence = m.ko;
+    }
+    saveDict();
+  } catch (e) { m.explErr = e instanceof NoKey ? 'Falta la clave de la API (⚙ Ajustes).' : 'No se pudo explicar: ' + e.message; }
+  m.explBusy = false; saveConv(); renderAll();
+}
+function explBlock(m){
+  const x = m.expl, d = document.createElement('div'); d.className = 'es';
+  d.innerHTML = `<div><b style="color:var(--fg)">${esc(x.translation)}</b></div>${x.literal ? `<div class="small">Literal: ${esc(x.literal)}</div>` : ''}
+    <div class="sec-t">Palabra por palabra</div><div class="conj">${(x.words || []).map(w => `<span class="ko" data-say="${esc(w.t)}" style="cursor:pointer;color:var(--fg)">${esc(w.t)}</span><span><b style="color:var(--fg)">${esc(w.gloss)}</b>${w.lemma && w.lemma !== w.t ? ` <span class="ko">(${esc(w.lemma)})</span>` : ''} · ${esc(w.explanation)}</span>`).join('')}</div>
+    ${(x.grammar || []).length ? `<div class="sec-t">Gramática</div>${x.grammar.map(g => `<div class="gram"><b class="ko" style="color:var(--fg)">${esc(g.point)}</b><div>${esc(g.explanation)}</div></div>`).join('')}` : ''}
+    ${x.tip ? `<div class="form">💡 ${esc(x.tip)}</div>` : ''}`;
+  d.querySelectorAll('[data-say]').forEach(e => e.onclick = () => speak(e.dataset.say));
+  return d;
 }
 
 /* ---------- «¿qué es…?»: traducción automática ---------- */
@@ -626,7 +669,7 @@ async function lookup(term, sentence){
   if (known?.detailed) { card.state = 'ok'; card.lemma = known.lemma; CONV.msgs.push(card); saveConv(); renderAll(); scrollEnd(); return; }
   CONV.msgs.push(card); saveConv(); renderAll(); scrollEnd();
   try {
-    const [x] = await define([{ term }]);
+    const [x] = await define([{ term }], S.chatModel);
     const e = mergeEntry(x, /[가-힣]/.test(term) ? term : '', '');
     if (e) { e.source = e.source || 'consulta'; card.lemma = e.lemma; card.state = 'ok'; } else card.state = 'err';
     saveDict();
@@ -701,7 +744,11 @@ function renderMsg(m){
     b('🐢', () => speak(m.ko, Math.max(0.5, S.rate - 0.3)), 'Escuchar despacio');
     const es = document.createElement('div'); es.className = 'es'; es.textContent = m.es; es.hidden = !m.showEs;
     b('Traducción', () => { m.showEs = !m.showEs; es.hidden = !m.showEs; saveConv(); });
+    const ex = b(m.expl ? 'Explicación' : '🎓 Explicar frase', () => { if (m.expl) { m.showExpl = !m.showExpl; saveConv(); renderAll(); } else explainSentence(m); }, 'El profesor (modelo caro) explica la frase completa');
+    if (m.explBusy) { ex.disabled = true; ex.textContent = 'Explicando…'; }
     d.appendChild(tools); d.appendChild(es);
+    if (m.explErr) { const f = document.createElement('div'); f.className = 'fix'; f.textContent = m.explErr; d.appendChild(f); }
+    if (m.expl && m.showExpl !== false) d.appendChild(explBlock(m));
   } else {
     d.appendChild(tools);
     if (m.correction) {
@@ -883,7 +930,7 @@ function openSettings(){
   pb.innerHTML = `
     <div class="sec-t">Modelos</div>
     <div class="field"><label>Para conversar (barato: se usa en cada mensaje)</label><select id="sChat">${opt(CHAT_MODELS, S.chatModel)}</select></div>
-    <div class="field"><label>Para definiciones y explicaciones (caro: solo para palabras nuevas, al tocar «Explicar» y al preguntar «…뭐예요?»)</label><select id="sDef">${opt(DEF_MODELS, S.defModel)}</select></div>
+    <div class="field"><label>Para explicaciones (caro: solo cuando aprietas «Explicar frase» o «Explicar» en una palabra)</label><select id="sDef">${opt(DEF_MODELS, S.defModel)}</select></div>
     <div class="sec-t">Claves de la API</div>
     <div class="field"><label>Anthropic (sk-ant-…)</label><input type="password" id="kA" autocomplete="off" value="${esc(KEYS.anthropic)}" placeholder="sk-ant-..."></div>
     <div class="field"><label>ID del workspace de Anthropic · solo si la clave no está asignada a un workspace</label><input type="text" id="kW" autocomplete="off" value="${esc(KEYS.workspace)}" placeholder="wrkspc_..."><div class="small">Lo ves en console.anthropic.com → Settings → Workspaces. Si tu clave se creó dentro de un workspace, déjalo vacío.</div></div>
@@ -891,7 +938,7 @@ function openSettings(){
     <p class="small">Las claves se guardan solo en este navegador y se envían directamente a api.anthropic.com o api.openai.com. No están en el archivo, así que puedes compartir la app sin peligro; eso sí, no compartas el navegador con la clave puesta.</p>
     <div class="sec-t">Lectura y ayudas</div>
     <label class="check"><input type="checkbox" id="oGloss" ${S.inlineGloss ? 'checked' : ''}><span>Mostrar el significado encima de las palabras nuevas</span></label>
-    <label class="check"><input type="checkbox" id="oDef" ${S.autoDefine ? 'checked' : ''}><span>Definir automáticamente las palabras nuevas con el modelo caro (se guardan en el diccionario)</span></label>
+    <label class="check"><input type="checkbox" id="oDef" ${S.autoDefine ? 'checked' : ''}><span>Definir automáticamente las palabras nuevas con el modelo caro (más lento; si está apagado, el modelo caro se usa solo cuando aprietas «Explicar»)</span></label>
     <div class="sec-t">Audio</div>
     <label class="check"><input type="checkbox" id="oSpeak" ${S.autoSpeak ? 'checked' : ''}><span>Leer en voz alta cada respuesta</span></label>
     <label class="check"><input type="checkbox" id="oSend" ${S.autoSend ? 'checked' : ''}><span>Enviar solo al terminar de hablar 🎤</span></label>

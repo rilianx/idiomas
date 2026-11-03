@@ -34,10 +34,10 @@ Una app para aprender idiomas conversando con una IA, empezando por el coreano. 
 
 | Para qué | Modelo por defecto | Cuándo se usa |
 |---|---|---|
-| Conversar y analizar cada palabra | **Claude Haiku 5.5** (o GPT-5.4 mini, o Sonnet 5.5) | En cada mensaje |
-| Definiciones y explicaciones | **Claude Opus 5.5** (o Sonnet 5.5, Fable 5.1, GPT-5.4 mini) | Palabras nuevas (en lote, una vez por palabra), al tocar «Explicar» y al preguntar «…뭐예요?» |
+| Conversar, analizar cada palabra y responder «…뭐예요?» | **Claude Haiku 5.5** (o GPT-5.4 mini, o Sonnet 5.5) | En cada mensaje: es rápido |
+| Explicaciones | **Claude Opus 5.5** (o Sonnet 5.5, Fable 5.1, GPT-5.4 mini) | **Solo cuando lo pides**: «🎓 Explicar frase» bajo una respuesta, o «Explicar» en una palabra |
 
-Las definiciones se guardan en el diccionario, así que cada palabra se paga una sola vez. La definición automática de palabras nuevas se puede apagar en ⚙ Ajustes.
+«Explicar frase» da la traducción, una traducción literal, cada palabra con su forma de diccionario y su función, los puntos de gramática y un consejo. Las palabras quedan en el diccionario. Si quieres que el modelo caro defina solo las palabras nuevas (más lento), se activa en ⚙ Ajustes.
 
 ## Cómo usarla
 
