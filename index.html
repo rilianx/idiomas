@@ -441,7 +441,7 @@ const ENTRY = obj({ query: STR, lemma: STR, pos: { type: 'string', enum: POS }, 
   conjugations: { type: 'array', items: obj({ form: STR, label: STR }) }, examples: { type: 'array', items: obj({ ko: STR, es: STR }) }, in_context: STR });
 const DEF_SCHEMA = obj({ entries: { type: 'array', items: ENTRY } });
 const SENT_SCHEMA = obj({ translation: STR, literal: STR,
-  words: { type: 'array', items: obj({ t: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, explanation: STR }) },
+  words: { type: 'array', items: obj({ t: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, meaning: STR, explanation: STR }) },
   grammar: { type: 'array', items: obj({ point: STR, explanation: STR }) }, tip: STR });
 
 /* ---------- instrucciones ---------- */
@@ -477,7 +477,7 @@ const SENT_SYSTEM = [
   'Eres un profesor experto de coreano para hispanohablantes. Explicas una frase coreana a un estudiante, en español, de forma clara y breve.',
   '- translation: traducción natural al español.',
   '- literal: traducción literal palabra por palabra que muestre el orden coreano (p. ej. «yo-TEMA escuela-A voy»).',
-  '- words: cada palabra de la frase en orden (sin signos de puntuación): t es la palabra tal como aparece; lemma, su forma de diccionario (verbos y adjetivos con -다, sustantivos sin partícula); gloss, el significado en 1 a 4 palabras; explanation, en una frase, qué forma tiene aquí y qué aporta (partícula, conjugación, matiz).',
+  '- words: cada palabra de la frase en orden (sin signos de puntuación): t es la palabra tal como aparece; lemma, su forma de diccionario (verbos y adjetivos con -다, sustantivos sin partícula); gloss, el significado en 1 a 4 palabras; meaning, una definición de diccionario breve en español (sentidos principales, en una frase); explanation, en una frase, qué forma tiene aquí y qué aporta (partícula, conjugación, matiz).',
   '- grammar: los 1 a 3 puntos gramaticales clave de la frase, cada uno con una explicación corta y cómo se forma.',
   '- tip: un consejo breve para usar la frase o algo parecido (o "").',
   'Sé exacto.'
@@ -615,14 +615,24 @@ async function explainSentence(m){
     const x = await ask(S.defModel, SENT_SYSTEM, 'FRASE: «' + m.ko + '»', SENT_SCHEMA, { effort: 'low', maxTokens: 12000, ms: 120000 });
     m.expl = x; m.showExpl = true;
     // las palabras explicadas quedan en el diccionario (sin contar como vistas otra vez)
+    // cada palabra queda en el diccionario: definición, la forma que tiene aquí y la frase como ejemplo
+    let added = 0, updated = 0;
     for (const w of x.words || []) {
       const lemma = (w.lemma || '').trim(); if (!lemma || !/[\uAC00-\uD7A3]/.test(lemma) || w.pos === 'puntuación' || w.pos === 'partícula' || (w.pos === 'nombre propio' && !LEVEL_WORDS[lemma])) continue;
-      const e = DICT[lemma] || (DICT[lemma] = { lemma, pos: w.pos, gloss: w.gloss, status: 'nueva', seen: 1, forms: {}, added: Date.now(), source: 'explicación', level: LEVEL_WORDS[lemma]?.level || null, detailed: false });
+      let e = DICT[lemma];
+      if (!e) { e = DICT[lemma] = { lemma, pos: w.pos, gloss: w.gloss, status: 'nueva', seen: 1, forms: {}, added: Date.now(), source: 'explicación', level: LEVEL_WORDS[lemma]?.level || null, detailed: false }; added++; }
+      else updated++;
       if (!e.gloss) e.gloss = w.gloss;
+      if (!e.pos || e.pos === 'otro') e.pos = w.pos;
+      if (!e.meaning && w.meaning) e.meaning = w.meaning;
       e.forms = e.forms || {};
       if (w.t && w.t !== lemma) e.forms[w.t] = e.forms[w.t] || w.explanation;
+      e.examples = e.examples || [];
+      if (!e.examples.some(ex => ex.ko === m.ko) && e.examples.length < 4) e.examples.push({ ko: m.ko, es: x.translation });
       if (!e.sentence) e.sentence = m.ko;
+      e.last = Date.now();
     }
+    m.explDict = { added, updated };
     saveDict();
   } catch (e) { m.explErr = e instanceof NoKey ? 'Falta la clave de la API (⚙ Ajustes).' : 'No se pudo explicar: ' + e.message; }
   m.explBusy = false; saveConv(); renderAll();
@@ -632,7 +642,8 @@ function explBlock(m){
   d.innerHTML = `<div><b style="color:var(--fg)">${esc(x.translation)}</b></div>${x.literal ? `<div class="small">Literal: ${esc(x.literal)}</div>` : ''}
     <div class="sec-t">Palabra por palabra</div><div class="conj">${(x.words || []).map(w => `<span class="ko" data-say="${esc(w.t)}" style="cursor:pointer;color:var(--fg)">${esc(w.t)}</span><span><b style="color:var(--fg)">${esc(w.gloss)}</b>${w.lemma && w.lemma !== w.t ? ` <span class="ko">(${esc(w.lemma)})</span>` : ''} · ${esc(w.explanation)}</span>`).join('')}</div>
     ${(x.grammar || []).length ? `<div class="sec-t">Gramática</div>${x.grammar.map(g => `<div class="gram"><b class="ko" style="color:var(--fg)">${esc(g.point)}</b><div>${esc(g.explanation)}</div></div>`).join('')}` : ''}
-    ${x.tip ? `<div class="form">💡 ${esc(x.tip)}</div>` : ''}`;
+    ${x.tip ? `<div class="form">💡 ${esc(x.tip)}</div>` : ''}
+    ${m.explDict ? `<div class="small" style="margin-top:6px">📖 ${m.explDict.added ? `${m.explDict.added} palabra${m.explDict.added > 1 ? 's' : ''} nueva${m.explDict.added > 1 ? 's' : ''} en tu diccionario` : 'Ninguna palabra nueva'}${m.explDict.updated ? ` · ${m.explDict.updated} actualizada${m.explDict.updated > 1 ? 's' : ''}` : ''}.</div>` : ''}`;
   d.querySelectorAll('[data-say]').forEach(e => e.onclick = () => speak(e.dataset.say));
   return d;
 }
