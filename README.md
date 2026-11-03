@@ -2,6 +2,8 @@
 
 Una app para aprender idiomas conversando con una IA, empezando por el coreano. Es un solo archivo, [`index.html`](index.html): se abre en el navegador, en el computador o en el celular, sin instalar nada.
 
+**Abrirla en línea:** https://rilianx.github.io/Avonlea/idiomas/ (con GitHub Pages activado; así el micrófono funciona en cualquier dispositivo).
+
 ## Qué hace
 
 - **Conversar con audio.** Conversas con 지수 (Jisu), una IA que habla a tu nivel. Puedes escribir o hablar 🎤, y cada respuesta se lee en voz alta 🔊 (también despacio 🐢).
