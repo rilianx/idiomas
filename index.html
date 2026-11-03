@@ -252,7 +252,7 @@ for (const l of LEVELS) for (const [ko, pos, gloss] of l.vocab) if (!LEVEL_WORDS
 /* ---------- estado guardado ---------- */
 const DEFAULT_SET = { chatModel: 'claude-haiku-5-5', defModel: 'claude-opus-5-5', autoSpeak: true, inlineGloss: true, autoDefine: true, autoSend: true, rate: 0.9, voice: '', theme: '' };
 const S = Object.assign({}, DEFAULT_SET, load('hab-set', {}));
-const KEYS = Object.assign({ anthropic: '', openai: '' }, load('hab-keys', {}));
+const KEYS = Object.assign({ anthropic: '', openai: '', workspace: '' }, load('hab-keys', {}));
 let DICT = load('hab-dict', {});
 let CONV = load('hab-conv', null);   // { level, topic, msgs: [...] }
 let LISTEN = false;                  // modo escucha: el coreano queda borroso hasta tocarlo
@@ -402,6 +402,8 @@ async function ask(model, system, user, schema, { effort = 'low', maxTokens = 80
 async function claudeAsk(model, system, user, schema, effort, maxTokens, ms, fallback = true){
   const body = { model, max_tokens: maxTokens, system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }], messages: [{ role: 'user', content: user }], output_config: { format: { type: 'json_schema', schema }, effort } };
   const headers = { 'content-type': 'application/json', 'x-api-key': KEYS.anthropic, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' };
+  // una clave de organización (no asignada a un workspace) tiene que decir qué workspace usar
+  if (KEYS.workspace) headers['anthropic-workspace-id'] = KEYS.workspace;
   // en Opus, Sonnet y Fable, si el modelo declina responder, el servidor lo reintenta en otro modelo
   if (fallback && model !== 'claude-haiku-5-5') { body.fallbacks = 'default'; headers['anthropic-beta'] = 'server-side-fallback-2026-07-01'; }
   const { res, data } = await post('https://api.anthropic.com/v1/messages', headers, body, ms);
@@ -520,6 +522,7 @@ async function aiTurn(userMsg){
   } catch (e) {
     busy = false; renderTyping(false);
     if (e instanceof NoKey) { note(`Para conversar falta la clave de ${e.message === 'openai' ? 'OpenAI' : 'Anthropic'}. Ponla en ⚙ Ajustes.`); openSettings(); }
+    else if (/workspace/i.test(e.message)) { note('Tu clave de Anthropic no está asignada a un workspace. En ⚙ Ajustes pon el ID del workspace (lo ves en console.anthropic.com → Settings → Workspaces, empieza con «wrkspc_»), o crea una clave dentro de un workspace.', true); openSettings(); }
     else note('No se pudo obtener respuesta: ' + e.message + '.', true);
   } finally { busy = false; }
 }
@@ -883,6 +886,7 @@ function openSettings(){
     <div class="field"><label>Para definiciones y explicaciones (caro: solo para palabras nuevas, al tocar «Explicar» y al preguntar «…뭐예요?»)</label><select id="sDef">${opt(DEF_MODELS, S.defModel)}</select></div>
     <div class="sec-t">Claves de la API</div>
     <div class="field"><label>Anthropic (sk-ant-…)</label><input type="password" id="kA" autocomplete="off" value="${esc(KEYS.anthropic)}" placeholder="sk-ant-..."></div>
+    <div class="field"><label>ID del workspace de Anthropic · solo si la clave no está asignada a un workspace</label><input type="text" id="kW" autocomplete="off" value="${esc(KEYS.workspace)}" placeholder="wrkspc_..."><div class="small">Lo ves en console.anthropic.com → Settings → Workspaces. Si tu clave se creó dentro de un workspace, déjalo vacío.</div></div>
     <div class="field"><label>OpenAI (sk-…) · solo si eliges GPT</label><input type="password" id="kO" autocomplete="off" value="${esc(KEYS.openai)}" placeholder="sk-..."></div>
     <p class="small">Las claves se guardan solo en este navegador y se envían directamente a api.anthropic.com o api.openai.com. No están en el archivo, así que puedes compartir la app sin peligro; eso sí, no compartas el navegador con la clave puesta.</p>
     <div class="sec-t">Lectura y ayudas</div>
@@ -904,6 +908,7 @@ function openSettings(){
   on('sChat', 'change', e => { S.chatModel = e.target.value; saveSet(); });
   on('sDef', 'change', e => { S.defModel = e.target.value; saveSet(); });
   on('kA', 'change', e => { KEYS.anthropic = e.target.value.trim(); saveKeys(); });
+  on('kW', 'change', e => { KEYS.workspace = e.target.value.trim(); saveKeys(); });
   on('kO', 'change', e => { KEYS.openai = e.target.value.trim(); saveKeys(); });
   on('oGloss', 'change', e => { S.inlineGloss = e.target.checked; saveSet(); renderAll(); });
   on('oDef', 'change', e => { S.autoDefine = e.target.checked; saveSet(); });
