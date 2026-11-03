@@ -1,0 +1,942 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Hablemos coreano</title>
+<style>
+:root{
+  --bg:#f6f3ee;--card:#fffdf9;--fg:#24211d;--muted:#7a7268;--line:#e3ddd3;
+  --accent:#c2412d;--accent-soft:#f6e1da;--me:#e9f0f7;--me-line:#c9d8e8;
+  --new:#2f6f5e;--new-soft:#e1f0ea;--warn:#9a5b00;--warn-soft:#fbefd9;--shadow:0 1px 3px rgba(40,30,20,.12);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#191714;--card:#24211d;--fg:#eee8df;--muted:#a59c90;--line:#3a352f;
+  --accent:#ec7a63;--accent-soft:#4a2a22;--me:#22303d;--me-line:#34495e;
+  --new:#7fcbb3;--new-soft:#1e3a32;--warn:#f0b35c;--warn-soft:#3e3020;--shadow:0 1px 3px rgba(0,0,0,.4);
+}}
+:root[data-theme="dark"]{
+  --bg:#191714;--card:#24211d;--fg:#eee8df;--muted:#a59c90;--line:#3a352f;
+  --accent:#ec7a63;--accent-soft:#4a2a22;--me:#22303d;--me-line:#34495e;
+  --new:#7fcbb3;--new-soft:#1e3a32;--warn:#f0b35c;--warn-soft:#3e3020;--shadow:0 1px 3px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",sans-serif}
+body{display:flex;flex-direction:column;height:100dvh}
+button{font:inherit;color:inherit;cursor:pointer}
+.ko{font-family:"Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif}
+
+header{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);background:var(--card)}
+header h1{font-size:17px;margin:0;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+header h1 small{color:var(--muted);font-weight:normal;font-size:13px;margin-left:6px}
+.ib{background:none;border:1px solid var(--line);border-radius:10px;height:38px;min-width:38px;padding:0 9px;font-size:15px;display:inline-flex;align-items:center;gap:5px}
+.ib:hover{background:var(--bg)}
+.ib.on{background:var(--accent-soft);border-color:var(--accent)}
+
+#chat{flex:1;overflow-y:auto;padding:14px 12px 8px;display:flex;flex-direction:column;gap:10px}
+.msg{max-width:min(620px,92%);padding:10px 13px;border-radius:14px;background:var(--card);border:1px solid var(--line);box-shadow:var(--shadow)}
+.msg.ai{align-self:flex-start;border-top-left-radius:4px}
+.msg.me{align-self:flex-end;background:var(--me);border-color:var(--me-line);border-top-right-radius:4px}
+.msg.note{align-self:center;background:var(--warn-soft);border-color:transparent;color:var(--warn);font-size:14px;box-shadow:none}
+.msg .text{font-size:21px;line-height:2.05;word-break:keep-all}
+.msg.me .text{font-size:19px}
+.msg .text.hide{filter:blur(7px);cursor:pointer;user-select:none}
+.w{cursor:pointer;border-radius:5px;padding:0 1px;transition:background .15s}
+.w:hover{background:var(--accent-soft)}
+.w.new{border-bottom:2px solid var(--new)}
+ruby{ruby-position:over}
+rt{font-size:11px;color:var(--new);font-family:system-ui,sans-serif;letter-spacing:0;line-height:1}
+.tools{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.chip{border:1px solid var(--line);background:var(--bg);border-radius:999px;padding:3px 10px;font-size:13px}
+.chip:hover{border-color:var(--accent)}
+.es{margin-top:6px;color:var(--muted);font-size:15px;border-top:1px dashed var(--line);padding-top:6px}
+.fix{margin-top:7px;font-size:14px;background:var(--warn-soft);border-radius:8px;padding:6px 9px}
+.fix b{color:var(--warn)}
+.fix .ko{font-size:17px}
+.typing{align-self:flex-start;color:var(--muted);font-style:italic;font-size:14px;padding:4px 8px}
+.card{align-self:center;width:min(560px,100%);background:var(--card);border:1px solid var(--line);border-left:4px solid var(--new);border-radius:10px;padding:10px 13px;box-shadow:var(--shadow)}
+.card .q{font-size:13px;color:var(--muted)}
+.card .lem{font-size:22px;font-weight:600}
+.welcome{align-self:center;width:min(560px,100%);background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px}
+.welcome h2{margin:.1em 0 .4em;font-size:20px}
+.welcome p{margin:.4em 0;color:var(--muted)}
+.btn{border:none;background:var(--accent);color:#fff;border-radius:10px;padding:9px 15px;font-weight:600}
+.btn.sec{background:var(--bg);color:var(--fg);border:1px solid var(--line)}
+.btn:disabled{opacity:.5;cursor:default}
+
+#quick{display:flex;gap:6px;overflow-x:auto;padding:6px 12px 0;scrollbar-width:none}
+#quick .chip{white-space:nowrap;font-size:14px;padding:4px 11px}
+footer{display:flex;align-items:flex-end;gap:8px;padding:8px 12px calc(10px + env(safe-area-inset-bottom));background:var(--bg)}
+#inp{flex:1;resize:none;border:1px solid var(--line);border-radius:12px;padding:9px 12px;font:18px/1.35 inherit;background:var(--card);color:var(--fg);max-height:120px;min-height:44px}
+#inp:focus{outline:2px solid var(--accent);outline-offset:-1px}
+#mic,#send{width:46px;height:46px;border-radius:50%;border:none;font-size:20px;flex:none}
+#mic{background:var(--card);border:1px solid var(--line)}
+#mic.rec{background:var(--accent);color:#fff;animation:pulse 1.2s infinite}
+#send{background:var(--accent);color:#fff}
+@keyframes pulse{50%{box-shadow:0 0 0 7px var(--accent-soft)}}
+
+/* the word sheet */
+#veil{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:20}
+#sheet{position:fixed;left:50%;bottom:0;transform:translateX(-50%);width:min(560px,100%);max-height:78dvh;overflow-y:auto;background:var(--card);border-radius:16px 16px 0 0;padding:16px 18px calc(18px + env(safe-area-inset-bottom));z-index:21;box-shadow:0 -4px 20px rgba(0,0,0,.2)}
+#sheet .big{font-size:34px;font-weight:600;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.rom{color:var(--muted);font-size:14px}
+.pos{display:inline-block;font-size:12px;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:1px 7px;margin-right:6px;color:var(--muted)}
+.gloss{font-size:19px;margin:6px 0}
+.form{background:var(--new-soft);color:var(--fg);border-radius:8px;padding:7px 10px;margin:8px 0;font-size:15px}
+.sec-t{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:12px 0 4px}
+.conj{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:15px}
+.conj .ko{font-size:17px}
+.ex{margin:4px 0;font-size:15px}
+.ex .ko{font-size:17px}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.spk{background:none;border:none;font-size:20px;padding:0 4px}
+.busy{color:var(--muted);font-style:italic;font-size:14px}
+
+/* panels */
+#panel{position:fixed;inset:0;background:var(--bg);z-index:15;display:flex;flex-direction:column}
+#panel .ph{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);background:var(--card)}
+#panel .ph h2{flex:1;margin:0;font-size:18px}
+#panel .pb{flex:1;overflow-y:auto;padding:12px 14px 30px}
+#panel .pb > *{max-width:760px;margin-left:auto;margin-right:auto}
+.field{margin:12px 0}
+.field label{display:block;font-size:14px;color:var(--muted);margin-bottom:4px}
+.field input[type=text],.field input[type=password],.field select,.search{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--fg);font:inherit}
+.check{display:flex;gap:10px;align-items:flex-start;margin:10px 0;font-size:15px}
+.check input{margin-top:4px;width:18px;height:18px;flex:none}
+.small{font-size:13px;color:var(--muted)}
+.lv{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:10px}
+.lv.cur{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.lv h3{margin:0 0 4px;font-size:17px}
+.vocab{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0}
+.vocab .chip{font-size:15px}
+.gram{border-left:3px solid var(--line);padding:2px 0 2px 10px;margin:8px 0}
+.gram b{font-size:16px}
+.ent{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:9px 12px;margin-bottom:8px}
+.ent .top{display:flex;align-items:center;gap:8px;cursor:pointer}
+.ent .top .ko{font-size:20px;font-weight:600}
+.ent .top .g{flex:1;min-width:0;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.st{font-size:11px;border-radius:6px;padding:1px 6px;white-space:nowrap}
+.st.nueva{background:var(--new-soft);color:var(--new)}
+.st.conocida{background:var(--bg);color:var(--muted);border:1px solid var(--line)}
+.filters{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 12px}
+.filters .chip.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+[hidden]{display:none !important}
+@media (max-width:480px){header h1 small{display:none}.ib .lbl{display:none}}
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="ko">한국어</span> · Hablemos <small id="lvname"></small></h1>
+  <button class="ib" id="bLevels" title="Niveles">🎓<span class="lbl">Niveles</span></button>
+  <button class="ib" id="bDict" title="Diccionario">📖<span class="lbl">Diccionario</span></button>
+  <button class="ib" id="bListen" title="Modo escucha: ocultar el texto coreano">👂</button>
+  <button class="ib" id="bSettings" title="Ajustes">⚙</button>
+</header>
+<main id="chat" aria-live="polite"></main>
+<div id="quick"></div>
+<footer>
+  <button id="mic" title="Hablar en coreano">🎤</button>
+  <textarea id="inp" rows="1" class="ko" placeholder="Escribe o habla en coreano…"></textarea>
+  <button id="send" title="Enviar">➤</button>
+</footer>
+<div id="veil" hidden></div>
+<div id="sheet" hidden></div>
+<div id="panel" hidden><div class="ph"><h2 id="ptitle"></h2><button class="ib" id="pclose">✕</button></div><div class="pb" id="pbody"></div></div>
+
+<script>
+'use strict';
+/* =====================================================================
+   Hablemos coreano: conversación con IA, lectura, audio y diccionario.
+   Todo vive en el navegador: las claves, la conversación y el diccionario.
+   ===================================================================== */
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const load = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } catch (e) { return d; } };
+const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} };
+
+/* ---------- niveles: vocabulario y gramática ---------- */
+// [palabra, categoría, significado]
+const LEVELS = [
+  { id: 1, name: 'Nivel 1 · Saludos y presentarse',
+    desc: 'Saludar, decir quién eres, de dónde eres, y preguntar «¿qué es?».',
+    vocab: [
+      ['안녕하세요','expresión','hola (cortés)'],['안녕히 가세요','expresión','adiós (a quien se va)'],['안녕히 계세요','expresión','adiós (a quien se queda)'],
+      ['감사합니다','expresión','gracias'],['고맙습니다','expresión','gracias'],['죄송합니다','expresión','lo siento, perdón'],
+      ['네','expresión','sí'],['아니요','expresión','no'],['저','pronombre','yo (humilde)'],['이름','sustantivo','nombre'],
+      ['사람','sustantivo','persona'],['학생','sustantivo','estudiante'],['선생님','sustantivo','profesor(a)'],['친구','sustantivo','amigo, amiga'],
+      ['한국','nombre propio','Corea'],['칠레','nombre propio','Chile'],['나라','sustantivo','país'],['이다','verbo','ser (cópula)'],
+      ['아니다','adjetivo','no ser'],['반갑다','adjetivo','estar contento de ver/conocer'],['만나다','verbo','encontrarse, conocer'],
+      ['뭐','pronombre','qué'],['누구','pronombre','quién'],['어느','otro','cuál, qué (determinante)']],
+    grammar: [
+      ['N은/는','Partícula de tema: «en cuanto a N». 은 después de consonante, 는 después de vocal.',[['저는 학생이에요.','Yo soy estudiante.'],['이름은 뭐예요?','¿Y el nombre?']]],
+      ['N이에요/예요','«Es / soy N». 이에요 después de consonante, 예요 después de vocal.',[['선생님이에요.','Es profesor(a).'],['친구예요.','Es mi amigo.']]],
+      ['N이/가 아니에요','«No es N».',[['저는 선생님이 아니에요.','Yo no soy profesor.']]],
+      ['뭐예요? / 누구예요?','«¿Qué es?», «¿quién es?».',[['이름이 뭐예요?','¿Cómo te llamas?'],['어느 나라 사람이에요?','¿De qué país eres?']]],
+      ['만나서 반갑습니다','«Encantado/a de conocerte» (literalmente: me alegra haberte conocido).',[['만나서 반가워요.','Encantado.']]]],
+    topics: ['Presentarse a alguien nuevo','¿De dónde eres?','En la clase de coreano'] },
+  { id: 2, name: 'Nivel 2 · Cosas y lugares',
+    desc: 'Preguntar qué es algo, decir qué hay y dónde está.',
+    vocab: [
+      ['이거','pronombre','esto'],['그거','pronombre','eso'],['저거','pronombre','aquello'],['여기','pronombre','aquí'],['거기','pronombre','ahí'],['저기','pronombre','allá'],
+      ['어디','pronombre','dónde'],['책','sustantivo','libro'],['물','sustantivo','agua'],['커피','sustantivo','café'],['가방','sustantivo','bolso, mochila'],
+      ['휴대폰','sustantivo','celular'],['집','sustantivo','casa'],['학교','sustantivo','escuela'],['카페','sustantivo','cafetería'],['화장실','sustantivo','baño'],
+      ['방','sustantivo','pieza, habitación'],['있다','adjetivo','haber, tener, estar'],['없다','adjetivo','no haber, no tener'],
+      ['위','sustantivo','arriba, encima'],['아래','sustantivo','abajo, debajo'],['옆','sustantivo','al lado'],['안','sustantivo','dentro'],['하나','número','uno'],['둘','número','dos']],
+    grammar: [
+      ['이거 뭐예요?','«¿Qué es esto?». 이거/그거/저거 = esto/eso/aquello (forma hablada de 이것/그것/저것).',[['이거 뭐예요?','¿Qué es esto?'],['그거 책이에요.','Eso es un libro.']]],
+      ['N이/가 있어요 / 없어요','«Hay N / no hay N» y también «tengo / no tengo N».',[['가방이 있어요.','Tengo una mochila.'],['물이 없어요.','No hay agua.']]],
+      ['N에 있어요','«Está en N». 에 marca el lugar donde algo está.',[['화장실이 어디에 있어요?','¿Dónde está el baño?'],['책이 가방 안에 있어요.','El libro está dentro de la mochila.']]],
+      ['N 위/아래/옆/안에','Posición: encima, debajo, al lado, dentro de N.',[['휴대폰이 책 위에 있어요.','El celular está sobre el libro.']]]],
+    topics: ['¿Qué hay en tu mochila?','Buscar el baño en una cafetería','Tu pieza'] },
+  { id: 3, name: 'Nivel 3 · Acciones de cada día',
+    desc: 'El presente cortés (-아요/어요), el objeto y los lugares de las acciones.',
+    vocab: [
+      ['가다','verbo','ir'],['오다','verbo','venir'],['먹다','verbo','comer'],['마시다','verbo','beber'],['보다','verbo','ver, mirar'],['하다','verbo','hacer'],
+      ['공부하다','verbo','estudiar'],['일하다','verbo','trabajar'],['자다','verbo','dormir'],['읽다','verbo','leer'],['듣다','verbo','escuchar (irregular ㄷ)'],
+      ['좋아하다','verbo','gustar (algo a alguien)'],['좋다','adjetivo','ser bueno'],['맛있다','adjetivo','ser rico, sabroso'],['많다','adjetivo','ser mucho'],
+      ['밥','sustantivo','arroz, comida'],['음악','sustantivo','música'],['영화','sustantivo','película'],['한국어','sustantivo','idioma coreano'],
+      ['오늘','sustantivo','hoy'],['지금','sustantivo','ahora'],['매일','adverbio','todos los días'],['같이','adverbio','juntos'],['그리고','adverbio','y, además'],['안','adverbio','no (antes del verbo)']],
+    grammar: [
+      ['-아요/어요/해요','Presente cortés. Si la última vocal de la raíz es ㅏ u ㅗ: -아요; si no: -어요; 하다 → 해요. Se contraen: 가요, 와요, 봐요, 마셔요.',[['밥을 먹어요.','Como.'],['학교에 가요.','Voy a la escuela.'],['한국어를 공부해요.','Estudio coreano.']]],
+      ['N을/를','Partícula de objeto directo. 을 después de consonante, 를 después de vocal.',[['커피를 마셔요.','Tomo café.'],['음악을 들어요.','Escucho música.']]],
+      ['N에 가요 / N에서 V','에 = a dónde se va; 에서 = dónde ocurre la acción.',[['카페에 가요.','Voy al café.'],['집에서 자요.','Duermo en casa.']]],
+      ['안 + V','Negación simple: «no» antes del verbo (공부 안 해요 con 하다 compuestos).',[['커피를 안 마셔요.','No tomo café.']]]],
+    topics: ['Tu rutina diaria','Lo que te gusta comer','Música y películas que te gustan'] },
+  { id: 4, name: 'Nivel 4 · El pasado y el tiempo',
+    desc: 'Contar lo que hiciste: pasado -았/었어요, horas y días, unir acciones con -고.',
+    vocab: [
+      ['어제','sustantivo','ayer'],['주말','sustantivo','fin de semana'],['아침','sustantivo','mañana, desayuno'],['점심','sustantivo','mediodía, almuerzo'],['저녁','sustantivo','tarde-noche, cena'],
+      ['시간','sustantivo','tiempo, hora(s)'],['몇','otro','cuántos'],['시','sustantivo','hora (en punto)'],['언제','adverbio','cuándo'],
+      ['사다','verbo','comprar'],['만들다','verbo','hacer, fabricar (irregular ㄹ)'],['놀다','verbo','jugar, pasarlo bien'],['쉬다','verbo','descansar'],['일어나다','verbo','levantarse'],
+      ['재미있다','adjetivo','ser entretenido'],['피곤하다','adjetivo','estar cansado'],['바쁘다','adjetivo','estar ocupado (ㅡ)'],['정말','adverbio','de verdad, muy'],['그래서','adverbio','por eso']],
+    grammar: [
+      ['-았어요/었어요/했어요','Pasado cortés. Misma regla de vocales que el presente: 갔어요, 먹었어요, 했어요.',[['어제 영화를 봤어요.','Ayer vi una película.'],['주말에 쉬었어요.','El fin de semana descansé.']]],
+      ['-고','«Y (luego)»: une dos acciones o descripciones.',[['밥을 먹고 공부했어요.','Comí y estudié.']]],
+      ['N에 (tiempo)','에 también marca el momento: 아침에, 주말에, 세 시에.',[['일곱 시에 일어났어요.','Me levanté a las siete.']]],
+      ['언제? 몇 시에?','«¿Cuándo?», «¿a qué hora?».',[['언제 왔어요?','¿Cuándo llegaste?']]]],
+    topics: ['¿Qué hiciste ayer?','Tu último fin de semana','Un día muy ocupado'] },
+  { id: 5, name: 'Nivel 5 · Planes y deseos',
+    desc: 'Futuro, querer hacer, poder y no poder, y «pero».',
+    vocab: [
+      ['내일','sustantivo','mañana (día)'],['다음 주','sustantivo','la próxima semana'],['여행','sustantivo','viaje'],['계획','sustantivo','plan'],['가족','sustantivo','familia'],
+      ['날씨','sustantivo','clima, tiempo'],['춥다','adjetivo','hacer frío (irregular ㅂ)'],['덥다','adjetivo','hacer calor (irregular ㅂ)'],['싶다','adjetivo','querer (con -고)'],
+      ['배우다','verbo','aprender'],['기다리다','verbo','esperar'],['살다','verbo','vivir'],['알다','verbo','saber, conocer'],['모르다','verbo','no saber (irregular 르)'],['못','adverbio','no poder'],['꼭','adverbio','sin falta']],
+    grammar: [
+      ['-(으)ㄹ 거예요','Futuro / intención: 갈 거예요, 먹을 거예요.',[['내일 친구를 만날 거예요.','Mañana voy a ver a un amigo.']]],
+      ['-고 싶어요','«Quiero (hacer)».',[['한국에 가고 싶어요.','Quiero ir a Corea.']]],
+      ['-(으)ㄹ 수 있어요/없어요','«Puedo / no puedo (hacer)».',[['한국어를 읽을 수 있어요.','Puedo leer coreano.']]],
+      ['못 + V','«No poder» (por imposibilidad, no por decisión).',[['어제 못 잤어요.','Ayer no pude dormir.']]],
+      ['-지만','«Pero».',[['춥지만 좋아요.','Hace frío, pero está bien.']]]],
+    topics: ['Planear un viaje','Lo que quieres aprender','El clima y tus planes del fin de semana'] },
+  { id: 6, name: 'Nivel 6 · Cortesía y conectores',
+    desc: 'Estilo formal -(스)ㅂ니다, pedir con -(으)세요 y -아/어 주세요, «porque» y «si».',
+    vocab: [
+      ['주다','verbo','dar'],['드리다','verbo','dar (honorífico)'],['주문하다','verbo','pedir (en un local)'],['얼마','sustantivo','cuánto (precio)'],['원','sustantivo','won (moneda)'],
+      ['비싸다','adjetivo','ser caro'],['싸다','adjetivo','ser barato'],['메뉴','sustantivo','menú'],['손님','sustantivo','cliente, invitado'],['계시다','verbo','estar (honorífico)'],
+      ['드시다','verbo','comer/beber (honorífico)'],['잠깐','adverbio','un momento'],['물어보다','verbo','preguntar'],['길','sustantivo','camino, calle'],['역','sustantivo','estación']],
+    grammar: [
+      ['-(스)ㅂ니다 / -(스)ㅂ니까?','Estilo formal (noticias, tiendas, presentaciones): 감사합니다, 먹습니다, 갑니까?',[['처음 뵙겠습니다.','Mucho gusto (formal).']]],
+      ['-(으)세요','Pedido cortés u honorífico: 앉으세요 (siéntese), 가세요.',[['여기 앉으세요.','Siéntese aquí, por favor.']]],
+      ['-아/어 주세요','«Por favor, haz (algo) por mí».',[['천천히 말해 주세요.','Hable más despacio, por favor.'],['물 좀 주세요.','Agua, por favor.']]],
+      ['-아서/어서','«Porque» o «y entonces» (no con pasado delante).',[['비싸서 안 샀어요.','No lo compré porque era caro.']]],
+      ['-(으)면','«Si…».',[['시간이 있으면 같이 가요.','Si tienes tiempo, vamos juntos.']]]],
+    topics: ['Pedir en un restaurante','Comprar en una tienda','Preguntar cómo llegar a la estación'] },
+  { id: 7, name: 'Libre', desc: 'Sin lista de palabras: coreano natural y sencillo sobre lo que quieras.', vocab: [], grammar: [], topics: ['Conversación libre'] }
+];
+const LV = id => LEVELS.find(l => l.id === id) || LEVELS[0];
+// todas las palabras de los niveles: base para reconocer formas y mostrar significados sin conexión
+const LEVEL_WORDS = {};
+for (const l of LEVELS) for (const [ko, pos, gloss] of l.vocab) if (!LEVEL_WORDS[ko]) LEVEL_WORDS[ko] = { lemma: ko, pos, gloss, level: l.id };
+
+/* ---------- estado guardado ---------- */
+const DEFAULT_SET = { chatModel: 'claude-haiku-5-5', defModel: 'claude-opus-5-5', autoSpeak: true, inlineGloss: true, autoDefine: true, autoSend: true, rate: 0.9, voice: '', theme: '' };
+const S = Object.assign({}, DEFAULT_SET, load('hab-set', {}));
+const KEYS = Object.assign({ anthropic: '', openai: '' }, load('hab-keys', {}));
+let DICT = load('hab-dict', {});
+let CONV = load('hab-conv', null);   // { level, topic, msgs: [...] }
+let LISTEN = false;                  // modo escucha: el coreano queda borroso hasta tocarlo
+const saveSet = () => save('hab-set', S), saveKeys = () => save('hab-keys', KEYS), saveDict = () => save('hab-dict', DICT);
+const saveConv = () => { if (CONV) CONV.msgs = CONV.msgs.slice(-200); save('hab-conv', CONV); };
+if (S.theme) document.documentElement.dataset.theme = S.theme;
+
+/* ---------- hangul: descomponer, componer y romanizar ---------- */
+const H0 = 0xAC00, H1 = 0xD7A3;
+const isHangul = ch => { const c = ch.charCodeAt(0); return c >= H0 && c <= H1; };
+const dec = ch => { if (!ch || !isHangul(ch)) return null; const c = ch.charCodeAt(0) - H0; return { l: Math.floor(c / 588), v: Math.floor((c % 588) / 28), t: c % 28 }; };
+const comp = (l, v, t) => String.fromCharCode(H0 + (l * 21 + v) * 28 + t);
+const RI = ['g','kk','n','d','tt','r','m','b','pp','s','ss','','j','jj','ch','k','t','p','h'];
+const RV = ['a','ae','ya','yae','eo','e','yeo','ye','o','wa','wae','oe','yo','u','wo','we','wi','yu','eu','ui','i'];
+const RF = ['','k','k','k','n','n','n','t','l','k','m','l','l','l','p','l','m','p','p','t','t','ng','t','t','k','t','p','t'];
+// si la sílaba siguiente empieza con ㅇ, la consonante final se pasa (enlace): [lo que queda, lo que pasa]
+const LINK = { 1:['','g'],2:['','kk'],3:['k','s'],4:['','n'],5:['n','j'],6:['n',''],7:['','d'],8:['','r'],9:['l','g'],10:['l','m'],11:['l','b'],12:['l','s'],13:['l','t'],14:['l','p'],15:['l',''],16:['','m'],17:['','b'],18:['p','s'],19:['','s'],20:['','ss'],22:['','j'],23:['','ch'],24:['','k'],25:['','t'],26:['','p'],27:['',''] };
+function romanize(s){
+  const ch = [...s]; let out = '', carry = null;
+  for (let i = 0; i < ch.length; i++) {
+    const d = dec(ch[i]);
+    if (!d) { out += ch[i]; carry = null; continue; }
+    const n = dec(ch[i + 1]);
+    out += (carry !== null && d.l === 11 ? carry : RI[d.l]) + RV[d.v]; carry = null;
+    if (d.t) { if (n && n.l === 11 && LINK[d.t]) { out += LINK[d.t][0]; carry = LINK[d.t][1]; } else out += RF[d.t]; }
+  }
+  return out;
+}
+
+/* ---------- reconocer la forma de diccionario (verbos conjugados, sustantivos con partícula) ---------- */
+const PARTICLES = ['에서','에게','한테','으로','이랑','하고','까지','부터','처럼','보다','은','는','이','가','을','를','에','도','로','의','랑','와','과','만','요'];
+const knownLemma = w => DICT[w] || LEVEL_WORDS[w];
+function formsIndex(){ const ix = {}; for (const e of Object.values(DICT)) for (const f of Object.keys(e.forms || {})) ix[f] = e.lemma; return ix; }
+function stemVariants(stem){
+  // a partir de una raíz conjugada (먹었, 마셔, 봤, 해…) propone raíces de diccionario posibles
+  const out = new Set([stem]);
+  const last = stem.slice(-1), pre = stem.slice(0, -1), d = dec(last);
+  if (!d) return out;
+  const add = (l, v, t) => out.add(pre + comp(l, v, t));
+  const vow = (v, t) => {
+    if (d.l === 18 && v === 1) out.add(pre + '하');                 // 해 → 하
+    if (v === 9) add(d.l, 8, 0);                                     // ㅘ → ㅗ (봐 → 보)
+    if (v === 14) add(d.l, 13, 0);                                   // ㅝ → ㅜ (줘 → 주)
+    if (v === 6) add(d.l, 20, 0);                                    // ㅕ → ㅣ (마셔 → 마시)
+    if (v === 10) add(d.l, 11, 0);                                   // ㅙ → ㅚ (돼 → 되)
+    if (v === 4 || v === 0) add(d.l, 18, 0);                         // ㅓ/ㅏ → ㅡ (써 → 쓰, 바빠 → 바쁘)
+    if (v === 0 || v === 4 || v === 1 || v === 5) add(d.l, v, 0);    // 가, 서, 보내…
+  };
+  if (d.t === 20) { add(d.l, d.v, 0); vow(d.v); }                    // 갔 → 가, 했 → 하, 봤 → 보
+  else if (d.t === 0) vow(d.v);
+  // irregulares
+  if (d.l === 11 && d.v === 14 && pre) { const p = dec(pre.slice(-1)); if (p && !p.t) out.add(pre.slice(0, -1) + comp(p.l, p.v, 17)); } // 추워 → 춥
+  if (d.l === 5 && (d.v === 0 || d.v === 4) && pre) { const p = dec(pre.slice(-1)); if (p && p.t === 8) out.add(pre.slice(0, -1) + comp(p.l, p.v, 0) + '르'); } // 몰라 → 모르
+  for (const s of [...out]) { const e = dec(s.slice(-1)); if (e) { if (e.t === 8) out.add(s.slice(0, -1) + comp(e.l, e.v, 7)); if (!e.t) out.add(s.slice(0, -1) + comp(e.l, e.v, 8)); } } // 들 → 듣, 만드 → 만들
+  return out;
+}
+function lemmaCandidates(word){
+  const w = word.replace(/[^가-힣]/g, '');
+  const C = new Set(); if (!w) return C;
+  C.add(w); C.add(w + '다');
+  for (const p of PARTICLES) if (w.length > p.length && w.endsWith(p)) C.add(w.slice(0, -p.length));
+  if (/(이에요|예요|입니다|이었어요|였어요)$/.test(w)) C.add(w.replace(/(이에요|예요|입니다|이었어요|였어요)$/, ''));
+  // ir quitando terminaciones verbales
+  const stems = new Set(), seen = new Set(), queue = [w];
+  const ENDS = ['습니다','습니까','으세요','세요','셨어요','지만','는데','네요','지요','거예요','어요','아요','여요','에요','고','죠','요','어서','아서','서','면','어','아','었','았','였','지','시'];
+  while (queue.length) {
+    const s = queue.shift(); if (seen.has(s) || !s) continue; seen.add(s); stems.add(s);
+    for (const e of ENDS) if (s.length > e.length && s.endsWith(e)) queue.push(s.slice(0, -e.length));
+    const last = dec(s.slice(-1));
+    if (s.endsWith('니다') || s.endsWith('니까')) { const p = dec(s.slice(-3, -2)); if (p && p.t === 17) queue.push(s.slice(0, -3) + comp(p.l, p.v, 0)); }   // 갑니다 → 가
+    if (/[을]$/.test(s) || (last && last.t === 8 && s.length > 1)) { if (s.endsWith('을')) queue.push(s.slice(0, -1)); else queue.push(s.slice(0, -1) + comp(last.l, last.v, 0)); } // 갈 거예요 → 가
+    if (s.endsWith('싶')) queue.push(s.slice(0, -1).replace(/고$/, ''));
+  }
+  for (const s of stems) for (const v of stemVariants(s)) { C.add(v); C.add(v + '다'); }
+  return C;
+}
+function guessLemma(surface){
+  const clean = surface.replace(/[^가-힣 ]/g, '').trim(); if (!clean) return null;
+  const ix = formsIndex(); if (ix[clean]) return ix[clean];
+  if (knownLemma(clean)) return clean;
+  for (const c of lemmaCandidates(clean)) if (knownLemma(c)) return c;
+  return null;
+}
+
+/* ---------- voz: leer en voz alta y reconocer lo que dices ---------- */
+let VOICES = [];
+function loadVoices(){ VOICES = (window.speechSynthesis?.getVoices() || []).filter(v => /^ko/i.test(v.lang)); }
+if ('speechSynthesis' in window) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
+function speak(text, rate = S.rate){
+  if (!('speechSynthesis' in window) || !text) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text.replace(/[^가-힣ㄱ-ㆎ0-9 .,?!~]/g, ' '));
+  u.lang = 'ko-KR'; u.rate = rate;
+  const v = VOICES.find(v => v.name === S.voice) || VOICES[0]; if (v) u.voice = v;
+  speechSynthesis.speak(u);
+}
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, recBase = '';
+function toggleMic(){
+  if (!SR) { note('Este navegador no reconoce voz. Prueba con Chrome (computador o Android) o Safari.'); return; }
+  if (rec) { rec.stop(); return; }
+  speechSynthesis?.cancel();
+  rec = new SR(); rec.lang = 'ko-KR'; rec.interimResults = true; rec.continuous = false;
+  recBase = $('inp').value ? $('inp').value + ' ' : '';
+  let finalText = '';
+  rec.onresult = ev => {
+    let interim = ''; finalText = '';
+    for (const r of ev.results) (r.isFinal ? (finalText += r[0].transcript) : (interim += r[0].transcript));
+    $('inp').value = recBase + finalText + interim; autosize();
+  };
+  rec.onerror = ev => { if (ev.error !== 'no-speech' && ev.error !== 'aborted') note('Micrófono: ' + (ev.error === 'not-allowed' ? 'no hay permiso para usarlo.' : ev.error)); };
+  rec.onend = () => { rec = null; $('mic').classList.remove('rec'); if (S.autoSend && finalText.trim()) send(); };
+  rec.start(); $('mic').classList.add('rec');
+}
+
+/* ---------- la IA: un modelo barato conversa, uno caro define y explica ---------- */
+const MODELS = {
+  'claude-haiku-5-5': { name: 'Claude Haiku 5.5', prov: 'anthropic' },
+  'claude-sonnet-5-5': { name: 'Claude Sonnet 5.5', prov: 'anthropic' },
+  'claude-opus-5-5': { name: 'Claude Opus 5.5', prov: 'anthropic' },
+  'claude-fable-5-1': { name: 'Claude Fable 5.1', prov: 'anthropic' },
+  'gpt-5.4-mini': { name: 'GPT-5.4 mini', prov: 'openai' }
+};
+const CHAT_MODELS = [['claude-haiku-5-5','Claude Haiku 5.5 · el más barato (recomendado)'],['gpt-5.4-mini','GPT-5.4 mini · OpenAI'],['claude-sonnet-5-5','Claude Sonnet 5.5 · mejor, más caro']];
+const DEF_MODELS = [['claude-opus-5-5','Claude Opus 5.5 · preciso (recomendado)'],['claude-sonnet-5-5','Claude Sonnet 5.5 · más barato'],['claude-fable-5-1','Claude Fable 5.1 · el más capaz y el más caro'],['gpt-5.4-mini','GPT-5.4 mini · OpenAI, barato']];
+const provOf = m => MODELS[m]?.prov || (m.startsWith('gpt') ? 'openai' : 'anthropic');
+
+async function post(url, headers, body, ms){
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), ms);
+  let res;
+  try { res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: ctl.signal }); }
+  catch (e) { throw new Error(e.name === 'AbortError' ? 'la IA tardó demasiado' : 'sin conexión'); }
+  finally { clearTimeout(timer); }
+  return { res, data: await res.json().catch(() => ({})) };
+}
+const httpError = (res, data) => new Error({ 401: 'la clave no es válida', 403: 'la clave no tiene permiso', 429: 'demasiados pedidos seguidos (o sin saldo); espera un poco', 529: 'el servicio está saturado' }[res.status] || ('error ' + res.status + (data.error?.message ? ': ' + data.error.message : '')));
+function parseJSON(txt){ try { const o = JSON.parse(txt); if (o && typeof o === 'object') return o; } catch (e) {} throw new Error('la respuesta llegó incompleta'); }
+class NoKey extends Error {}
+
+async function ask(model, system, user, schema, { effort = 'low', maxTokens = 8000, ms = 60000 } = {}){
+  const prov = provOf(model);
+  if (!KEYS[prov]) throw new NoKey(prov);
+  const out = prov === 'openai' ? await openaiAsk(model, system, user, schema, effort, maxTokens, ms) : await claudeAsk(model, system, user, schema, effort, maxTokens, ms);
+  return out;
+}
+// Claude (Messages API). Las instrucciones fijas van en system y se marcan para el caché.
+async function claudeAsk(model, system, user, schema, effort, maxTokens, ms, fallback = true){
+  const body = { model, max_tokens: maxTokens, system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }], messages: [{ role: 'user', content: user }], output_config: { format: { type: 'json_schema', schema }, effort } };
+  const headers = { 'content-type': 'application/json', 'x-api-key': KEYS.anthropic, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' };
+  // en Opus, Sonnet y Fable, si el modelo declina responder, el servidor lo reintenta en otro modelo
+  if (fallback && model !== 'claude-haiku-5-5') { body.fallbacks = 'default'; headers['anthropic-beta'] = 'server-side-fallback-2026-07-01'; }
+  const { res, data } = await post('https://api.anthropic.com/v1/messages', headers, body, ms);
+  if (!res.ok) {
+    if (res.status === 400 && fallback && /fallback/i.test(data.error?.message || '')) return claudeAsk(model, system, user, schema, effort, maxTokens, ms, false);
+    throw httpError(res, data);
+  }
+  if (data.stop_reason === 'refusal') throw new Error('el modelo no quiso responder eso');
+  if (data.stop_reason === 'max_tokens') throw new Error('la respuesta quedó cortada');
+  console.debug('[hablemos]', data.model, data.usage);
+  return parseJSON((data.content || []).filter(b => b.type === 'text').map(b => b.text).join(''));
+}
+// OpenAI (Chat Completions)
+async function openaiAsk(model, system, user, schema, effort, maxTokens, ms, strict = true){
+  const body = { model, max_completion_tokens: maxTokens, messages: [{ role: 'system', content: system + (strict ? '' : '\n\nResponde solo con un objeto JSON que siga este esquema: ' + JSON.stringify(schema)) }, { role: 'user', content: user }] };
+  if (strict) { body.response_format = { type: 'json_schema', json_schema: { name: 'respuesta', strict: true, schema } }; body.reasoning_effort = effort; }
+  else body.response_format = { type: 'json_object' };
+  const { res, data } = await post('https://api.openai.com/v1/chat/completions', { 'content-type': 'application/json', authorization: 'Bearer ' + KEYS.openai }, body, ms);
+  if (!res.ok) { if (res.status === 400 && strict) return openaiAsk(model, system, user, schema, effort, maxTokens, ms, false); throw httpError(res, data); }
+  const msg = data.choices?.[0]?.message || {};
+  if (msg.refusal) throw new Error('el modelo no quiso responder eso');
+  console.debug('[hablemos]', data.model, data.usage);
+  return parseJSON(msg.content || '');
+}
+
+/* ---------- esquemas de respuesta ---------- */
+const POS = ['sustantivo','verbo','adjetivo','adverbio','pronombre','número','partícula','expresión','nombre propio','puntuación','otro'];
+const obj = (props) => ({ type: 'object', additionalProperties: false, required: Object.keys(props), properties: props });
+const STR = { type: 'string' };
+const TOKENS = { type: 'array', items: obj({ t: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, form: STR }) };
+const CHAT_SCHEMA = obj({ reply: obj({ ko: STR, es: STR, tokens: TOKENS }), student: obj({ tokens: TOKENS, correction: STR, note: STR }) });
+const ENTRY = obj({ query: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, meaning: STR, explanation: STR, hanja: STR, irregular: STR,
+  conjugations: { type: 'array', items: obj({ form: STR, label: STR }) }, examples: { type: 'array', items: obj({ ko: STR, es: STR }) }, in_context: STR });
+const DEF_SCHEMA = obj({ entries: { type: 'array', items: ENTRY } });
+
+/* ---------- instrucciones ---------- */
+function chatSystem(levelId){
+  const lv = LV(levelId), free = lv.vocab.length === 0;
+  const vocab = LEVELS.filter(l => l.id <= levelId).flatMap(l => l.vocab.map(v => `${v[0]} (${v[2]})`)).join(', ');
+  const grammar = LEVELS.filter(l => l.id <= levelId).flatMap(l => l.grammar.map(g => `- ${g[0]}: ${g[1]}`)).join('\n');
+  return [
+    'Eres 지수 (Jisu), una persona coreana amable y paciente de Seúl. Conversas por chat de voz con un estudiante hispanohablante que aprende coreano.',
+    `Nivel del estudiante: ${lv.name}. ${lv.desc}`,
+    '',
+    'CÓMO CONVERSAS',
+    `- Escribe SIEMPRE reply.ko en coreano, en estilo cortés (-요)${levelId >= 6 ? ', y formal (-ㅂ니다) cuando la situación lo pida' : ''}.`,
+    '- Mensajes cortos: de 1 a 3 oraciones simples. Casi siempre termina con una pregunta fácil para que la conversación siga.',
+    free ? '- Usa coreano natural pero sencillo, de nivel básico-intermedio.' :
+      '- Usa sobre todo el vocabulario y la gramática de las listas de abajo. Como mucho introduce una o dos palabras nuevas por mensaje, solo si son útiles y fáciles.',
+    '- Si el estudiante escribe en español o mezcla idiomas, entiéndelo y responde en coreano sencillo, incluyendo la forma coreana de lo que quiso decir.',
+    '- Si pregunta qué significa algo (뭐예요?, 무슨 뜻이에요?) explícalo en coreano muy simple (un sinónimo o un ejemplo) y sigue conversando; la traducción al español la muestra la app.',
+    '- Si el estudiante pide que hables más despacio o que repitas, repite lo último con palabras más simples.',
+    '- Nunca pongas romanización ni español dentro de reply.ko.',
+    '',
+    'ANÁLISIS (la app lo usa para mostrar el significado de cada palabra al tocarla)',
+    '- reply.tokens: todas las palabras de reply.ko en orden, tal como aparecen separadas por espacios, sin omitir ninguna. t es el texto exacto de la palabra en reply.ko, sin los signos de puntuación (cada signo va como su propio token con pos "puntuación" y lemma "").',
+    '- lemma: la forma de diccionario. Verbos y adjetivos terminan en -다 (먹었어요 → 먹다, 추워요 → 춥다, 공부해요 → 공부하다). Un sustantivo con partícula o con la cópula: el sustantivo (학교에 → 학교, 학생이에요 → 학생). Expresiones fijas tal cual (안녕하세요, 감사합니다).',
+    '- gloss: significado breve en español del lemma (1 a 4 palabras).',
+    '- form: si la palabra está conjugada o lleva partícula, explica en español, muy breve, qué forma es: por ejemplo "-았어요: pasado cortés", "에: partícula de lugar (a, en)", "-고 싶어요: querer hacer", "이에요: cópula «es»". Usa "" si es la forma básica.',
+    '- reply.es: traducción natural al español de reply.ko.',
+    '- student: analiza del mismo modo el ÚLTIMO mensaje del estudiante (student.tokens, solo las partes en coreano). En student.correction escribe la versión corregida y natural en coreano si tenía errores, o "" si estaba bien (o si no hay mensaje del estudiante). En student.note explica en español, en una o dos frases, el error principal, o "".',
+    ...(free ? [] : ['', 'VOCABULARIO (de este nivel y de los anteriores):', vocab, '', 'GRAMÁTICA (de este nivel y de los anteriores):', grammar])
+  ].join('\n');
+}
+const DEF_SYSTEM = [
+  'Eres un profesor experto de coreano para hispanohablantes y escribes un diccionario de aprendizaje preciso.',
+  'Recibes una lista de términos. Cada término puede ser una palabra coreana conjugada o con partícula, una forma de diccionario, una expresión, o una palabra en español (en ese caso da la palabra coreana más común para ese significado). A veces viene la oración donde apareció.',
+  'Devuelve una entrada por término, en el mismo orden:',
+  '- query: el término tal como lo recibiste.',
+  '- lemma: la forma de diccionario en coreano (verbos y adjetivos con -다; sustantivos sin partícula; expresiones fijas tal cual).',
+  '- pos: la categoría. En coreano los «adjetivos» son verbos descriptivos: usa "adjetivo" para ellos.',
+  '- gloss: el significado en 1 a 4 palabras en español.',
+  '- meaning: definición clara en español, con los sentidos principales.',
+  '- explanation: 2 a 4 frases en español para un estudiante: cuándo se usa, registro (cortés, formal, íntimo), matices, confusiones frecuentes y, si es un verbo, cómo se conjuga.',
+  '- hanja: los caracteres chinos si es una palabra sino-coreana, o "".',
+  '- irregular: si es un verbo o adjetivo irregular, de qué tipo y cómo cambia (p. ej. "irregular en ㅂ: 춥다 → 추워요"), o "".',
+  '- conjugations: para verbos y adjetivos, 6 a 8 formas comunes con su etiqueta en español (presente cortés -아/어요, pasado cortés, futuro -(으)ㄹ 거예요, formal -(스)ㅂ니다, -고 싶어요 si es verbo, -(으)세요, -고, -지만…). Para otras categorías, [].',
+  '- examples: 2 oraciones de ejemplo cortas y naturales (en estilo cortés -요) con su traducción.',
+  '- in_context: si vino una oración, explica en español qué forma tiene el término EN ESA oración y qué aporta (partícula, conjugación, matiz); si no vino oración, "".',
+  'Sé exacto: no inventes formas ni significados.'
+].join('\n');
+
+/* ---------- conversación ---------- */
+let busy = false;
+const uid = () => Math.random().toString(36).slice(2, 10);
+function transcript(){
+  const msgs = CONV.msgs.filter(m => m.role === 'me' || m.role === 'ai').slice(-16);
+  return msgs.map(m => (m.role === 'me' ? 'Estudiante: ' : 'Tú (지수): ') + m.ko).join('\n');
+}
+function newConversation(levelId, topic){
+  CONV = { level: levelId, topic: topic || LV(levelId).topics[0], msgs: [] };
+  saveConv(); closePanel(); renderAll(); aiTurn(null);
+}
+async function aiTurn(userMsg){
+  if (!CONV) return;
+  busy = true; renderTyping(true);
+  const lv = CONV.level;
+  const user = (CONV.msgs.some(m => m.role === 'me' || m.role === 'ai') ? 'CONVERSACIÓN HASTA AHORA:\n' + transcript() + '\n\n' : '') +
+    (userMsg ? 'Responde al último mensaje del estudiante.' : `Empieza tú la conversación. Tema: «${CONV.topic}». Saluda y haz una pregunta sencilla.`);
+  try {
+    const out = await ask(S.chatModel, chatSystem(lv), user, CHAT_SCHEMA, { effort: 'low', maxTokens: 8000, ms: 60000 });
+    if (userMsg && out.student) {
+      userMsg.tokens = out.student.tokens || [];
+      userMsg.correction = (out.student.correction || '').trim();
+      userMsg.note = (out.student.note || '').trim();
+      if (userMsg.correction && norm(userMsg.correction) === norm(userMsg.ko)) userMsg.correction = '';
+      learnTokens(userMsg.tokens, userMsg.ko, 'tú');
+    }
+    const r = out.reply || {};
+    const m = { id: uid(), role: 'ai', ko: (r.ko || '').trim(), es: (r.es || '').trim(), tokens: r.tokens || [] };
+    m.fresh = learnTokens(m.tokens, m.ko, 'conversación');
+    CONV.msgs.push(m); saveConv(); saveDict();
+    busy = false; renderTyping(false); renderAll(); scrollEnd();
+    if (S.autoSpeak && m.ko) speak(m.ko);
+    if (S.autoDefine && m.fresh.length) defineInBackground(m);
+  } catch (e) {
+    busy = false; renderTyping(false);
+    if (e instanceof NoKey) { note(`Para conversar falta la clave de ${e.message === 'openai' ? 'OpenAI' : 'Anthropic'}. Ponla en ⚙ Ajustes.`); openSettings(); }
+    else note('No se pudo obtener respuesta: ' + e.message + '.', true);
+  } finally { busy = false; }
+}
+const norm = s => (s || '').replace(/[\s.,!?~]/g, '');
+function send(){
+  const text = $('inp').value.trim();
+  if (!text || busy) return;
+  if (!CONV) { CONV = { level: S.level || 1, topic: LV(S.level || 1).topics[0], msgs: [] }; }
+  $('inp').value = ''; autosize();
+  const m = { id: uid(), role: 'me', ko: text, tokens: [] };
+  CONV.msgs.push(m); saveConv(); renderAll(); scrollEnd();
+  const q = detectQuestion(text);
+  if (q) lookup(q, text);
+  aiTurn(m);
+}
+function note(text, retry){
+  if (!CONV) CONV = { level: S.level || 1, topic: LV(S.level || 1).topics[0], msgs: [] };
+  CONV.msgs.push({ id: uid(), role: 'note', text, retry: !!retry }); saveConv(); renderAll(); scrollEnd();
+}
+
+/* ---------- el diccionario se llena solo ---------- */
+// registra las palabras de un mensaje; devuelve los lemas que el estudiante todavía no domina (para resaltarlos)
+function learnTokens(tokens, sentence, source){
+  const fresh = [];
+  for (const t of tokens || []) {
+    const lemma = (t.lemma || '').trim();
+    if (!lemma || t.pos === 'puntuación' || t.pos === 'partícula' || !/[가-힣]/.test(lemma)) continue;
+    if (t.pos === 'nombre propio' && !LEVEL_WORDS[lemma]) continue;   // los nombres de personas no van al diccionario
+    let e = DICT[lemma];
+    if (!e) {
+      const lw = LEVEL_WORDS[lemma];
+      e = DICT[lemma] = { lemma, pos: t.pos || lw?.pos || 'otro', gloss: t.gloss || lw?.gloss || '', status: 'nueva', seen: 0, forms: {}, added: Date.now(), source, level: lw?.level || null, detailed: false };
+    }
+    if (!e.gloss && t.gloss) e.gloss = t.gloss;
+    if (t.t && t.t !== lemma) e.forms[t.t] = t.form || e.forms[t.t] || '';
+    if (!e.sentence && sentence) e.sentence = sentence;
+    e.seen = (e.seen || 0) + 1; e.last = Date.now();
+    if (e.status !== 'conocida' && e.seen <= 3 && !fresh.includes(lemma)) fresh.push(lemma);
+  }
+  return fresh;
+}
+function mergeEntry(x, surface, form){
+  if (!x || !x.lemma) return null;
+  const lemma = x.lemma.trim();
+  const e = DICT[lemma] || { lemma, status: 'nueva', seen: 0, forms: {}, added: Date.now(), source: 'consulta', level: LEVEL_WORDS[lemma]?.level || null };
+  Object.assign(e, { pos: x.pos || e.pos, gloss: x.gloss || e.gloss, meaning: x.meaning, explanation: x.explanation, hanja: x.hanja, irregular: x.irregular,
+    conjugations: x.conjugations || [], examples: x.examples || [], detailed: true });
+  e.forms = e.forms || {};
+  if (surface && surface !== lemma && /[가-힣]/.test(surface)) e.forms[surface] = form || e.forms[surface] || '';
+  DICT[lemma] = e;
+  return e;
+}
+async function define(items){
+  const user = 'TÉRMINOS:\n' + items.map((it, i) => `${i + 1}. «${it.term}»` + (it.lemma ? ` (forma de diccionario probable: ${it.lemma})` : '') + (it.sentence ? ` — en la oración: «${it.sentence}»` : '')).join('\n');
+  const out = await ask(S.defModel, DEF_SYSTEM, user, DEF_SCHEMA, { effort: 'medium', maxTokens: 16000, ms: 120000 });
+  return out.entries || [];
+}
+const pendingDefs = new Set();
+async function defineInBackground(m){
+  const lemmas = m.fresh.filter(l => DICT[l] && !DICT[l].detailed && !pendingDefs.has(l)).slice(0, 8);
+  if (!lemmas.length) return;
+  lemmas.forEach(l => pendingDefs.add(l));
+  try {
+    const items = lemmas.map(l => { const surface = (m.tokens.find(t => t.lemma === l) || {}).t || l; return { term: surface, lemma: l, sentence: m.ko }; });
+    const entries = await define(items);
+    entries.forEach((x, i) => { const it = items[i]; const e = mergeEntry(x, it?.term, (m.tokens.find(t => t.t === it?.term) || {}).form); if (e && it && x.lemma !== it.lemma && DICT[it.lemma] && !DICT[it.lemma].detailed) { /* el modelo caro corrigió el lema */ e.seen = Math.max(e.seen || 0, DICT[it.lemma].seen || 0); } });
+    saveDict(); refreshSheet();
+  } catch (e) { console.warn('definiciones:', e.message); }
+  finally { lemmas.forEach(l => pendingDefs.delete(l)); }
+}
+
+/* ---------- «¿qué es…?»: traducción automática ---------- */
+const DEMONST = /^(이거|그거|저거|이것|그것|저것|여기|거기|저기|이게|그게|저게|이건|그건|저건|이름|취미|직업)$/;
+function stripParticle(w){
+  const last = dec(w.slice(-1)), prev = dec(w.slice(-2, -1));
+  if (w.length < 2) return w;
+  if (/(이|은|을)$/.test(w) && prev && prev.t) return w.slice(0, -1);
+  if (/(가|는|를)$/.test(w) && prev && !prev.t) return w.slice(0, -1);
+  if (/(이라는|라는|이란|란)$/.test(w)) return w.replace(/(이라는|라는|이란|란)$/, '');
+  return w;
+}
+function detectQuestion(text){
+  const t = text.trim();
+  // español: «¿qué es X?», «¿qué significa X?», «¿cómo se dice X?»
+  let m = t.match(/(?:qu[ée]\s+(?:es|son|significa|quiere decir)|c[óo]mo\s+se\s+dice)\s+["'«“]?([^?"'»”]+?)["'»”]?\s*\??$/i);
+  if (m) return m[1].trim();
+  // coreano: «X(이/가) 뭐예요?», «X(이/가) 무슨 뜻이에요?», «X는 뭐야?»
+  m = t.match(/(?:^|[\s.,!?])([^\s.,!?]+?)\s*(?:뭐예요|뭐에요|뭐야|뭐지요|뭐죠|뭔가요|뭐예용|무엇입니까|무엇이에요|무슨\s*뜻이에요|무슨\s*뜻이야|무슨\s*뜻이에요|무슨\s*뜻입니까|무슨\s*뜻)\s*[?？]?\s*$/);
+  if (m) {
+    let term = m[1].replace(/^["'«“‘]|["'»”’]$/g, '');
+    term = stripParticle(term).replace(/^["'«“‘]|["'»”’]$/g, '');
+    if (!term || DEMONST.test(term)) return null;
+    if (DICT[term]?.status === 'conocida') return null;
+    return term;
+  }
+  return null;
+}
+async function lookup(term, sentence){
+  const card = { id: uid(), role: 'lookup', term, state: 'busy' };
+  const known = DICT[term] || DICT[guessLemma(term) || ''];
+  if (known?.detailed) { card.state = 'ok'; card.lemma = known.lemma; CONV.msgs.push(card); saveConv(); renderAll(); scrollEnd(); return; }
+  CONV.msgs.push(card); saveConv(); renderAll(); scrollEnd();
+  try {
+    const [x] = await define([{ term }]);
+    const e = mergeEntry(x, /[가-힣]/.test(term) ? term : '', '');
+    if (e) { e.source = e.source || 'consulta'; card.lemma = e.lemma; card.state = 'ok'; } else card.state = 'err';
+    saveDict();
+  } catch (e) { card.state = 'err'; card.err = e instanceof NoKey ? 'falta la clave en ⚙ Ajustes' : e.message; }
+  saveConv(); renderAll();
+}
+
+/* ---------- dibujar el chat ---------- */
+function wordSpan(tok, msg){
+  const sp = document.createElement('span');
+  sp.className = 'w ko'; sp.textContent = tok.t;
+  const e = tok.lemma && DICT[tok.lemma];
+  const isFresh = msg.fresh?.includes(tok.lemma) && !(e && e.status === 'conocida');
+  if (isFresh && S.inlineGloss && msg.role === 'ai') {
+    sp.classList.add('new');
+    const ruby = document.createElement('ruby'); ruby.appendChild(sp);
+    const rt = document.createElement('rt'); rt.textContent = (e?.gloss || tok.gloss || '').slice(0, 22); ruby.appendChild(rt);
+    sp.onclick = () => openWord(tok, msg);
+    return ruby;
+  }
+  sp.onclick = () => openWord(tok, msg);
+  return sp;
+}
+function renderKo(el, msg){
+  const text = msg.ko || '';
+  const toks = (msg.tokens || []).filter(t => t.t && t.pos !== 'puntuación');
+  let cur = 0;
+  const plain = s => {
+    // lo que no vino analizado igual se puede tocar, palabra por palabra
+    for (const part of s.split(/(\s+)/)) {
+      if (!part) continue;
+      if (/[가-힣]/.test(part)) { const w = part.replace(/[.,!?~…"'()]+$/g, ''), rest = part.slice(w.length); el.appendChild(wordSpan({ t: w, lemma: '', pos: '', gloss: '', form: '' }, msg)); if (rest) el.appendChild(document.createTextNode(rest)); }
+      else el.appendChild(document.createTextNode(part));
+    }
+  };
+  for (const t of toks) {
+    const i = text.indexOf(t.t, cur);
+    if (i < 0) continue;
+    if (i > cur) plain(text.slice(cur, i));
+    el.appendChild(wordSpan(t, msg)); cur = i + t.t.length;
+  }
+  if (cur < text.length) plain(text.slice(cur));
+}
+function renderMsg(m){
+  const chat = $('chat');
+  if (m.role === 'note') {
+    const d = document.createElement('div'); d.className = 'msg note'; d.textContent = m.text;
+    if (m.retry) { const b = document.createElement('button'); b.className = 'chip'; b.style.marginLeft = '8px'; b.textContent = 'Reintentar'; b.onclick = () => { CONV.msgs = CONV.msgs.filter(x => x !== m); const last = [...CONV.msgs].reverse().find(x => x.role === 'me' || x.role === 'ai'); saveConv(); renderAll(); aiTurn(last && last.role === 'me' ? last : null); }; d.appendChild(b); }
+    chat.appendChild(d); return;
+  }
+  if (m.role === 'lookup') {
+    const d = document.createElement('div'); d.className = 'card';
+    const e = m.lemma && DICT[m.lemma];
+    if (m.state === 'busy') d.innerHTML = `<div class="q">¿Qué es <b class="ko">${esc(m.term)}</b>?</div><div class="busy">Buscando la traducción…</div>`;
+    else if (m.state === 'err' || !e) d.innerHTML = `<div class="q">¿Qué es <b class="ko">${esc(m.term)}</b>?</div><div class="busy">No se pudo traducir${m.err ? ': ' + esc(m.err) : ''}.</div>`;
+    else {
+      d.innerHTML = `<div class="q">¿Qué es <b class="ko">${esc(m.term)}</b>?</div><div><span class="lem ko">${esc(e.lemma)}</span> <button class="spk" title="Escuchar">🔊</button> <span class="pos">${esc(e.pos)}</span></div><div class="gloss">${esc(e.gloss)}</div><div class="small">${esc(e.meaning || '')}</div><div class="tools"><button class="chip">Ver más</button></div>`;
+      d.querySelector('.spk').onclick = () => speak(e.lemma);
+      d.querySelector('.tools .chip').onclick = () => openWord({ t: e.lemma, lemma: e.lemma, pos: e.pos, gloss: e.gloss, form: '' }, null);
+    }
+    chat.appendChild(d); return;
+  }
+  const d = document.createElement('div'); d.className = 'msg ' + m.role;
+  const tx = document.createElement('div'); tx.className = 'text ko';
+  renderKo(tx, m);
+  if (LISTEN && m.role === 'ai') { tx.classList.add('hide'); tx.title = 'Toca para ver el texto'; tx.addEventListener('click', ev => { if (tx.classList.contains('hide')) { ev.stopPropagation(); tx.classList.remove('hide'); } }, true); }
+  d.appendChild(tx);
+  const tools = document.createElement('div'); tools.className = 'tools';
+  const b = (label, fn, title) => { const x = document.createElement('button'); x.className = 'chip'; x.textContent = label; if (title) x.title = title; x.onclick = fn; tools.appendChild(x); return x; };
+  b('🔊', () => speak(m.ko), 'Escuchar');
+  if (m.role === 'ai') {
+    b('🐢', () => speak(m.ko, Math.max(0.5, S.rate - 0.3)), 'Escuchar despacio');
+    const es = document.createElement('div'); es.className = 'es'; es.textContent = m.es; es.hidden = !m.showEs;
+    b('Traducción', () => { m.showEs = !m.showEs; es.hidden = !m.showEs; saveConv(); });
+    d.appendChild(tools); d.appendChild(es);
+  } else {
+    d.appendChild(tools);
+    if (m.correction) {
+      const f = document.createElement('div'); f.className = 'fix';
+      f.innerHTML = `<b>Mejor:</b> <span class="ko">${esc(m.correction)}</span> <button class="spk" title="Escuchar">🔊</button>${m.note ? `<div>${esc(m.note)}</div>` : ''}`;
+      f.querySelector('.spk').onclick = () => speak(m.correction);
+      d.appendChild(f);
+    }
+  }
+  chat.appendChild(d);
+}
+function renderWelcome(){
+  const d = document.createElement('div'); d.className = 'welcome';
+  const lv = LV(S.level || 1);
+  d.innerHTML = `<h2>안녕하세요! 👋</h2>
+  <p>Conversa en coreano con 지수, una IA que habla a tu nivel. Puedes <b>escribir o hablar</b> 🎤 y escuchar cada respuesta 🔊.</p>
+  <p><b>Toca cualquier palabra</b> para ver su significado y su forma (también reconoce verbos conjugados). Las palabras nuevas aparecen <span style="border-bottom:2px solid var(--new)">subrayadas</span> con su significado encima, y todo se guarda en tu 📖 diccionario.</p>
+  <p>Si preguntas <span class="ko">«사과가 뭐예요?»</span> (¿qué es 사과?) la traducción aparece sola.</p>
+  <div class="row"><button class="btn" id="wStart">Empezar · ${esc(lv.name)}</button><button class="btn sec" id="wLevels">Elegir nivel y tema</button></div>
+  ${KEYS.anthropic || KEYS.openai ? '' : '<p class="small">Antes, pon tu clave de la API en ⚙ Ajustes.</p>'}`;
+  $('chat').appendChild(d);
+  d.querySelector('#wStart').onclick = () => newConversation(S.level || 1);
+  d.querySelector('#wLevels').onclick = openLevels;
+}
+function renderAll(){
+  const chat = $('chat'); chat.innerHTML = '';
+  $('lvname').textContent = CONV ? LV(CONV.level).name + ' · ' + (CONV.topic || '') : '';
+  if (!CONV || !CONV.msgs.length) { if (!busy) renderWelcome(); }
+  else CONV.msgs.forEach(renderMsg);
+  if (busy) renderTyping(true);
+}
+function renderTyping(on){
+  let t = $('typing');
+  if (on && !t) { t = document.createElement('div'); t.id = 'typing'; t.className = 'typing'; t.textContent = '지수 está escribiendo…'; $('chat').appendChild(t); scrollEnd(); }
+  if (!on && t) t.remove();
+}
+const scrollEnd = () => requestAnimationFrame(() => { $('chat').scrollTop = $('chat').scrollHeight; });
+
+/* ---------- ficha de una palabra ---------- */
+let SHEET = null;   // { tok, msg, ctx, busy, err }
+function openWord(tok, msg){
+  SHEET = { tok, msg, ctx: '', busy: false, err: '' };
+  if (!tok.lemma) { const g = guessLemma(tok.t); if (g) SHEET.guess = g; }
+  speak(tok.t);
+  $('veil').hidden = false; $('sheet').hidden = false; refreshSheet();
+}
+function closeSheet(){ SHEET = null; $('veil').hidden = true; $('sheet').hidden = true; }
+function entryHTML(e){
+  let h = '';
+  if (e.meaning) h += `<div class="sec-t">Significado</div><div>${esc(e.meaning)}</div>`;
+  if (e.explanation) h += `<div class="sec-t">Explicación</div><div>${esc(e.explanation)}</div>`;
+  if (e.hanja) h += `<div class="small" style="margin-top:6px">Hanja: ${esc(e.hanja)}</div>`;
+  if (e.irregular) h += `<div class="form">⚠ ${esc(e.irregular)}</div>`;
+  if (e.conjugations?.length) h += `<div class="sec-t">Conjugación</div><div class="conj">${e.conjugations.map(c => `<span class="ko" data-say="${esc(c.form)}" style="cursor:pointer">${esc(c.form)}</span><span>${esc(c.label)}</span>`).join('')}</div>`;
+  const forms = Object.entries(e.forms || {});
+  if (forms.length) h += `<div class="sec-t">Formas que has visto</div><div class="conj">${forms.map(([f, l]) => `<span class="ko" data-say="${esc(f)}" style="cursor:pointer">${esc(f)}</span><span>${esc(l || '—')}</span>`).join('')}</div>`;
+  if (e.examples?.length) h += `<div class="sec-t">Ejemplos</div>${e.examples.map(x => `<div class="ex"><span class="ko" data-say="${esc(x.ko)}" style="cursor:pointer">🔊 ${esc(x.ko)}</span><br><span class="small">${esc(x.es)}</span></div>`).join('')}`;
+  return h;
+}
+function refreshSheet(){
+  if (!SHEET) return;
+  const { tok, msg } = SHEET;
+  const lemma = tok.lemma || SHEET.guess || '';
+  const e = DICT[lemma] || (lemma && LEVEL_WORDS[lemma] ? { ...LEVEL_WORDS[lemma], fromLevel: true } : null);
+  const gloss = e?.gloss || tok.gloss || '';
+  let h = `<div class="big"><span class="ko">${esc(tok.t)}</span><button class="spk" data-say="${esc(tok.t)}">🔊</button></div><div class="rom">${esc(romanize(tok.t))}</div>`;
+  if (lemma && lemma !== tok.t) h += `<div style="margin-top:8px">Forma de diccionario: <b class="ko" style="font-size:20px">${esc(lemma)}</b> <button class="spk" data-say="${esc(lemma)}">🔊</button> <span class="rom">${esc(romanize(lemma))}</span>${!tok.lemma ? ' <span class="small">(reconocida automáticamente)</span>' : ''}</div>`;
+  if (e?.pos || tok.pos || gloss) h += `<div class="gloss">${e?.pos || tok.pos ? `<span class="pos">${esc(e?.pos || tok.pos)}</span>` : ''}${esc(gloss)}</div>`;
+  if (tok.form) h += `<div class="form">${esc(tok.form)}</div>`;
+  if (!lemma && !gloss) h += `<div class="small">Todavía no está analizada. Toca «Explicar» para que el modelo caro la analice.</div>`;
+  if (SHEET.ctx) h += `<div class="sec-t">En esta oración</div><div class="form">${esc(SHEET.ctx)}</div>`;
+  if (e && !e.fromLevel) h += entryHTML(e);
+  if (lemma && pendingDefs.has(lemma)) h += `<div class="busy" style="margin-top:8px">Preparando la definición completa…</div>`;
+  if (SHEET.busy) h += `<div class="busy" style="margin-top:8px">El profesor (${esc(MODELS[S.defModel]?.name || S.defModel)}) está explicando…</div>`;
+  if (SHEET.err) h += `<div class="fix" style="margin-top:8px">${esc(SHEET.err)}</div>`;
+  h += `<div class="row"><button class="btn" id="sExplain" ${SHEET.busy ? 'disabled' : ''}>${e?.detailed ? 'Explicar en esta oración' : 'Explicar en detalle'}</button>`;
+  if (DICT[lemma]) h += `<button class="btn sec" id="sKnown">${DICT[lemma].status === 'conocida' ? 'Marcar como nueva' : 'Ya la sé ✓'}</button>`;
+  h += `<button class="btn sec" id="sClose">Cerrar</button></div>`;
+  const sh = $('sheet'); sh.innerHTML = h;
+  sh.querySelectorAll('[data-say]').forEach(x => x.onclick = () => speak(x.dataset.say));
+  $('sClose').onclick = closeSheet;
+  if ($('sKnown')) $('sKnown').onclick = () => { const d = DICT[lemma]; d.status = d.status === 'conocida' ? 'nueva' : 'conocida'; saveDict(); refreshSheet(); renderAll(); };
+  $('sExplain').onclick = async () => {
+    SHEET.busy = true; SHEET.err = ''; refreshSheet();
+    const mine = SHEET;
+    try {
+      const [x] = await define([{ term: tok.t, lemma, sentence: msg?.ko || '' }]);
+      const ne = mergeEntry(x, tok.t, tok.form);
+      if (ne && msg) { const t = msg.tokens.find(t => t.t === tok.t); if (t && !t.lemma) { t.lemma = ne.lemma; t.gloss = ne.gloss; t.pos = ne.pos; saveConv(); } }
+      saveDict();
+      if (SHEET === mine) { mine.ctx = x?.in_context || ''; if (ne && !tok.lemma) mine.guess = ne.lemma; }
+    } catch (err) { if (SHEET === mine) mine.err = err instanceof NoKey ? 'Falta la clave de la API (⚙ Ajustes).' : 'No se pudo explicar: ' + err.message; }
+    if (SHEET === mine) { mine.busy = false; refreshSheet(); }
+  };
+}
+$('veil').onclick = closeSheet;
+
+/* ---------- paneles: niveles, diccionario, ajustes ---------- */
+let PANEL = '';
+function openPanel(title, kind){ PANEL = kind; $('ptitle').textContent = title; $('panel').hidden = false; $('pbody').scrollTop = 0; }
+function closePanel(){ PANEL = ''; $('panel').hidden = true; }
+$('pclose').onclick = closePanel;
+
+function openLevels(){
+  openPanel('Niveles', 'levels');
+  const cur = CONV?.level || S.level || 1;
+  const pb = $('pbody'); pb.innerHTML = '<p class="small">Cada nivel tiene un conjunto de palabras y de formas gramaticales. 지수 conversa usando las de tu nivel y de los anteriores. Toca una palabra para oírla y ver su significado.</p>';
+  for (const lv of LEVELS) {
+    const d = document.createElement('div'); d.className = 'lv' + (lv.id === cur ? ' cur' : '');
+    const known = lv.vocab.filter(v => DICT[v[0]]?.status === 'conocida').length;
+    d.innerHTML = `<h3>${esc(lv.name)}${lv.id === cur ? ' · actual' : ''}</h3><div class="small">${esc(lv.desc)}${lv.vocab.length ? ` · ${known}/${lv.vocab.length} palabras que ya sabes` : ''}</div>
+      ${lv.vocab.length ? `<div class="sec-t">Vocabulario</div><div class="vocab">${lv.vocab.map(v => `<button class="chip ko" data-w="${esc(v[0])}" title="${esc(v[2])}">${esc(v[0])}</button>`).join('')}</div>` : ''}
+      ${lv.grammar.length ? `<div class="sec-t">Gramática</div>${lv.grammar.map(g => `<div class="gram"><b class="ko">${esc(g[0])}</b><div class="small">${esc(g[1])}</div>${g[2].map(x => `<div class="ex"><span class="ko" data-say="${esc(x[0])}" style="cursor:pointer">🔊 ${esc(x[0])}</span> <span class="small">${esc(x[1])}</span></div>`).join('')}</div>`).join('')}` : ''}
+      <div class="sec-t">Practicar</div><div class="row" style="margin-top:4px">${lv.topics.map(t => `<button class="btn ${lv.id === cur ? '' : 'sec'}" data-topic="${esc(t)}">${esc(t)}</button>`).join('')}</div>`;
+    d.querySelectorAll('[data-w]').forEach(b => b.onclick = () => { const w = LEVEL_WORDS[b.dataset.w]; openWord({ t: w.lemma, lemma: w.lemma, pos: w.pos, gloss: w.gloss, form: '' }, null); });
+    d.querySelectorAll('[data-say]').forEach(b => b.onclick = () => speak(b.dataset.say));
+    d.querySelectorAll('[data-topic]').forEach(b => b.onclick = () => { if (CONV?.msgs.length && !confirm('¿Empezar una conversación nueva? (la actual se borra; tu diccionario se mantiene)')) return; S.level = lv.id; saveSet(); newConversation(lv.id, b.dataset.topic); });
+    pb.appendChild(d);
+  }
+}
+
+let DFILTER = 'todas', DQUERY = '', DOPEN = '';
+function openDict(){ openPanel('Diccionario', 'dict'); drawDict(); }
+function drawDict(){
+  const pb = $('pbody');
+  const all = Object.values(DICT);
+  const groups = { todas: () => true, verbos: e => e.pos === 'verbo' || e.pos === 'adjetivo', sustantivos: e => e.pos === 'sustantivo', otras: e => !['verbo','adjetivo','sustantivo'].includes(e.pos), nuevas: e => e.status !== 'conocida', conocidas: e => e.status === 'conocida' };
+  const q = DQUERY.trim().toLowerCase();
+  const list = all.filter(groups[DFILTER]).filter(e => !q || e.lemma.includes(q) || (e.gloss || '').toLowerCase().includes(q) || Object.keys(e.forms || {}).some(f => f.includes(q)))
+    .sort((a, b) => (b.last || b.added || 0) - (a.last || a.added || 0));
+  pb.innerHTML = `<input class="search ko" id="dq" placeholder="Buscar en coreano o en español (también formas conjugadas)…" value="${esc(DQUERY)}">
+    <div class="filters">${Object.keys(groups).map(k => `<button class="chip ${k === DFILTER ? 'on' : ''}" data-f="${k}">${{ todas: 'Todas', verbos: 'Verbos y adjetivos', sustantivos: 'Sustantivos', otras: 'Otras', nuevas: 'Por aprender', conocidas: 'Ya sé' }[k]}</button>`).join('')}</div>
+    <div class="small" style="margin-bottom:8px">${list.length} de ${all.length} palabras.</div><div id="dlist"></div>
+    <div class="row"><button class="btn sec" id="dExport">Exportar (JSON)</button><label class="btn sec" style="cursor:pointer">Importar<input type="file" id="dImport" accept=".json,application/json" hidden></label></div>`;
+  const dl = pb.querySelector('#dlist');
+  if (!all.length) dl.innerHTML = '<p class="small">Todavía está vacío. Las palabras se agregan solas cuando conversas, cuando las tocas y cuando preguntas «…뭐예요?».</p>';
+  for (const e of list.slice(0, 400)) {
+    const d = document.createElement('div'); d.className = 'ent';
+    const nForms = Object.keys(e.forms || {}).length;
+    d.innerHTML = `<div class="top"><span class="ko">${esc(e.lemma)}</span><button class="spk" title="Escuchar">🔊</button><span class="g">${e.pos ? `<span class="pos">${esc(e.pos)}</span>` : ''}${esc(e.gloss || '')}${nForms ? ` · ${nForms} forma${nForms > 1 ? 's' : ''}` : ''}</span><span class="st ${e.status === 'conocida' ? 'conocida' : 'nueva'}">${e.status === 'conocida' ? 'ya sé' : 'por aprender'}</span></div>`;
+    d.querySelector('.spk').onclick = ev => { ev.stopPropagation(); speak(e.lemma); };
+    d.querySelector('.top').onclick = () => { DOPEN = DOPEN === e.lemma ? '' : e.lemma; drawDict(); };
+    if (DOPEN === e.lemma) {
+      const body = document.createElement('div');
+      body.innerHTML = `<div class="rom">${esc(romanize(e.lemma))}${e.level ? ` · ${esc(LV(e.level).name)}` : ''} · visto ${e.seen || 0} ${e.seen === 1 ? 'vez' : 'veces'}</div>` + entryHTML(e) +
+        (!e.detailed ? `<div class="small" style="margin-top:6px">Sin definición completa todavía.</div>` : '') +
+        `<div class="row"><button class="btn" data-a="def">${e.detailed ? 'Rehacer definición' : 'Completar con IA'}</button><button class="btn sec" data-a="known">${e.status === 'conocida' ? 'Marcar por aprender' : 'Ya la sé ✓'}</button><button class="btn sec" data-a="del">Borrar</button></div>`;
+      body.querySelectorAll('[data-say]').forEach(x => x.onclick = () => speak(x.dataset.say));
+      body.querySelector('[data-a=known]').onclick = () => { e.status = e.status === 'conocida' ? 'nueva' : 'conocida'; saveDict(); drawDict(); };
+      body.querySelector('[data-a=del]').onclick = () => { if (confirm('¿Borrar ' + e.lemma + ' del diccionario?')) { delete DICT[e.lemma]; saveDict(); drawDict(); } };
+      body.querySelector('[data-a=def]').onclick = async ev => {
+        ev.target.disabled = true; ev.target.textContent = 'Definiendo…';
+        try { const [x] = await define([{ term: e.lemma, lemma: e.lemma, sentence: e.sentence || '' }]); mergeEntry(x); saveDict(); }
+        catch (err) { alert('No se pudo: ' + (err instanceof NoKey ? 'falta la clave de la API.' : err.message)); }
+        if (PANEL === 'dict') drawDict();
+      };
+      d.appendChild(body);
+    }
+    dl.appendChild(d);
+  }
+  const dq = pb.querySelector('#dq');
+  dq.oninput = () => { DQUERY = dq.value; const pos = dq.selectionStart; drawDict(); const n = $('dq'); n.focus(); n.setSelectionRange(pos, pos); };
+  pb.querySelectorAll('[data-f]').forEach(b => b.onclick = () => { DFILTER = b.dataset.f; drawDict(); });
+  pb.querySelector('#dExport').onclick = () => {
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(DICT, null, 1)], { type: 'application/json' }));
+    a.download = 'diccionario-coreano.json'; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  };
+  pb.querySelector('#dImport').onchange = async ev => {
+    const f = ev.target.files[0]; if (!f) return;
+    try { const o = JSON.parse(await f.text()); let n = 0; for (const [k, v] of Object.entries(o)) if (v && v.lemma) { DICT[k] = Object.assign(DICT[k] || {}, v); n++; } saveDict(); alert(n + ' palabras importadas.'); drawDict(); }
+    catch (e) { alert('El archivo no es un diccionario válido.'); }
+  };
+}
+
+function openSettings(){
+  openPanel('Ajustes', 'settings');
+  const opt = (list, v) => list.map(([id, n]) => `<option value="${id}" ${id === v ? 'selected' : ''}>${esc(n)}</option>`).join('');
+  const pb = $('pbody');
+  pb.innerHTML = `
+    <div class="sec-t">Modelos</div>
+    <div class="field"><label>Para conversar (barato: se usa en cada mensaje)</label><select id="sChat">${opt(CHAT_MODELS, S.chatModel)}</select></div>
+    <div class="field"><label>Para definiciones y explicaciones (caro: solo para palabras nuevas, al tocar «Explicar» y al preguntar «…뭐예요?»)</label><select id="sDef">${opt(DEF_MODELS, S.defModel)}</select></div>
+    <div class="sec-t">Claves de la API</div>
+    <div class="field"><label>Anthropic (sk-ant-…)</label><input type="password" id="kA" autocomplete="off" value="${esc(KEYS.anthropic)}" placeholder="sk-ant-..."></div>
+    <div class="field"><label>OpenAI (sk-…) · solo si eliges GPT</label><input type="password" id="kO" autocomplete="off" value="${esc(KEYS.openai)}" placeholder="sk-..."></div>
+    <p class="small">Las claves se guardan solo en este navegador y se envían directamente a api.anthropic.com o api.openai.com. No están en el archivo, así que puedes compartir la app sin peligro; eso sí, no compartas el navegador con la clave puesta.</p>
+    <div class="sec-t">Lectura y ayudas</div>
+    <label class="check"><input type="checkbox" id="oGloss" ${S.inlineGloss ? 'checked' : ''}><span>Mostrar el significado encima de las palabras nuevas</span></label>
+    <label class="check"><input type="checkbox" id="oDef" ${S.autoDefine ? 'checked' : ''}><span>Definir automáticamente las palabras nuevas con el modelo caro (se guardan en el diccionario)</span></label>
+    <div class="sec-t">Audio</div>
+    <label class="check"><input type="checkbox" id="oSpeak" ${S.autoSpeak ? 'checked' : ''}><span>Leer en voz alta cada respuesta</span></label>
+    <label class="check"><input type="checkbox" id="oSend" ${S.autoSend ? 'checked' : ''}><span>Enviar solo al terminar de hablar 🎤</span></label>
+    <div class="field"><label>Velocidad de la voz: <b id="rv">${S.rate}</b></label><input type="range" id="oRate" min="0.5" max="1.3" step="0.05" value="${S.rate}" style="width:100%"></div>
+    <div class="field"><label>Voz coreana</label><select id="oVoice">${VOICES.length ? VOICES.map(v => `<option ${v.name === S.voice ? 'selected' : ''}>${esc(v.name)}</option>`).join('') : '<option value="">(predeterminada)</option>'}</select>
+      ${VOICES.length ? '' : '<div class="small">No se encontró una voz coreana instalada. En el celular suele venir; en el computador puedes agregarla en los ajustes de idioma o voz del sistema.</div>'}
+      <div class="row" style="margin-top:6px"><button class="btn sec" id="oTest">Probar: 안녕하세요, 만나서 반가워요</button></div></div>
+    ${SR ? '' : '<p class="small">⚠ Este navegador no reconoce voz: usa Chrome o Safari para hablar con el micrófono.</p>'}
+    <div class="sec-t">Apariencia</div>
+    <div class="field"><select id="oTheme"><option value="">Según el sistema</option><option value="light" ${S.theme === 'light' ? 'selected' : ''}>Claro</option><option value="dark" ${S.theme === 'dark' ? 'selected' : ''}>Oscuro</option></select></div>
+    <div class="sec-t">Datos</div>
+    <div class="row"><button class="btn sec" id="xConv">Borrar la conversación</button><button class="btn sec" id="xDict">Borrar el diccionario</button></div>`;
+  const on = (id, ev, fn) => $(id).addEventListener(ev, fn);
+  on('sChat', 'change', e => { S.chatModel = e.target.value; saveSet(); });
+  on('sDef', 'change', e => { S.defModel = e.target.value; saveSet(); });
+  on('kA', 'change', e => { KEYS.anthropic = e.target.value.trim(); saveKeys(); });
+  on('kO', 'change', e => { KEYS.openai = e.target.value.trim(); saveKeys(); });
+  on('oGloss', 'change', e => { S.inlineGloss = e.target.checked; saveSet(); renderAll(); });
+  on('oDef', 'change', e => { S.autoDefine = e.target.checked; saveSet(); });
+  on('oSpeak', 'change', e => { S.autoSpeak = e.target.checked; saveSet(); });
+  on('oSend', 'change', e => { S.autoSend = e.target.checked; saveSet(); });
+  on('oRate', 'input', e => { S.rate = +e.target.value; $('rv').textContent = S.rate; saveSet(); });
+  on('oVoice', 'change', e => { S.voice = e.target.value; saveSet(); });
+  on('oTest', 'click', () => speak('안녕하세요, 만나서 반가워요'));
+  on('oTheme', 'change', e => { S.theme = e.target.value; saveSet(); if (S.theme) document.documentElement.dataset.theme = S.theme; else delete document.documentElement.dataset.theme; });
+  on('xConv', 'click', () => { if (confirm('¿Borrar la conversación?')) { CONV = null; saveConv(); renderAll(); closePanel(); } });
+  on('xDict', 'click', () => { if (confirm('¿Borrar todo el diccionario? No se puede deshacer.')) { DICT = {}; saveDict(); renderAll(); } });
+}
+
+/* ---------- frases rápidas y controles ---------- */
+const QUICK = [['뭐예요?','¿Qué es?'],['다시 말해 주세요','¿Puedes repetir?'],['천천히 말해 주세요','Más despacio, por favor'],['잘 모르겠어요','No entiendo bien'],['네','Sí'],['아니요','No'],['감사합니다','Gracias']];
+for (const [ko, es] of QUICK) {
+  const b = document.createElement('button'); b.className = 'chip ko'; b.textContent = ko; b.title = es;
+  b.onclick = () => { const inp = $('inp'); if (ko === '뭐예요?') { inp.value = (inp.value.trim() ? inp.value.trim() + ' ' : '') + '뭐예요?'; inp.focus(); inp.setSelectionRange(0, 0); } else { inp.value = ko; send(); } autosize(); };
+  $('quick').appendChild(b);
+}
+function autosize(){ const t = $('inp'); t.style.height = 'auto'; t.style.height = Math.min(120, t.scrollHeight) + 'px'; }
+$('inp').addEventListener('input', autosize);
+$('inp').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });
+$('send').onclick = send;
+$('mic').onclick = toggleMic;
+$('bLevels').onclick = openLevels;
+$('bDict').onclick = openDict;
+$('bSettings').onclick = openSettings;
+$('bListen').onclick = () => { LISTEN = !LISTEN; $('bListen').classList.toggle('on', LISTEN); $('bListen').title = LISTEN ? 'Modo escucha activado: toca un mensaje para ver el texto' : 'Modo escucha: ocultar el texto coreano'; renderAll(); };
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { if (SHEET) closeSheet(); else if (PANEL) closePanel(); } });
+if (!SR) $('mic').title = 'Este navegador no reconoce voz (usa Chrome o Safari)';
+
+renderAll(); scrollEnd();
+</script>
+</body>
+</html>
