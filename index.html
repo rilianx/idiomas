@@ -258,13 +258,16 @@ const LEVEL_WORDS = {};
 for (const l of LEVELS) for (const [ko, pos, gloss] of l.vocab) if (!LEVEL_WORDS[ko]) LEVEL_WORDS[ko] = { lemma: ko, pos, gloss, level: l.id };
 
 /* ---------- estado guardado ---------- */
-const DEFAULT_SET = { chatModel: 'claude-haiku-5-5', defModel: 'claude-opus-5-5', autoSpeak: true, suggest: true, learnProfile: true, inlineGloss: true, autoDefine: false, autoSend: true, rate: 0.9, voice: '', theme: '' };
+const DEFAULT_SET = { chatModel: 'claude-haiku-5-5', defModel: 'claude-opus-5-5', autoSpeak: true, suggest: true, learnProfile: true, memory: 16, inlineGloss: true, autoDefine: false, autoSend: true, rate: 0.9, voice: '', theme: '' };
 const S = Object.assign({}, DEFAULT_SET, load('hab-set', {}));
 const KEYS = Object.assign({ anthropic: '', openai: '', workspace: '' }, load('hab-keys', {}));
 let DICT = load('hab-dict', {});
 // los errores que el estudiante pidió explicar (solo esos se guardan): [{ id, msgId, wrong, right, note, category, level, date, done, expl }]
 let ERRS = load('hab-errs', []).filter(e => e.expl);
 // el perfil del estudiante, que se va armando con la conversación: { facts: [{ id, kind: 'dato'|'interés', text, date }] }
+// gasto estimado por día: { 'AAAA-MM-DD': { chat: { n, tin, tout, cost, unpriced }, explain: {…} } }
+let USAGE = load('hab-usage', {});
+const saveUsage = () => save('hab-usage', USAGE);
 let PROFILE = Object.assign({ facts: [] }, load('hab-profile', {}));
 const saveProfile = () => { PROFILE.facts = PROFILE.facts.slice(-80); save('hab-profile', PROFILE); };
 let CONV = load('hab-conv', null);   // { level, topic, msgs: [...] }
@@ -408,11 +411,12 @@ const httpError = (res, data) => new Error({ 401: 'la clave no es válida', 403:
 function parseJSON(txt){ try { const o = JSON.parse(txt); if (o && typeof o === 'object') return o; } catch (e) {} throw new Error('la respuesta llegó incompleta'); }
 class NoKey extends Error {}
 
-async function ask(model, system, user, schema, { effort = 'low', maxTokens = 8000, ms = 60000 } = {}){
+async function ask(model, system, user, schema, { effort = 'low', maxTokens = 8000, ms = 60000, kind = 'chat' } = {}){
   const prov = provOf(model);
   if (!KEYS[prov]) throw new NoKey(prov);
-  const out = prov === 'openai' ? await openaiAsk(model, system, user, schema, effort, maxTokens, ms) : await claudeAsk(model, system, user, schema, effort, maxTokens, ms);
-  return out;
+  const r = prov === 'openai' ? await openaiAsk(model, system, user, schema, effort, maxTokens, ms) : await claudeAsk(model, system, user, schema, effort, maxTokens, ms);
+  recordUsage(kind, model, r.served, r.usage);
+  return r.out;
 }
 // Claude (Messages API). Las instrucciones fijas van en system y se marcan para el caché.
 async function claudeAsk(model, system, user, schema, effort, maxTokens, ms, fallback = true){
@@ -430,7 +434,9 @@ async function claudeAsk(model, system, user, schema, effort, maxTokens, ms, fal
   if (data.stop_reason === 'refusal') throw new Error('el modelo no quiso responder eso');
   if (data.stop_reason === 'max_tokens') throw new Error('la respuesta quedó cortada');
   console.debug('[hablemos]', data.model, data.usage);
-  return parseJSON((data.content || []).filter(b => b.type === 'text').map(b => b.text).join(''));
+  const u = data.usage || {};
+  return { out: parseJSON((data.content || []).filter(b => b.type === 'text').map(b => b.text).join('')), served: data.model,
+    usage: { in: u.input_tokens || 0, cacheW: u.cache_creation_input_tokens || 0, cacheR: u.cache_read_input_tokens || 0, out: u.output_tokens || 0 } };
 }
 // OpenAI (Chat Completions)
 async function openaiAsk(model, system, user, schema, effort, maxTokens, ms, strict = true){
@@ -442,7 +448,45 @@ async function openaiAsk(model, system, user, schema, effort, maxTokens, ms, str
   const msg = data.choices?.[0]?.message || {};
   if (msg.refusal) throw new Error('el modelo no quiso responder eso');
   console.debug('[hablemos]', data.model, data.usage);
-  return parseJSON(msg.content || '');
+  const u = data.usage || {}, cached = u.prompt_tokens_details?.cached_tokens || 0;
+  return { out: parseJSON(msg.content || ''), served: data.model, usage: { in: (u.prompt_tokens || 0) - cached, cacheW: 0, cacheR: cached, out: u.completion_tokens || 0 } };
+}
+
+/* ---------- gasto estimado ---------- */
+// dólares por millón de tokens: [entrada, salida, lectura de caché, escritura de caché]. Precios publicados de Anthropic;
+// la escritura de caché se estima en 1,25 veces la entrada. GPT-5.4 mini no tiene precio aquí: se cuentan solo sus tokens.
+const PRICES = {
+  'claude-haiku-5-5': [0.10, 0.50, 0.01, 0.125],
+  'claude-sonnet-5-5': [2, 10, 0.20, 2.5],
+  'claude-opus-5-5': [4, 20, 0.20, 5],
+  'claude-fable-5-1': [10, 50, 0.25, 12.5]
+};
+const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+function recordUsage(kind, model, served, u){
+  if (!u) return;
+  const pr = PRICES[served] || PRICES[model];
+  const day = USAGE[today()] || (USAGE[today()] = {});
+  const k = day[kind] || (day[kind] = { n: 0, tin: 0, tout: 0, cost: 0, unpriced: 0 });
+  k.n++; k.tin += u.in + u.cacheW + u.cacheR; k.tout += u.out;
+  if (pr) k.cost += (u.in * pr[0] + u.out * pr[1] + u.cacheR * pr[2] + u.cacheW * pr[3]) / 1e6;
+  else k.unpriced++;
+  saveUsage();
+}
+function usageSum(filter){
+  const t = { chat: { n: 0, tin: 0, tout: 0, cost: 0, unpriced: 0 }, explain: { n: 0, tin: 0, tout: 0, cost: 0, unpriced: 0 } };
+  for (const [day, v] of Object.entries(USAGE)) if (filter(day)) for (const k of ['chat', 'explain']) if (v[k]) for (const f of Object.keys(t[k])) t[k][f] += v[k][f] || 0;
+  return t;
+}
+const money = c => c === 0 ? '$0' : c < 0.001 ? '< $0,001' : '$' + c.toFixed(c < 0.01 ? 3 : 2).replace('.', ',');
+const ktok = n => n >= 1e6 ? (n / 1e6).toFixed(1).replace('.', ',') + ' M' : n >= 1000 ? Math.round(n / 1000) + ' mil' : String(n);
+function usageHTML(){
+  const d = today(), month = d.slice(0, 7);
+  const rows = [['Hoy', usageSum(x => x === d)], ['Este mes', usageSum(x => x.startsWith(month))], ['Total', usageSum(() => true)]];
+  const cell = k => `${k.n} · ${money(k.cost)}${k.unpriced ? ` <span class="small">(+${k.unpriced} sin precio)</span>` : ''}`;
+  return `<div class="conj" style="grid-template-columns:auto 1fr 1fr;gap:6px 14px;font-size:15px">
+    <span></span><b class="small">Conversación</b><b class="small">Explicaciones</b>
+    ${rows.map(([l, t]) => `<b>${l}</b><span>${cell(t.chat)}</span><span>${cell(t.explain)}</span>`).join('')}</div>
+    <div class="small" style="margin-top:6px">Total: ${money(rows[2][1].chat.cost + rows[2][1].explain.cost)} · ${ktok(rows[2][1].chat.tin + rows[2][1].explain.tin)} tokens de entrada y ${ktok(rows[2][1].chat.tout + rows[2][1].explain.tout)} de salida.<br>Es una estimación con los tokens que informa la API y los precios publicados. El cobro real está en console.anthropic.com (o platform.openai.com).</div>`;
 }
 
 /* ---------- esquemas de respuesta ---------- */
@@ -528,7 +572,7 @@ const DEF_SYSTEM = [
 let busy = false;
 const uid = () => Math.random().toString(36).slice(2, 10);
 function transcript(){
-  const msgs = CONV.msgs.filter(m => m.role === 'me' || m.role === 'ai').slice(-16);
+  const msgs = CONV.msgs.filter(m => m.role === 'me' || m.role === 'ai').slice(-(S.memory || 16));
   return msgs.map(m => (m.role === 'me' ? 'Estudiante: ' : 'Tú (지수): ') + m.ko).join('\n');
 }
 function newConversation(levelId, topic){
@@ -619,7 +663,7 @@ function mergeEntry(x, surface, form){
 }
 async function define(items, model = S.defModel){
   const user = (items[0]?.context ? 'ÚLTIMOS MENSAJES DE LA CONVERSACIÓN:\n' + items[0].context + '\n\n' : '') + 'TÉRMINOS:\n' + items.map((it, i) => `${i + 1}. «${it.term}»` + (it.lemma ? ` (forma de diccionario probable: ${it.lemma})` : '') + (it.sentence ? ` — en la oración: «${it.sentence}»` : '')).join('\n');
-  const out = await ask(model, DEF_SYSTEM, user, DEF_SCHEMA, { effort: 'low', maxTokens: 16000, ms: 120000 });
+  const out = await ask(model, DEF_SYSTEM, user, DEF_SCHEMA, { effort: 'low', maxTokens: 16000, ms: 120000, kind: model === S.defModel ? 'explain' : 'chat' });
   return out.entries || [];
 }
 const pendingDefs = new Set();
@@ -649,7 +693,7 @@ const ctxBlock = (m, label) => { const c = contextBefore(m); return (c ? 'ÚLTIM
 async function explainSentence(m){
   m.explBusy = true; m.explErr = ''; renderAll();
   try {
-    const x = await ask(S.defModel, SENT_SYSTEM, ctxBlock(m, 'FRASE A EXPLICAR (la dijo ' + (m.role === 'me' ? 'el estudiante' : '지수') + '): «' + m.ko + '»'), SENT_SCHEMA, { effort: 'low', maxTokens: 16000, ms: 150000 });
+    const x = await ask(S.defModel, SENT_SYSTEM, ctxBlock(m, 'FRASE A EXPLICAR (la dijo ' + (m.role === 'me' ? 'el estudiante' : '지수') + '): «' + m.ko + '»'), SENT_SCHEMA, { effort: 'low', maxTokens: 16000, ms: 150000, kind: 'explain' });
     m.expl = x; m.showExpl = true;
     // las palabras explicadas quedan en el diccionario (sin contar como vistas otra vez)
     // cada palabra queda en el diccionario: definición, la forma que tiene aquí y la frase como ejemplo
@@ -729,7 +773,7 @@ const ERR_BUSY = new Set();
 async function explainMsgError(m){
   ERR_BUSY.add(m.id); m.errErr = ''; renderAll();
   try {
-    const x = await ask(S.defModel, ERR_SYSTEM, ctxBlock(m, `FRASE DEL ESTUDIANTE: «${m.ko}»\nCORREGIDA: «${m.correction}»` + (m.note ? `\nNOTA BREVE: ${m.note}` : '')), ERR_SCHEMA, { effort: 'low', maxTokens: 16000, ms: 150000 });
+    const x = await ask(S.defModel, ERR_SYSTEM, ctxBlock(m, `FRASE DEL ESTUDIANTE: «${m.ko}»\nCORREGIDA: «${m.correction}»` + (m.note ? `\nNOTA BREVE: ${m.note}` : '')), ERR_SCHEMA, { effort: 'low', maxTokens: 16000, ms: 150000, kind: 'explain' });
     if (!ERRS.some(e => e.msgId === m.id))
       ERRS.push({ id: uid(), msgId: m.id, wrong: m.ko, right: m.correction, note: m.note || '', category: m.category || x.category || 'Otros', level: CONV?.level || null, date: Date.now(), done: false, expl: x, showExpl: true });
     saveErrs();
@@ -746,7 +790,7 @@ const frequentErrors = () => errGroups(ERRS.filter(e => !e.done && e.category !=
 async function explainError(er){
   ERR_BUSY.add(er.id); er.err = ''; renderAll(); if (PANEL === 'dict') drawDict();
   try {
-    const x = await ask(S.defModel, ERR_SYSTEM, `FRASE DEL ESTUDIANTE: «${er.wrong}»\nCORREGIDA: «${er.right}»` + (er.note ? `\nNOTA BREVE: ${er.note}` : ''), ERR_SCHEMA, { effort: 'low', maxTokens: 12000, ms: 120000 });
+    const x = await ask(S.defModel, ERR_SYSTEM, `FRASE DEL ESTUDIANTE: «${er.wrong}»\nCORREGIDA: «${er.right}»` + (er.note ? `\nNOTA BREVE: ${er.note}` : ''), ERR_SCHEMA, { effort: 'low', maxTokens: 16000, ms: 150000, kind: 'explain' });
     er.expl = x; er.showExpl = true;
     if (x.category && (!er.category || er.category === 'Otros')) er.category = x.category;
   } catch (e) { er.err = e instanceof NoKey ? 'Falta la clave de la API (⚙ Ajustes).' : 'No se pudo explicar: ' + e.message; }
@@ -1119,6 +1163,11 @@ function openSettings(){
     <div class="sec-t">Modelos</div>
     <div class="field"><label>Para conversar (barato: se usa en cada mensaje)</label><select id="sChat">${opt(CHAT_MODELS, S.chatModel)}</select></div>
     <div class="field"><label>Para explicaciones (caro: solo cuando aprietas «Explicar frase» o «Explicar» en una palabra)</label><select id="sDef">${opt(DEF_MODELS, S.defModel)}</select></div>
+    <div class="field"><label>Mensajes que 지수 recuerda de la conversación</label><select id="sMem">${[6, 10, 16, 24, 40].map(n => `<option value="${n}" ${n === (S.memory || 16) ? 'selected' : ''}>${n} mensajes${n === 16 ? ' (recomendado)' : ''}</option>`).join('')}</select>
+      <div class="small">Más mensajes: 지수 recuerda más de lo que hablaron, pero cada mensaje cuesta un poco más. Lo que cuentas de ti queda igual en tu perfil.</div></div>
+    <div class="sec-t">Gasto (estimado)</div>
+    <div id="usage">${usageHTML()}</div>
+    <div class="row" style="margin-top:6px"><button class="btn sec" id="xUsage">Reiniciar el contador</button></div>
     <div class="sec-t">Claves de la API</div>
     <div class="field"><label>Anthropic (sk-ant-…)</label><input type="password" id="kA" autocomplete="off" value="${esc(KEYS.anthropic)}" placeholder="sk-ant-..."></div>
     <div class="field"><label>ID del workspace de Anthropic · solo si la clave no está asignada a un workspace</label><input type="text" id="kW" autocomplete="off" value="${esc(KEYS.workspace)}" placeholder="wrkspc_..."><div class="small">Lo ves en console.anthropic.com → Settings → Workspaces. Si tu clave se creó dentro de un workspace, déjalo vacío.</div></div>
@@ -1146,6 +1195,8 @@ function openSettings(){
   on('pfAdd', 'click', addFact);
   on('pfText', 'keydown', e => { if (e.key === 'Enter') addFact(); });
   on('oLearn', 'change', e => { S.learnProfile = e.target.checked; saveSet(); });
+  on('sMem', 'change', e => { S.memory = +e.target.value; saveSet(); });
+  on('xUsage', 'click', () => { if (confirm('¿Reiniciar el contador de gasto?')) { USAGE = {}; saveUsage(); $('usage').innerHTML = usageHTML(); } });
   on('sChat', 'change', e => { S.chatModel = e.target.value; saveSet(); });
   on('sDef', 'change', e => { S.defModel = e.target.value; saveSet(); });
   on('kA', 'change', e => { KEYS.anthropic = e.target.value.trim(); saveKeys(); });

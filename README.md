@@ -44,6 +44,10 @@ Una app para aprender idiomas conversando con una IA, empezando por el coreano. 
 
 Las explicaciones ven los últimos 3 mensajes de la conversación y el nivel, y explican en contexto, no solo traducen. «Explicar frase» da: a qué responde la frase y qué se espera que contestes; una explicación detallada (formas, por qué se usan aquí, registro, matices, datos culturales); respuestas posibles (al tocarlas quedan escritas para enviarlas); la gramática con otro ejemplo; y, plegado, palabra por palabra. Las palabras quedan en el diccionario. «Explicar error» también usa el contexto: qué querías decir y si hay una respuesta más natural para esa conversación. Si quieres que el modelo caro defina solo las palabras nuevas (más lento), se activa en ⚙ Ajustes.
 
+**Gasto y memoria.** En ⚙ Ajustes:
+- **Gasto (estimado):** hoy, este mes y en total, separado en conversación y explicaciones, con los tokens que informa la API en cada respuesta y los precios publicados (para GPT-5.4 mini se cuentan solo los pedidos, sin precio). Como referencia, un mensaje con Haiku 5.5 cuesta del orden de una décima de centavo de dólar y una explicación con Opus 5.5, unos 5 a 8 centavos.
+- **Mensajes que 지수 recuerda:** 6, 10, 16 (por defecto), 24 o 40 mensajes de la conversación en cada pedido. Más mensajes, más memoria y un poco más de costo; lo que cuentas de ti queda igual en el perfil.
+
 ## Cómo usarla
 
 1. Abre `index.html` en el navegador (Chrome o Safari para hablar con el micrófono).
