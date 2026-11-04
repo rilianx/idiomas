@@ -29,6 +29,7 @@ Una app para aprender idiomas conversando con una IA, empezando por el coreano. 
   5. Planes y deseos
   6. Cortesía y conectores
   7. Libre
+- **Perfil dinámico** 👤. Mientras conversas, el modelo barato anota lo nuevo que cuentas de ti (nombre, país, trabajo, familia, gustos e intereses), sin llamadas extra; bajo tu mensaje aparece qué se anotó. 지수 recuerda el perfil en todas las conversaciones: no vuelve a preguntar lo que ya sabe, te pregunta por tu vida e intereses, y las respuestas sugeridas proponen temas relacionados. El perfil se ve y se edita en ⚙ Ajustes (borrar, agregar, dejar de aprender).
 - **Correcciones.** Si lo que escribes tiene errores, el modelo de la conversación muestra debajo la versión correcta («Mejor: …») con una explicación breve y el tipo de error.
   - **«🎓 Explicar error»**: el modelo caro explica qué estaba mal y por qué, da la regla y ejemplos para escuchar. Solo se usa si aprietas el botón.
   - **✍ Mis errores** (en 📖): los errores que pediste explicar quedan guardados (solo esos) y agrupados por tipo (p. ej. «Partícula de objeto 을/를 · 3 veces»), para repasarla, explicarla o marcarla como aprendida.
