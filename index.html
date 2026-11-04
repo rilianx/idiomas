@@ -65,7 +65,11 @@ rt{font-size:11px;color:var(--new);font-family:system-ui,sans-serif;letter-spaci
 .btn:disabled{opacity:.5;cursor:default}
 
 #quick{display:flex;gap:6px;overflow-x:auto;padding:6px 12px 0;scrollbar-width:none}
+#quick{align-items:stretch}
 #quick .chip{white-space:nowrap;font-size:14px;padding:4px 11px}
+#quick .chip.sug{background:var(--new-soft);border-color:var(--new);font-size:15px;display:flex;flex-direction:column;align-items:flex-start;line-height:1.25;padding:4px 12px;border-radius:12px}
+#quick .chip.sug small{font-size:11px;color:var(--muted);font-family:system-ui,sans-serif}
+#quick .sep{flex:none;width:1px;background:var(--line);margin:2px 2px}
 footer{display:flex;align-items:flex-end;gap:8px;padding:8px 12px calc(10px + env(safe-area-inset-bottom));background:var(--bg)}
 #inp{flex:1;resize:none;border:1px solid var(--line);border-radius:12px;padding:9px 12px;font:18px/1.35 inherit;background:var(--card);color:var(--fg);max-height:120px;min-height:44px}
 #inp:focus{outline:2px solid var(--accent);outline-offset:-1px}
@@ -250,7 +254,7 @@ const LEVEL_WORDS = {};
 for (const l of LEVELS) for (const [ko, pos, gloss] of l.vocab) if (!LEVEL_WORDS[ko]) LEVEL_WORDS[ko] = { lemma: ko, pos, gloss, level: l.id };
 
 /* ---------- estado guardado ---------- */
-const DEFAULT_SET = { chatModel: 'claude-haiku-5-5', defModel: 'claude-opus-5-5', autoSpeak: true, inlineGloss: true, autoDefine: false, autoSend: true, rate: 0.9, voice: '', theme: '' };
+const DEFAULT_SET = { chatModel: 'claude-haiku-5-5', defModel: 'claude-opus-5-5', autoSpeak: true, suggest: true, inlineGloss: true, autoDefine: false, autoSend: true, rate: 0.9, voice: '', theme: '' };
 const S = Object.assign({}, DEFAULT_SET, load('hab-set', {}));
 const KEYS = Object.assign({ anthropic: '', openai: '', workspace: '' }, load('hab-keys', {}));
 let DICT = load('hab-dict', {});
@@ -438,7 +442,7 @@ const POS = ['sustantivo','verbo','adjetivo','adverbio','pronombre','número','p
 const obj = (props) => ({ type: 'object', additionalProperties: false, required: Object.keys(props), properties: props });
 const STR = { type: 'string' };
 const TOKENS = { type: 'array', items: obj({ t: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, form: STR }) };
-const CHAT_SCHEMA = obj({ reply: obj({ ko: STR, es: STR, tokens: TOKENS }), student: obj({ tokens: TOKENS, correction: STR, note: STR, category: STR }) });
+const CHAT_SCHEMA = obj({ reply: obj({ ko: STR, es: STR, tokens: TOKENS, suggestions: { type: 'array', items: obj({ ko: STR, es: STR }) } }), student: obj({ tokens: TOKENS, correction: STR, note: STR, category: STR }) });
 const ENTRY = obj({ query: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, meaning: STR, explanation: STR, hanja: STR, irregular: STR,
   conjugations: { type: 'array', items: obj({ form: STR, label: STR }) }, examples: { type: 'array', items: obj({ ko: STR, es: STR }) }, in_context: STR });
 const DEF_SCHEMA = obj({ entries: { type: 'array', items: ENTRY } });
@@ -472,6 +476,7 @@ function chatSystem(levelId){
     '- gloss: significado breve en español del lemma (1 a 4 palabras).',
     '- form: si la palabra está conjugada o lleva partícula, explica en español, muy breve, qué forma es: por ejemplo "-았어요: pasado cortés", "에: partícula de lugar (a, en)", "-고 싶어요: querer hacer", "이에요: cópula «es»". Usa "" si es la forma básica.',
     '- reply.es: traducción natural al español de reply.ko.',
+    '- reply.suggestions: 3 respuestas que el estudiante podría darte a reply.ko, en coreano, cortas (una oración), naturales y de su nivel, distintas entre sí (por ejemplo una muy simple, una con algo de detalle y una que diga que no o pregunte de vuelta), cada una con su traducción en es. Si la conversación terminó con una despedida, propone cómo despedirse o seguir.',
     '- student: analiza del mismo modo el ÚLTIMO mensaje del estudiante (student.tokens, solo las partes en coreano). En student.correction escribe la versión corregida y natural en coreano si tenía errores, o "" si estaba bien (o si no hay mensaje del estudiante). En student.note explica en español, en una o dos frases, el error principal, o "". En student.category da el tipo de error en 2 a 5 palabras en español, siempre con el mismo nombre para el mismo tipo (p. ej. "Partícula 은/는 vs 이/가", "Partícula de objeto 을/를", "Conjugación del pasado", "Orden de las palabras", "Vocabulario", "Ortografía", "Cortesía (-요)"), o "" si no hubo error.',
     '- Si en el pedido vienen los ERRORES FRECUENTES del estudiante, de vez en cuando haz preguntas que lo lleven a usar esas formas (sin decirle que es por sus errores), para que las practique.',
     ...(free ? [] : ['', 'VOCABULARIO (de este nivel y de los anteriores):', vocab, '', 'GRAMÁTICA (de este nivel y de los anteriores):', grammar])
@@ -539,7 +544,7 @@ async function aiTurn(userMsg){
       learnTokens(userMsg.tokens, userMsg.ko, 'tú');
     }
     const r = out.reply || {};
-    const m = { id: uid(), role: 'ai', ko: (r.ko || '').trim(), es: (r.es || '').trim(), tokens: r.tokens || [] };
+    const m = { id: uid(), role: 'ai', ko: (r.ko || '').trim(), es: (r.es || '').trim(), tokens: r.tokens || [], suggestions: (r.suggestions || []).filter(x => x && x.ko).slice(0, 3) };
     m.fresh = learnTokens(m.tokens, m.ko, 'conversación');
     CONV.msgs.push(m); saveConv(); saveDict();
     busy = false; renderTyping(false); renderAll(); scrollEnd();
@@ -878,6 +883,7 @@ function renderAll(){
   if (!CONV || !CONV.msgs.length) { if (!busy) renderWelcome(); }
   else CONV.msgs.forEach(renderMsg);
   if (busy) renderTyping(true);
+  renderQuick();
 }
 function renderTyping(on){
   let t = $('typing');
@@ -1081,6 +1087,7 @@ function openSettings(){
     <label class="check"><input type="checkbox" id="oDef" ${S.autoDefine ? 'checked' : ''}><span>Definir automáticamente las palabras nuevas con el modelo caro (más lento; si está apagado, el modelo caro se usa solo cuando aprietas «Explicar»)</span></label>
     <div class="sec-t">Audio</div>
     <label class="check"><input type="checkbox" id="oSpeak" ${S.autoSpeak ? 'checked' : ''}><span>Leer en voz alta cada respuesta</span></label>
+    <label class="check"><input type="checkbox" id="oSug" ${S.suggest ? 'checked' : ''}><span>Mostrar respuestas sugeridas sobre el cuadro de texto</span></label>
     <label class="check"><input type="checkbox" id="oSend" ${S.autoSend ? 'checked' : ''}><span>Enviar solo al terminar de hablar 🎤</span></label>
     <div class="field"><label>Velocidad de la voz: <b id="rv">${S.rate}</b></label><input type="range" id="oRate" min="0.5" max="1.3" step="0.05" value="${S.rate}" style="width:100%"></div>
     <div class="field"><label>Voz coreana</label><select id="oVoice">${VOICES.length ? VOICES.map(v => `<option ${v.name === S.voice ? 'selected' : ''}>${esc(v.name)}</option>`).join('') : '<option value="">(predeterminada)</option>'}</select>
@@ -1100,6 +1107,7 @@ function openSettings(){
   on('oGloss', 'change', e => { S.inlineGloss = e.target.checked; saveSet(); renderAll(); });
   on('oDef', 'change', e => { S.autoDefine = e.target.checked; saveSet(); });
   on('oSpeak', 'change', e => { S.autoSpeak = e.target.checked; saveSet(); });
+  on('oSug', 'change', e => { S.suggest = e.target.checked; saveSet(); renderQuick(); });
   on('oSend', 'change', e => { S.autoSend = e.target.checked; saveSet(); });
   on('oRate', 'input', e => { S.rate = +e.target.value; $('rv').textContent = S.rate; saveSet(); });
   on('oVoice', 'change', e => { S.voice = e.target.value; saveSet(); });
@@ -1112,10 +1120,25 @@ function openSettings(){
 
 /* ---------- frases rápidas y controles ---------- */
 const QUICK = [['뭐예요?','¿Qué es?'],['다시 말해 주세요','¿Puedes repetir?'],['천천히 말해 주세요','Más despacio, por favor'],['잘 모르겠어요','No entiendo bien'],['네','Sí'],['아니요','No'],['감사합니다','Gracias']];
-for (const [ko, es] of QUICK) {
-  const b = document.createElement('button'); b.className = 'chip ko'; b.textContent = ko; b.title = es;
-  b.onclick = () => { const inp = $('inp'); if (ko === '뭐예요?') { inp.value = (inp.value.trim() ? inp.value.trim() + ' ' : '') + '뭐예요?'; inp.focus(); inp.setSelectionRange(0, 0); } else { inp.value = ko; send(); } autosize(); };
-  $('quick').appendChild(b);
+// arriba del cuadro de texto: las respuestas sugeridas para el último mensaje de 지수, y después las frases fijas
+function renderQuick(){
+  const q = $('quick'); q.innerHTML = '';
+  const last = CONV?.msgs.filter(m => m.role === 'me' || m.role === 'ai').slice(-1)[0];
+  const sugs = S.suggest && !busy && last?.role === 'ai' ? (last.suggestions || []) : [];
+  for (const sg of sugs) {
+    const b = document.createElement('button'); b.className = 'chip sug';
+    b.innerHTML = `<span class="ko">${esc(sg.ko)}</span><small>${esc(sg.es)}</small>`;
+    b.title = 'Toca para oírla y dejarla escrita (puedes cambiarla antes de enviar)';
+    b.onclick = () => { speak(sg.ko); const inp = $('inp'); inp.value = sg.ko; autosize(); inp.focus(); };
+    q.appendChild(b);
+  }
+  if (sugs.length) { const sep = document.createElement('span'); sep.className = 'sep'; q.appendChild(sep); }
+  for (const [ko, es] of QUICK) {
+    const b = document.createElement('button'); b.className = 'chip ko'; b.textContent = ko; b.title = es;
+    b.onclick = () => { const inp = $('inp'); if (ko === '뭐예요?') { inp.value = (inp.value.trim() ? inp.value.trim() + ' ' : '') + '뭐예요?'; inp.focus(); inp.setSelectionRange(0, 0); } else { inp.value = ko; send(); } autosize(); };
+    q.appendChild(b);
+  }
+  q.scrollLeft = 0;
 }
 function autosize(){ const t = $('inp'); t.style.height = 'auto'; t.style.height = Math.min(120, t.scrollHeight) + 'px'; }
 $('inp').addEventListener('input', autosize);
