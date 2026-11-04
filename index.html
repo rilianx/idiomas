@@ -656,12 +656,17 @@ function note(text, retry){
 }
 
 /* ---------- avance de cada palabra ----------
-   Responder a 지수 sin mirar el significado de una palabra la marca como «ya sé» (la reconoce): eso la llena
-   hasta 50 %. Usarla uno mismo (escribiendo o hablando) completa el resto, hasta 100 %. */
+   Responder a 지수 sin mirar el significado de una palabra la marca como «ya sé» y la llena de a poco: +10 % cada vez,
+   hasta 50 %. Usarla uno mismo (escribiendo o hablando) suma +20 % cada vez, hasta 100 %. */
 function wordProgress(lemma){
   const e = DICT[lemma]; if (!e) return 0;
-  const passive = e.status === 'conocida' ? 50 : Math.min(50, (e.heard || 0) * 10);
-  return Math.min(100, passive + (e.used || 0) * 25);
+  return Math.min(100, Math.min(50, (e.heard || 0) * 10) + (e.used || 0) * 20);
+}
+// marcarla a mano como sabida la deja al menos en 50 %
+function toggleKnown(e){
+  if (e.status === 'conocida') e.status = 'nueva';
+  else { e.status = 'conocida'; e.heard = Math.max(e.heard || 0, 5); }
+  saveDict();
 }
 function bump(lemma, field){
   const e = DICT[lemma]; if (!e) return;
@@ -1112,7 +1117,7 @@ function refreshSheet(){
   const sh = $('sheet'); sh.innerHTML = h;
   sh.querySelectorAll('[data-say]').forEach(x => x.onclick = () => speak(x.dataset.say));
   $('sClose').onclick = closeSheet;
-  if ($('sKnown')) $('sKnown').onclick = () => { const d = DICT[lemma]; d.status = d.status === 'conocida' ? 'nueva' : 'conocida'; saveDict(); refreshSheet(); renderAll(); };
+  if ($('sKnown')) $('sKnown').onclick = () => { toggleKnown(DICT[lemma]); refreshSheet(); renderAll(); };
   $('sExplain').onclick = async () => {
     SHEET.busy = true; SHEET.err = ''; refreshSheet();
     const mine = SHEET;
@@ -1137,7 +1142,7 @@ $('pclose').onclick = closePanel;
 function openLevels(){
   openPanel('Niveles', 'levels');
   const cur = CONV?.level || S.level || 1;
-  const pb = $('pbody'); pb.innerHTML = '<p class="small">Cada nivel tiene un conjunto de palabras y de formas gramaticales. 지수 conversa usando las de tu nivel y de los anteriores. Cada palabra se va llenando: cuando 지수 la usa y respondes sin mirar su significado queda como «ya sé» y se llena hasta la mitad; se completa cuando la usas tú. Toca una palabra para oírla y ver su significado.</p>';
+  const pb = $('pbody'); pb.innerHTML = '<p class="small">Cada nivel tiene un conjunto de palabras y de formas gramaticales. 지수 conversa usando las de tu nivel y de los anteriores. Cada palabra se va llenando: cada vez que 지수 la usa y respondes sin mirar su significado sube 10 % (hasta la mitad, y queda como «ya sé»); cada vez que la usas tú, sube 20 %, hasta completarse. Toca una palabra para oírla y ver su significado.</p>';
   for (const lv of LEVELS) {
     const d = document.createElement('div'); d.className = 'lv' + (lv.id === cur ? ' cur' : '');
     const known = lv.vocab.filter(v => wordProgress(v[0]) >= 100).length;
@@ -1221,7 +1226,7 @@ function drawDict(){
         (!e.detailed ? `<div class="small" style="margin-top:6px">Sin definición completa todavía.</div>` : '') +
         `<div class="row"><button class="btn" data-a="def">${e.detailed ? 'Rehacer definición' : 'Completar con IA'}</button><button class="btn sec" data-a="known">${e.status === 'conocida' ? 'Marcar por aprender' : 'Ya la sé ✓'}</button><button class="btn sec" data-a="del">Borrar</button></div>`;
       body.querySelectorAll('[data-say]').forEach(x => x.onclick = () => speak(x.dataset.say));
-      body.querySelector('[data-a=known]').onclick = () => { e.status = e.status === 'conocida' ? 'nueva' : 'conocida'; saveDict(); drawDict(); };
+      body.querySelector('[data-a=known]').onclick = () => { toggleKnown(e); drawDict(); };
       body.querySelector('[data-a=del]').onclick = () => { if (confirm('¿Borrar ' + e.lemma + ' del diccionario?')) { delete DICT[e.lemma]; saveDict(); drawDict(); } };
       body.querySelector('[data-a=def]').onclick = async ev => {
         ev.target.disabled = true; ev.target.textContent = 'Definiendo…';
