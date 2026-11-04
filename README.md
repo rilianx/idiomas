@@ -53,7 +53,7 @@ Las explicaciones ven los últimos 3 mensajes de la conversación y el nivel, y 
 
 1. Abre `index.html` en el navegador (Chrome o Safari para hablar con el micrófono).
 2. En ⚙ Ajustes pega **tu propia clave** de la API de Anthropic (y la de OpenAI si eliges GPT). Se guarda solo en tu navegador y se envía directamente a `api.anthropic.com` o `api.openai.com`.
-3. Elige un nivel y un tema en 🎓, o toca «Empezar».
+3. 지수 empieza la conversación sola (al abrir la app, al cerrar Ajustes después de poner la clave o al borrar la conversación). Para cambiar de nivel o de tema, elige uno en 🎓.
 
 La voz usa lo que trae el navegador: la síntesis de voz con una voz coreana (en el celular suele venir; en el computador puede que haya que instalarla) y el reconocimiento de voz `ko-KR`.
 

@@ -1153,7 +1153,14 @@ $('veil').onclick = closeSheet;
 let PANEL = '';
 function openPanel(title, kind){ PANEL = kind; $('ptitle').textContent = title; $('panel').hidden = false; $('pbody').scrollTop = 0; }
 function closePanel(){ PANEL = ''; $('panel').hidden = true; }
-$('pclose').onclick = closePanel;
+// si no hay conversación y ya está la clave, 지수 la empieza sola
+const hasTalk = () => !!CONV && CONV.msgs.some(m => m.role === 'ai' || m.role === 'me');
+function maybeAutoStart(){
+  if (busy || hasTalk() || !KEYS[provOf(S.chatModel)]) return false;
+  newConversation(CONV?.level || S.level || 1, CONV?.topic);
+  return true;
+}
+$('pclose').onclick = () => { const wasSettings = PANEL === 'settings'; closePanel(); if (wasSettings) maybeAutoStart(); };
 
 function openLevels(){
   openPanel('Niveles', 'levels');
@@ -1330,7 +1337,7 @@ function openSettings(){
   on('oVoice', 'change', e => { S.voice = e.target.value; saveSet(); });
   on('oTest', 'click', () => speak('안녕하세요, 만나서 반가워요'));
   on('oTheme', 'change', e => { S.theme = e.target.value; saveSet(); if (S.theme) document.documentElement.dataset.theme = S.theme; else delete document.documentElement.dataset.theme; });
-  on('xConv', 'click', () => { if (confirm('¿Borrar la conversación?')) { CONV = null; saveConv(); renderAll(); closePanel(); } });
+  on('xConv', 'click', () => { if (confirm('¿Borrar la conversación?')) { CONV = null; saveConv(); closePanel(); renderAll(); maybeAutoStart(); } });
   on('xProf', 'click', () => { if (confirm('¿Borrar todo tu perfil?')) { PROFILE.facts = []; saveProfile(); openSettings(); } });
   on('xErrs', 'click', () => { if (confirm('¿Borrar todos tus errores guardados?')) { ERRS = []; saveErrs(); renderAll(); } });
   on('xDict', 'click', () => { if (confirm('¿Borrar todo el diccionario? No se puede deshacer.')) { DICT = {}; saveDict(); renderAll(); } });
@@ -1343,6 +1350,8 @@ let SUG_SENT = '', SUG_PLACED = '';   // la sugerencia tocada, y la puesta en el
 function renderQuick(){
   const q = $('quick'); q.innerHTML = '<div id="sugs"></div><div id="fixed"></div>';
   const sq = $('sugs'), fq = $('fixed');
+  // las frases fijas y las sugerencias tienen sentido solo cuando 지수 ya dijo algo
+  if (!CONV?.msgs.some(m => m.role === 'ai')) { q.innerHTML = ''; return; }
   const last = CONV?.msgs.filter(m => m.role === 'me' || m.role === 'ai').slice(-1)[0];
   const sugs = S.suggest && !busy && last?.role === 'ai' ? (last.suggestions || []) : [];
   for (const sg of sugs) {
@@ -1373,6 +1382,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') { if (SHEET)
 if (!SR) $('mic').title = 'Este navegador no reconoce voz (usa Chrome o Safari)';
 
 renderAll(); scrollEnd();
+maybeAutoStart();
 </script>
 </body>
 </html>
