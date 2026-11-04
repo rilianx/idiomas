@@ -481,7 +481,7 @@ function chatSystem(levelId){
     '- gloss: significado breve en español del lemma (1 a 4 palabras).',
     '- form: si la palabra está conjugada o lleva partícula, explica en español, muy breve, qué forma es: por ejemplo "-았어요: pasado cortés", "에: partícula de lugar (a, en)", "-고 싶어요: querer hacer", "이에요: cópula «es»". Usa "" si es la forma básica.',
     '- reply.es: traducción natural al español de reply.ko.',
-    '- reply.suggestions: 3 respuestas que el estudiante podría darte a reply.ko, en coreano, cortas (una oración), naturales y de su nivel, distintas entre sí (por ejemplo una muy simple, una con algo de detalle y una que diga que no o pregunte de vuelta), cada una con su traducción en es. Si la conversación terminó con una despedida, propone cómo despedirse o seguir.',
+    '- reply.suggestions: 3 o 4 cosas que el estudiante podría decirte ahora, en coreano, cortas (una o dos oraciones) y de su nivel, cada una con su traducción en es. No sigas un patrón fijo: que lleven la conversación por caminos distintos y naturales, por ejemplo responder a lo que preguntaste, contar algo propio, preguntarte algo a ti, mostrar interés o gusto por algo, reaccionar (sorpresa, acuerdo, duda) o proponer otro tema relacionado con sus intereses o con lo que se ha hablado. Varíalas de un mensaje a otro. Si la conversación terminó con una despedida, propone cómo despedirse o empezar otro tema.',
     '- student: analiza del mismo modo el ÚLTIMO mensaje del estudiante (student.tokens, solo las partes en coreano). En student.correction escribe la versión corregida y natural en coreano si tenía errores, o "" si estaba bien (o si no hay mensaje del estudiante). En student.note explica en español, en una o dos frases, el error principal, o "". En student.category da el tipo de error en 2 a 5 palabras en español, siempre con el mismo nombre para el mismo tipo (p. ej. "Partícula 은/는 vs 이/가", "Partícula de objeto 을/를", "Conjugación del pasado", "Orden de las palabras", "Vocabulario", "Ortografía", "Cortesía (-요)"), o "" si no hubo error.',
     '- Si en el pedido vienen los ERRORES FRECUENTES del estudiante, de vez en cuando haz preguntas que lo lleven a usar esas formas (sin decirle que es por sus errores), para que las practique.',
     ...(free ? [] : ['', 'VOCABULARIO (de este nivel y de los anteriores):', vocab, '', 'GRAMÁTICA (de este nivel y de los anteriores):', grammar])
@@ -549,7 +549,7 @@ async function aiTurn(userMsg){
       learnTokens(userMsg.tokens, userMsg.ko, 'tú');
     }
     const r = out.reply || {};
-    const m = { id: uid(), role: 'ai', ko: (r.ko || '').trim(), es: (r.es || '').trim(), tokens: r.tokens || [], suggestions: (r.suggestions || []).filter(x => x && x.ko).slice(0, 3) };
+    const m = { id: uid(), role: 'ai', ko: (r.ko || '').trim(), es: (r.es || '').trim(), tokens: r.tokens || [], suggestions: (r.suggestions || []).filter(x => x && x.ko).slice(0, 4) };
     m.fresh = learnTokens(m.tokens, m.ko, 'conversación');
     CONV.msgs.push(m); saveConv(); saveDict();
     busy = false; renderTyping(false); renderAll(); scrollEnd();
