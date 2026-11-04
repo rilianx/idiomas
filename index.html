@@ -613,10 +613,10 @@ async function aiTurn(userMsg){
       userMsg.category = userMsg.correction ? (out.student.category || '').trim() : '';
       if (S.learnProfile) userMsg.learned = learnFacts(out.student.learned);
       learnTokens(userMsg.tokens, userMsg.ko, 'tú');
-      // usarla uno mismo (escrita o hablada) llena la palabra; elegir una respuesta sugerida no cuenta
-      if (!userMsg.fromSug) for (const t of userMsg.tokens) {
+      // usarla uno mismo (escrita o hablada) en una frase correcta llena la palabra;
+      // si la frase tenía errores, o era una respuesta sugerida, no cuenta
+      if (!userMsg.fromSug && !userMsg.correction) for (const t of userMsg.tokens) {
         if (!t.lemma || t.pos === 'puntuación' || t.pos === 'partícula' || !DICT[t.lemma]) continue;
-        if (userMsg.correction && !userMsg.correction.includes(t.t)) continue;
         bump(t.lemma, 'used');
       }
     }
