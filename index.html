@@ -656,25 +656,32 @@ function note(text, retry){
 }
 
 /* ---------- avance de cada palabra ----------
-   Oírla de 지수 y responder sin mirar su traducción la llena hasta 50 %; usarla uno mismo, hasta 100 %. */
+   Responder a 지수 sin mirar el significado de una palabra la marca como «ya sé» (la reconoce): eso la llena
+   hasta 50 %. Usarla uno mismo (escribiendo o hablando) completa el resto, hasta 100 %. */
 function wordProgress(lemma){
   const e = DICT[lemma]; if (!e) return 0;
-  if (e.status === 'conocida') return 100;
-  return Math.min(100, Math.min(50, (e.heard || 0) * 10) + (e.used || 0) * 25);
+  const passive = e.status === 'conocida' ? 50 : Math.min(50, (e.heard || 0) * 10);
+  return Math.min(100, passive + (e.used || 0) * 25);
 }
 function bump(lemma, field){
   const e = DICT[lemma]; if (!e) return;
   e[field] = (e[field] || 0) + 1;
-  if (wordProgress(lemma) >= 100 && e.status !== 'conocida') { e.status = 'conocida'; e.mastered = Date.now(); }
+  if (wordProgress(lemma) >= 100 && !e.mastered) e.mastered = Date.now();
 }
 const msgLemmas = m => [...new Set((m.tokens || []).filter(t => t.lemma && t.pos !== 'puntuación' && t.pos !== 'partícula').map(t => t.lemma))];
-// el estudiante responde al último mensaje de 지수: cuentan las palabras que no miró
+// el estudiante responde al último mensaje de 지수: las palabras que no miró las sabe
 function creditHeard(){
   const last = CONV?.msgs.filter(m => m.role === 'ai').slice(-1)[0];
   if (!last || last.credited) return;
   last.credited = true;
-  if (last.sawEs) return;                         // vio la traducción de todo el mensaje
-  for (const l of msgLemmas(last)) if (!(last.peek || []).includes(l)) bump(l, 'heard');
+  if (last.sawEs) return;                         // vio la traducción de todo el mensaje (o pidió explicarlo)
+  const learned = [];
+  for (const l of msgLemmas(last)) {
+    if ((last.peek || []).includes(l) || !DICT[l]) continue;
+    bump(l, 'heard');
+    if (DICT[l].status !== 'conocida') { DICT[l].status = 'conocida'; DICT[l].knownAt = Date.now(); learned.push(l); }
+  }
+  if (learned.length) { last.learnedWords = learned; saveConv(); }
   saveDict();
 }
 function markPeek(msg, lemma){ if (msg && lemma) { msg.peek = msg.peek || []; if (!msg.peek.includes(lemma)) { msg.peek.push(lemma); saveConv(); } } }
@@ -741,6 +748,7 @@ const ctxBlock = (m, label) => { const c = contextBefore(m); return (c ? 'ÚLTIM
 
 /* ---------- explicar una frase (modelo caro, solo cuando se pide) ---------- */
 async function explainSentence(m){
+  m.sawEs = true;
   m.explBusy = true; m.explErr = ''; renderAll();
   try {
     const x = await ask(S.defModel, SENT_SYSTEM, ctxBlock(m, 'FRASE A EXPLICAR (la dijo ' + (m.role === 'me' ? 'el estudiante' : '지수') + '): «' + m.ko + '»'), SENT_SCHEMA, { effort: 'low', maxTokens: 16000, ms: 150000, kind: 'explain' });
@@ -773,7 +781,7 @@ function explBlock(m){
   d.innerHTML = `<div><b style="color:var(--fg)">${esc(x.translation)}</b></div>${x.literal ? `<div class="small">Literal: ${esc(x.literal)}</div>` : ''}
     ${x.context ? `<div class="form">💬 ${esc(x.context)}</div>` : ''}
     ${x.explanation ? `<div class="sec-t">Explicación</div>${paras(x.explanation)}` : ''}
-    ${(x.answers || []).length ? `<div class="sec-t">Puedes responder</div>${x.answers.map(a => `<div class="ex"><span class="ko" data-say="${esc(a.ko)}" data-use="${esc(a.ko)}" style="cursor:pointer;color:var(--fg)">🔊 ${esc(a.ko)}</span> <span class="small">${esc(a.es)}</span></div>`).join('')}` : ''}
+    ${(x.answers || []).length ? `<div class="sec-t">Puedes responder</div>${x.answers.map(a => `<div class="ex"><span class="ko" data-say="${esc(a.ko)}" data-use="${esc(a.ko)}" style="cursor:pointer;color:var(--fg)">🔊 ${esc(a.ko)}</span> <button class="chip" data-tr style="padding:0 8px">›</button> <span class="small" hidden>${esc(a.es)}</span></div>`).join('')}` : ''}
     <details style="margin-top:8px"><summary class="sec-t" style="cursor:pointer;display:list-item">Palabra por palabra</summary><div class="conj">${(x.words || []).map(w => `<span class="ko" data-say="${esc(w.t)}" style="cursor:pointer;color:var(--fg)">${esc(w.t)}</span><span><b style="color:var(--fg)">${esc(w.gloss)}</b>${w.lemma && w.lemma !== w.t ? ` <span class="ko">(${esc(w.lemma)})</span>` : ''} · ${esc(w.explanation)}</span>`).join('')}</div></details>
     ${(x.grammar || []).length ? `<div class="sec-t">Gramática</div>${x.grammar.map(g => `<div class="gram"><b class="ko" style="color:var(--fg)">${esc(g.point)}</b><div>${esc(g.explanation)}</div></div>`).join('')}` : ''}
     ${x.tip ? `<div class="form">💡 ${esc(x.tip)}</div>` : ''}
@@ -781,6 +789,7 @@ function explBlock(m){
   d.querySelectorAll('[data-say]').forEach(e => e.onclick = () => speak(e.dataset.say));
   // una respuesta sugerida: se oye y queda escrita, lista para enviar o cambiar
   d.querySelectorAll('[data-use]').forEach(e => e.onclick = () => { speak(e.dataset.use); $('inp').value = e.dataset.use; autosize(); $('inp').focus(); });
+  d.querySelectorAll('[data-tr]').forEach(b => b.onclick = () => { const sm = b.nextElementSibling; sm.hidden = !sm.hidden; b.textContent = sm.hidden ? '›' : '‹'; });
   return d;
 }
 // texto en párrafos (separados por una línea en blanco)
@@ -999,6 +1008,7 @@ function renderMsg(m){
     const ex = b(m.expl ? 'Explicación' : '🎓 Explicar frase', () => { if (m.expl) { m.showExpl = !m.showExpl; saveConv(); renderAll(); } else explainSentence(m); }, 'El profesor (modelo caro) explica la frase completa');
     if (m.explBusy) { ex.disabled = true; ex.textContent = 'Explicando…'; }
     d.appendChild(tools); d.appendChild(es);
+    if (m.learnedWords?.length) { const l = document.createElement('div'); l.className = 'small'; l.style.marginTop = '6px'; l.innerHTML = '✓ Respondiste sin mirarlas, quedan como «ya sé»: ' + m.learnedWords.map(w => `<span class="ko">${esc(w)}</span>`).join(' · '); d.appendChild(l); }
     if (m.explErr) { const f = document.createElement('div'); f.className = 'fix'; f.textContent = m.explErr; d.appendChild(f); }
     if (m.expl && m.showExpl !== false) d.appendChild(explBlock(m));
   } else {
@@ -1089,7 +1099,7 @@ function refreshSheet(){
   if (lemma && lemma !== tok.t) h += `<div style="margin-top:8px">Forma de diccionario: <b class="ko" style="font-size:20px">${esc(lemma)}</b> <button class="spk" data-say="${esc(lemma)}">🔊</button> <span class="rom">${esc(romanize(lemma))}</span>${!tok.lemma ? ' <span class="small">(reconocida automáticamente)</span>' : ''}</div>`;
   if (e?.pos || tok.pos || gloss) h += `<div class="gloss">${e?.pos || tok.pos ? `<span class="pos">${esc(e?.pos || tok.pos)}</span>` : ''}${esc(gloss)}</div>`;
   if (tok.form) h += `<div class="form">${esc(tok.form)}</div>`;
-  if (DICT[lemma]) { const d = DICT[lemma], pr = wordProgress(lemma); h += `<div class="small" style="margin-top:6px">Dominio: <b>${pr} %</b> · la oíste sin traducir ${d.heard || 0} ${d.heard === 1 ? 'vez' : 'veces'}, la usaste ${d.used || 0}</div><div class="bar"><i style="width:${pr}%"></i></div>`; }
+  if (DICT[lemma]) { const d = DICT[lemma], pr = wordProgress(lemma); h += `<div class="small" style="margin-top:6px">Dominio: <b>${pr} %</b>${d.status === 'conocida' ? ' · ya la sabes' : ''} · la oíste sin mirarla ${d.heard || 0} ${d.heard === 1 ? 'vez' : 'veces'}, la usaste ${d.used || 0}</div><div class="bar"><i style="width:${pr}%"></i></div>`; }
   if (!lemma && !gloss) h += `<div class="small">Todavía no está analizada. Toca «Explicar» para que el modelo caro la analice.</div>`;
   if (SHEET.ctx) h += `<div class="sec-t">En esta oración</div><div class="form">${esc(SHEET.ctx)}</div>`;
   if (e && !e.fromLevel) h += entryHTML(e);
@@ -1127,7 +1137,7 @@ $('pclose').onclick = closePanel;
 function openLevels(){
   openPanel('Niveles', 'levels');
   const cur = CONV?.level || S.level || 1;
-  const pb = $('pbody'); pb.innerHTML = '<p class="small">Cada nivel tiene un conjunto de palabras y de formas gramaticales. 지수 conversa usando las de tu nivel y de los anteriores. Cada palabra se va llenando: hasta la mitad cuando 지수 la usa y respondes sin mirar su traducción, y hasta completarse cuando la usas tú. Toca una palabra para oírla y ver su significado.</p>';
+  const pb = $('pbody'); pb.innerHTML = '<p class="small">Cada nivel tiene un conjunto de palabras y de formas gramaticales. 지수 conversa usando las de tu nivel y de los anteriores. Cada palabra se va llenando: cuando 지수 la usa y respondes sin mirar su significado queda como «ya sé» y se llena hasta la mitad; se completa cuando la usas tú. Toca una palabra para oírla y ver su significado.</p>';
   for (const lv of LEVELS) {
     const d = document.createElement('div'); d.className = 'lv' + (lv.id === cur ? ' cur' : '');
     const known = lv.vocab.filter(v => wordProgress(v[0]) >= 100).length;
@@ -1202,7 +1212,7 @@ function drawDict(){
   for (const e of list.slice(0, 400)) {
     const d = document.createElement('div'); d.className = 'ent';
     const nForms = Object.keys(e.forms || {}).length;
-    d.innerHTML = `<div class="top"><span class="ko">${esc(e.lemma)}</span><button class="spk" title="Escuchar">🔊</button><span class="g">${e.pos ? `<span class="pos">${esc(e.pos)}</span>` : ''}${esc(e.gloss || '')}${nForms ? ` · ${nForms} forma${nForms > 1 ? 's' : ''}` : ''}</span><span class="st ${e.status === 'conocida' ? 'conocida' : 'nueva'}">${e.status === 'conocida' ? 'ya sé' : wordProgress(e.lemma) + ' %'}</span></div><div class="bar"><i style="width:${wordProgress(e.lemma)}%"></i></div>`;
+    d.innerHTML = `<div class="top"><span class="ko">${esc(e.lemma)}</span><button class="spk" title="Escuchar">🔊</button><span class="g">${e.pos ? `<span class="pos">${esc(e.pos)}</span>` : ''}${esc(e.gloss || '')}${nForms ? ` · ${nForms} forma${nForms > 1 ? 's' : ''}` : ''}</span><span class="st ${e.status === 'conocida' ? 'conocida' : 'nueva'}">${e.status === 'conocida' ? 'ya sé · ' : ''}${wordProgress(e.lemma)} %</span></div><div class="bar"><i style="width:${wordProgress(e.lemma)}%"></i></div>`;
     d.querySelector('.spk').onclick = ev => { ev.stopPropagation(); speak(e.lemma); };
     d.querySelector('.top').onclick = () => { DOPEN = DOPEN === e.lemma ? '' : e.lemma; drawDict(); };
     if (DOPEN === e.lemma) {
