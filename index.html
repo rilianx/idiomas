@@ -64,12 +64,16 @@ rt{font-size:11px;color:var(--new);font-family:system-ui,sans-serif;letter-spaci
 .btn.sec{background:var(--bg);color:var(--fg);border:1px solid var(--line)}
 .btn:disabled{opacity:.5;cursor:default}
 
-#quick{display:flex;gap:6px;overflow-x:auto;padding:6px 12px 0;scrollbar-width:none}
-#quick{align-items:stretch}
+#quick{padding:6px 12px 0}
+#sugs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
+#sugs:empty{display:none}
+#fixed{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none}
 #quick .chip{white-space:nowrap;font-size:14px;padding:4px 11px}
-#quick .chip.sug{background:var(--new-soft);border-color:var(--new);font-size:15px;display:flex;flex-direction:column;align-items:flex-start;line-height:1.25;padding:4px 12px;border-radius:12px}
-#quick .chip.sug small{font-size:11px;color:var(--muted);font-family:system-ui,sans-serif}
-#quick .sep{flex:none;width:1px;background:var(--line);margin:2px 2px}
+#quick .chip.sug{background:var(--new-soft);border-color:var(--new);display:flex;align-items:stretch;padding:0;border-radius:12px;overflow:hidden;max-width:100%}
+#quick .sug .pick{background:none;border:none;font-size:15px;display:flex;flex-direction:column;align-items:flex-start;line-height:1.25;padding:4px 6px 4px 12px;text-align:left;min-width:0;white-space:normal}
+#quick .sug .pick small{font-size:11px;color:var(--muted);font-family:system-ui,sans-serif}
+#quick .sug .ed{background:none;border:none;border-left:1px solid var(--new);padding:0 9px;font-size:14px;opacity:.75}
+#quick .sug .ed:hover,#quick .sug .pick:hover{background:rgba(127,127,127,.12)}
 footer{display:flex;align-items:flex-end;gap:8px;padding:8px 12px calc(10px + env(safe-area-inset-bottom));background:var(--bg)}
 #inp{flex:1;resize:none;border:1px solid var(--line);border-radius:12px;padding:9px 12px;font:18px/1.35 inherit;background:var(--card);color:var(--fg);max-height:120px;min-height:44px}
 #inp:focus{outline:2px solid var(--accent);outline-offset:-1px}
@@ -349,9 +353,10 @@ function guessLemma(surface){
 let VOICES = [];
 function loadVoices(){ VOICES = (window.speechSynthesis?.getVoices() || []).filter(v => /^ko/i.test(v.lang)); }
 if ('speechSynthesis' in window) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
-function speak(text, rate = S.rate){
+// queue: no cortar lo que se está diciendo (la respuesta de 지수 espera a que termine la tuya)
+function speak(text, rate = S.rate, queue = false){
   if (!('speechSynthesis' in window) || !text) return;
-  speechSynthesis.cancel();
+  if (!queue) speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text.replace(/[^가-힣ㄱ-ㆎ0-9 .,?!~]/g, ' '));
   u.lang = 'ko-KR'; u.rate = rate;
   const v = VOICES.find(v => v.name === S.voice) || VOICES[0]; if (v) u.voice = v;
@@ -548,7 +553,7 @@ async function aiTurn(userMsg){
     m.fresh = learnTokens(m.tokens, m.ko, 'conversación');
     CONV.msgs.push(m); saveConv(); saveDict();
     busy = false; renderTyping(false); renderAll(); scrollEnd();
-    if (S.autoSpeak && m.ko) speak(m.ko);
+    if (S.autoSpeak && m.ko) speak(m.ko, S.rate, true);
     if (S.autoDefine && m.fresh.length) defineInBackground(m);
   } catch (e) {
     busy = false; renderTyping(false);
@@ -1122,23 +1127,23 @@ function openSettings(){
 const QUICK = [['뭐예요?','¿Qué es?'],['다시 말해 주세요','¿Puedes repetir?'],['천천히 말해 주세요','Más despacio, por favor'],['잘 모르겠어요','No entiendo bien'],['네','Sí'],['아니요','No'],['감사합니다','Gracias']];
 // arriba del cuadro de texto: las respuestas sugeridas para el último mensaje de 지수, y después las frases fijas
 function renderQuick(){
-  const q = $('quick'); q.innerHTML = '';
+  const q = $('quick'); q.innerHTML = '<div id="sugs"></div><div id="fixed"></div>';
+  const sq = $('sugs'), fq = $('fixed');
   const last = CONV?.msgs.filter(m => m.role === 'me' || m.role === 'ai').slice(-1)[0];
   const sugs = S.suggest && !busy && last?.role === 'ai' ? (last.suggestions || []) : [];
   for (const sg of sugs) {
-    const b = document.createElement('button'); b.className = 'chip sug';
-    b.innerHTML = `<span class="ko">${esc(sg.ko)}</span><small>${esc(sg.es)}</small>`;
-    b.title = 'Toca para oírla y dejarla escrita (puedes cambiarla antes de enviar)';
-    b.onclick = () => { speak(sg.ko); const inp = $('inp'); inp.value = sg.ko; autosize(); inp.focus(); };
-    q.appendChild(b);
+    // tocarla la dice y la envía (para conversar sin hablar ni escribir); ✏ la deja escrita para cambiarla
+    const b = document.createElement('div'); b.className = 'chip sug';
+    b.innerHTML = `<button class="pick" title="Responder esto"><span class="ko">${esc(sg.ko)}</span><small>${esc(sg.es)}</small></button><button class="ed" title="Escribirla para cambiarla antes de enviar">✏</button>`;
+    b.querySelector('.pick').onclick = () => { if (busy) return; const inp = $('inp'); inp.value = sg.ko; autosize(); speak(sg.ko); send(); };
+    b.querySelector('.ed').onclick = () => { speak(sg.ko); const inp = $('inp'); inp.value = sg.ko; autosize(); inp.focus(); };
+    sq.appendChild(b);
   }
-  if (sugs.length) { const sep = document.createElement('span'); sep.className = 'sep'; q.appendChild(sep); }
   for (const [ko, es] of QUICK) {
     const b = document.createElement('button'); b.className = 'chip ko'; b.textContent = ko; b.title = es;
     b.onclick = () => { const inp = $('inp'); if (ko === '뭐예요?') { inp.value = (inp.value.trim() ? inp.value.trim() + ' ' : '') + '뭐예요?'; inp.focus(); inp.setSelectionRange(0, 0); } else { inp.value = ko; send(); } autosize(); };
-    q.appendChild(b);
+    fq.appendChild(b);
   }
-  q.scrollLeft = 0;
 }
 function autosize(){ const t = $('inp'); t.style.height = 'auto'; t.style.height = Math.min(120, t.scrollHeight) + 'px'; }
 $('inp').addEventListener('input', autosize);

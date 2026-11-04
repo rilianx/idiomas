@@ -12,7 +12,7 @@ Una app para aprender idiomas conversando con una IA, empezando por el coreano. 
   - su significado, su romanización y la categoría;
   - la forma de diccionario y qué forma es (por ejemplo, «먹었어요 → 먹다 · -었어요: pasado cortés»);
   - con «Explicar», una explicación detallada: en esa oración, conjugaciones, irregularidades y ejemplos.
-- **Respuestas sugeridas.** Con cada respuesta de 지수, el modelo barato propone 3 respuestas posibles (una simple, una con más detalle, una que dice que no o pregunta de vuelta), con su traducción, sobre el cuadro de texto. Al tocar una se oye y queda escrita para enviarla o cambiarla. Se pueden ocultar en ⚙ Ajustes.
+- **Respuestas sugeridas (conversar sin hablar ni escribir).** Con cada respuesta de 지수, el modelo barato propone 3 respuestas posibles (una simple, una con más detalle, una que dice que no o pregunta de vuelta), con su traducción, sobre el cuadro de texto. Al tocar una se dice en voz alta y se envía, así que se puede llevar el diálogo eligiendo, como en un juego; con ✏ queda escrita para cambiarla antes de enviar. Se pueden ocultar en ⚙ Ajustes.
 - **Palabras nuevas.** Aparecen subrayadas, con su significado encima, hasta que las hayas visto unas veces o marques «Ya la sé».
 - **«¿Qué es…?»** Si escribes o dices «사과가 뭐예요?», «먹다는 무슨 뜻이에요?», «¿qué significa 사랑?» o «¿cómo se dice manzana?», la traducción aparece sola en una tarjeta.
 - **Diccionario propio** 📖. Cada palabra que aparece, que tocas o que preguntas se guarda. Ahí se puede:
