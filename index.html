@@ -43,7 +43,15 @@ header h1 small{color:var(--muted);font-weight:normal;font-size:13px;margin-left
 .msg .text.hide{filter:blur(7px);cursor:pointer;user-select:none}
 .w{cursor:pointer;border-radius:5px;padding:0 1px;transition:background .15s}
 .w:hover{background:var(--accent-soft)}
+.w{touch-action:manipulation}
 .w.new{border-bottom:2px solid var(--new)}
+#tip{position:fixed;z-index:30;background:var(--fg);color:var(--bg);padding:4px 10px;border-radius:8px;font-size:14px;line-height:1.3;pointer-events:none;max-width:260px;transform:translate(-50%,-100%);box-shadow:var(--shadow);text-align:center}
+#tip.below{transform:translate(-50%,0)}
+#tip .ko{font-weight:600}
+#tip small{display:block;opacity:.7;font-size:11px}
+.bar{height:4px;background:var(--line);border-radius:2px;margin-top:6px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--new)}
+.vocab .chip{position:relative}
 ruby{ruby-position:over}
 rt{font-size:11px;color:var(--new);font-family:system-ui,sans-serif;letter-spacing:0;line-height:1}
 .tools{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
@@ -72,6 +80,8 @@ rt{font-size:11px;color:var(--new);font-family:system-ui,sans-serif;letter-spaci
 #quick .chip.sug{background:var(--new-soft);border-color:var(--new);display:flex;align-items:stretch;padding:0;border-radius:12px;overflow:hidden;max-width:100%}
 #quick .sug .pick{background:none;border:none;font-size:15px;display:flex;flex-direction:column;align-items:flex-start;line-height:1.25;padding:4px 6px 4px 12px;text-align:left;min-width:0;white-space:normal}
 #quick .sug .pick small{font-size:11px;color:var(--muted);font-family:system-ui,sans-serif}
+#quick .sug .tr{background:none;border:none;border-left:1px solid var(--new);padding:0 8px;font-size:15px;color:var(--muted)}
+#quick .sug .pick small[hidden]{display:none}
 #quick .sug .ed{background:none;border:none;border-left:1px solid var(--new);padding:0 9px;font-size:14px;opacity:.75}
 #quick .sug .ed:hover,#quick .sug .pick:hover{background:rgba(127,127,127,.12)}
 footer{display:flex;align-items:flex-end;gap:8px;padding:8px 12px calc(10px + env(safe-area-inset-bottom));background:var(--bg)}
@@ -258,7 +268,7 @@ const LEVEL_WORDS = {};
 for (const l of LEVELS) for (const [ko, pos, gloss] of l.vocab) if (!LEVEL_WORDS[ko]) LEVEL_WORDS[ko] = { lemma: ko, pos, gloss, level: l.id };
 
 /* ---------- estado guardado ---------- */
-const DEFAULT_SET = { chatModel: 'claude-haiku-5-5', defModel: 'claude-opus-5-5', autoSpeak: true, suggest: true, learnProfile: true, memory: 16, inlineGloss: true, autoDefine: false, autoSend: true, rate: 0.9, voice: '', theme: '' };
+const DEFAULT_SET = { chatModel: 'claude-haiku-5-5', defModel: 'claude-opus-5-5', autoSpeak: true, suggest: true, learnProfile: true, memory: 16, inlineGloss: false, autoDefine: false, autoSend: true, rate: 0.9, voice: '', theme: '' };
 const S = Object.assign({}, DEFAULT_SET, load('hab-set', {}));
 const KEYS = Object.assign({ anthropic: '', openai: '', workspace: '' }, load('hab-keys', {}));
 let DICT = load('hab-dict', {});
@@ -276,6 +286,8 @@ const saveSet = () => save('hab-set', S), saveKeys = () => save('hab-keys', KEYS
 const saveConv = () => { if (CONV) CONV.msgs = CONV.msgs.slice(-200); save('hab-conv', CONV); };
 // (desde la v2 el modelo caro se usa solo cuando el estudiante lo pide)
 if (!S.v2) { S.autoDefine = false; S.v2 = true; saveSet(); }
+// (desde la v3 el coreano aparece sin traducción: el significado se ve al pasar o tocar la palabra)
+if (!S.v3) { S.inlineGloss = false; S.v3 = true; saveSet(); }
 if (S.theme) document.documentElement.dataset.theme = S.theme;
 
 /* ---------- hangul: descomponer, componer y romanizar ---------- */
@@ -601,6 +613,12 @@ async function aiTurn(userMsg){
       userMsg.category = userMsg.correction ? (out.student.category || '').trim() : '';
       if (S.learnProfile) userMsg.learned = learnFacts(out.student.learned);
       learnTokens(userMsg.tokens, userMsg.ko, 'tú');
+      // usarla uno mismo llena la palabra; elegir una sugerencia cuenta solo como leerla
+      for (const t of userMsg.tokens) {
+        if (!t.lemma || t.pos === 'puntuación' || t.pos === 'partícula' || !DICT[t.lemma]) continue;
+        if (userMsg.correction && !userMsg.correction.includes(t.t)) continue;
+        bump(t.lemma, userMsg.fromSug ? 'heard' : 'used');
+      }
     }
     const r = out.reply || {};
     // las frases sugeridas para el estudiante: se descartan las que solo repiten lo que dijo 지수
@@ -620,12 +638,13 @@ async function aiTurn(userMsg){
   } finally { busy = false; }
 }
 const norm = s => (s || '').replace(/[\s.,!?~]/g, '');
-function send(){
+function send(fromSug){
   const text = $('inp').value.trim();
   if (!text || busy) return;
   if (!CONV) { CONV = { level: S.level || 1, topic: LV(S.level || 1).topics[0], msgs: [] }; }
   $('inp').value = ''; autosize();
-  const m = { id: uid(), role: 'me', ko: text, tokens: [] };
+  creditHeard();
+  const m = { id: uid(), role: 'me', ko: text, tokens: [], fromSug: fromSug === true && text === SUG_SENT };
   CONV.msgs.push(m); saveConv(); renderAll(); scrollEnd();
   const q = detectQuestion(text);
   if (q) lookup(q, text);
@@ -635,6 +654,30 @@ function note(text, retry){
   if (!CONV) CONV = { level: S.level || 1, topic: LV(S.level || 1).topics[0], msgs: [] };
   CONV.msgs.push({ id: uid(), role: 'note', text, retry: !!retry }); saveConv(); renderAll(); scrollEnd();
 }
+
+/* ---------- avance de cada palabra ----------
+   Oírla de 지수 y responder sin mirar su traducción la llena hasta 50 %; usarla uno mismo, hasta 100 %. */
+function wordProgress(lemma){
+  const e = DICT[lemma]; if (!e) return 0;
+  if (e.status === 'conocida') return 100;
+  return Math.min(100, Math.min(50, (e.heard || 0) * 10) + (e.used || 0) * 25);
+}
+function bump(lemma, field){
+  const e = DICT[lemma]; if (!e) return;
+  e[field] = (e[field] || 0) + 1;
+  if (wordProgress(lemma) >= 100 && e.status !== 'conocida') { e.status = 'conocida'; e.mastered = Date.now(); }
+}
+const msgLemmas = m => [...new Set((m.tokens || []).filter(t => t.lemma && t.pos !== 'puntuación' && t.pos !== 'partícula').map(t => t.lemma))];
+// el estudiante responde al último mensaje de 지수: cuentan las palabras que no miró
+function creditHeard(){
+  const last = CONV?.msgs.filter(m => m.role === 'ai').slice(-1)[0];
+  if (!last || last.credited) return;
+  last.credited = true;
+  if (last.sawEs) return;                         // vio la traducción de todo el mensaje
+  for (const l of msgLemmas(last)) if (!(last.peek || []).includes(l)) bump(l, 'heard');
+  saveDict();
+}
+function markPeek(msg, lemma){ if (msg && lemma) { msg.peek = msg.peek || []; if (!msg.peek.includes(lemma)) { msg.peek.push(lemma); saveConv(); } } }
 
 /* ---------- el diccionario se llena solo ---------- */
 // registra las palabras de un mensaje; devuelve los lemas que el estudiante todavía no domina (para resaltarlos)
@@ -857,16 +900,51 @@ function wordSpan(tok, msg){
   sp.className = 'w ko'; sp.textContent = tok.t;
   const e = tok.lemma && DICT[tok.lemma];
   const isFresh = msg.fresh?.includes(tok.lemma) && !(e && e.status === 'conocida');
-  if (isFresh && S.inlineGloss && msg.role === 'ai') {
+  bindWord(sp, tok, msg);
+  if (isFresh && msg.role === 'ai') {
     sp.classList.add('new');
-    const ruby = document.createElement('ruby'); ruby.appendChild(sp);
-    const rt = document.createElement('rt'); rt.textContent = (e?.gloss || tok.gloss || '').slice(0, 22); ruby.appendChild(rt);
-    sp.onclick = () => openWord(tok, msg);
-    return ruby;
+    if (S.inlineGloss) {
+      const ruby = document.createElement('ruby'); ruby.appendChild(sp);
+      const rt = document.createElement('rt'); rt.textContent = (e?.gloss || tok.gloss || '').slice(0, 22); ruby.appendChild(rt);
+      return ruby;
+    }
   }
-  sp.onclick = () => openWord(tok, msg);
   return sp;
 }
+let LAST_PTR = 'mouse', TAP = { el: null, t: 0 };
+document.addEventListener('pointerdown', e => { LAST_PTR = e.pointerType || 'mouse'; }, true);
+function bindWord(sp, tok, msg){
+  sp.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') showTip(sp, tok, msg); });
+  sp.addEventListener('pointerleave', e => { if (e.pointerType === 'mouse') hideTip(); });
+  sp.addEventListener('click', ev => {
+    ev.stopPropagation();
+    if (LAST_PTR === 'mouse') { hideTip(); openWord(tok, msg); return; }
+    const now = Date.now();
+    if (TAP.el === sp && now - TAP.t < 450) { TAP = { el: null, t: 0 }; hideTip(); openWord(tok, msg); }
+    else { TAP = { el: sp, t: now }; showTip(sp, tok, msg); }
+  });
+}
+// el significado, arriba de la palabra
+function tipInfo(tok){
+  let lemma = tok.lemma || guessLemma(tok.t) || '';
+  const e = DICT[lemma] || LEVEL_WORDS[lemma];
+  return { lemma, gloss: tok.gloss || e?.gloss || '' };
+}
+function showTip(sp, tok, msg){
+  const { lemma, gloss } = tipInfo(tok);
+  markPeek(msg, lemma || tok.t);
+  let tip = $('tip'); if (!tip) { tip = document.createElement('div'); tip.id = 'tip'; document.body.appendChild(tip); }
+  const touch = LAST_PTR !== 'mouse';
+  tip.innerHTML = (gloss ? esc(gloss) : '<i>sin analizar</i>') + (lemma && lemma !== tok.t ? ` <span class="ko">· ${esc(lemma)}</span>` : '') + (tok.form ? `<small>${esc(tok.form)}</small>` : '') + `<small>${touch ? 'toca dos veces para ver más' : 'clic para ver más'}</small>`;
+  const r = sp.getBoundingClientRect();
+  const x = Math.max(80, Math.min(innerWidth - 80, r.left + r.width / 2));
+  tip.style.left = x + 'px';
+  if (r.top > 90) { tip.classList.remove('below'); tip.style.top = (r.top - 6) + 'px'; } else { tip.classList.add('below'); tip.style.top = (r.bottom + 6) + 'px'; }
+  tip.hidden = false;
+}
+function hideTip(){ const t = $('tip'); if (t) t.hidden = true; }
+document.addEventListener('click', e => { if (!e.target.closest?.('.w')) hideTip(); });
+$('chat').addEventListener('scroll', hideTip, { passive: true });
 function renderKo(el, msg){
   const text = msg.ko || '';
   const toks = (msg.tokens || []).filter(t => t.t && t.pos !== 'puntuación');
@@ -917,7 +995,7 @@ function renderMsg(m){
   if (m.role === 'ai') {
     b('🐢', () => speak(m.ko, Math.max(0.5, S.rate - 0.3)), 'Escuchar despacio');
     const es = document.createElement('div'); es.className = 'es'; es.textContent = m.es; es.hidden = !m.showEs;
-    b('Traducción', () => { m.showEs = !m.showEs; es.hidden = !m.showEs; saveConv(); });
+    b('Traducción', () => { m.showEs = !m.showEs; if (m.showEs) m.sawEs = true; es.hidden = !m.showEs; saveConv(); });
     const ex = b(m.expl ? 'Explicación' : '🎓 Explicar frase', () => { if (m.expl) { m.showExpl = !m.showExpl; saveConv(); renderAll(); } else explainSentence(m); }, 'El profesor (modelo caro) explica la frase completa');
     if (m.explBusy) { ex.disabled = true; ex.textContent = 'Explicando…'; }
     d.appendChild(tools); d.appendChild(es);
@@ -984,6 +1062,7 @@ let SHEET = null;   // { tok, msg, ctx, busy, err }
 function openWord(tok, msg){
   SHEET = { tok, msg, ctx: '', busy: false, err: '' };
   if (!tok.lemma) { const g = guessLemma(tok.t); if (g) SHEET.guess = g; }
+  markPeek(msg, tok.lemma || SHEET.guess || tok.t);
   speak(tok.t);
   $('veil').hidden = false; $('sheet').hidden = false; refreshSheet();
 }
@@ -1010,6 +1089,7 @@ function refreshSheet(){
   if (lemma && lemma !== tok.t) h += `<div style="margin-top:8px">Forma de diccionario: <b class="ko" style="font-size:20px">${esc(lemma)}</b> <button class="spk" data-say="${esc(lemma)}">🔊</button> <span class="rom">${esc(romanize(lemma))}</span>${!tok.lemma ? ' <span class="small">(reconocida automáticamente)</span>' : ''}</div>`;
   if (e?.pos || tok.pos || gloss) h += `<div class="gloss">${e?.pos || tok.pos ? `<span class="pos">${esc(e?.pos || tok.pos)}</span>` : ''}${esc(gloss)}</div>`;
   if (tok.form) h += `<div class="form">${esc(tok.form)}</div>`;
+  if (DICT[lemma]) { const d = DICT[lemma], pr = wordProgress(lemma); h += `<div class="small" style="margin-top:6px">Dominio: <b>${pr} %</b> · la oíste sin traducir ${d.heard || 0} ${d.heard === 1 ? 'vez' : 'veces'}, la usaste ${d.used || 0}</div><div class="bar"><i style="width:${pr}%"></i></div>`; }
   if (!lemma && !gloss) h += `<div class="small">Todavía no está analizada. Toca «Explicar» para que el modelo caro la analice.</div>`;
   if (SHEET.ctx) h += `<div class="sec-t">En esta oración</div><div class="form">${esc(SHEET.ctx)}</div>`;
   if (e && !e.fromLevel) h += entryHTML(e);
@@ -1047,12 +1127,13 @@ $('pclose').onclick = closePanel;
 function openLevels(){
   openPanel('Niveles', 'levels');
   const cur = CONV?.level || S.level || 1;
-  const pb = $('pbody'); pb.innerHTML = '<p class="small">Cada nivel tiene un conjunto de palabras y de formas gramaticales. 지수 conversa usando las de tu nivel y de los anteriores. Toca una palabra para oírla y ver su significado.</p>';
+  const pb = $('pbody'); pb.innerHTML = '<p class="small">Cada nivel tiene un conjunto de palabras y de formas gramaticales. 지수 conversa usando las de tu nivel y de los anteriores. Cada palabra se va llenando: hasta la mitad cuando 지수 la usa y respondes sin mirar su traducción, y hasta completarse cuando la usas tú. Toca una palabra para oírla y ver su significado.</p>';
   for (const lv of LEVELS) {
     const d = document.createElement('div'); d.className = 'lv' + (lv.id === cur ? ' cur' : '');
-    const known = lv.vocab.filter(v => DICT[v[0]]?.status === 'conocida').length;
-    d.innerHTML = `<h3>${esc(lv.name)}${lv.id === cur ? ' · actual' : ''}</h3><div class="small">${esc(lv.desc)}${lv.vocab.length ? ` · ${known}/${lv.vocab.length} palabras que ya sabes` : ''}</div>
-      ${lv.vocab.length ? `<div class="sec-t">Vocabulario</div><div class="vocab">${lv.vocab.map(v => `<button class="chip ko" data-w="${esc(v[0])}" title="${esc(v[2])}">${esc(v[0])}</button>`).join('')}</div>` : ''}
+    const known = lv.vocab.filter(v => wordProgress(v[0]) >= 100).length;
+    const avg = lv.vocab.length ? Math.round(lv.vocab.reduce((a, v) => a + wordProgress(v[0]), 0) / lv.vocab.length) : 0;
+    d.innerHTML = `<h3>${esc(lv.name)}${lv.id === cur ? ' · actual' : ''}</h3><div class="small">${esc(lv.desc)}${lv.vocab.length ? ` · ${known}/${lv.vocab.length} palabras dominadas · ${avg} %` : ''}</div>${lv.vocab.length ? `<div class="bar"><i style="width:${avg}%"></i></div>` : ''}
+      ${lv.vocab.length ? `<div class="sec-t">Vocabulario</div><div class="vocab">${lv.vocab.map(v => { const pr = wordProgress(v[0]); return `<button class="chip ko" data-w="${esc(v[0])}" title="${esc(v[2])} · ${pr} %" style="background:linear-gradient(90deg,color-mix(in srgb,var(--new) 38%,var(--bg)) ${pr}%,var(--bg) ${pr}%);${pr >= 100 ? 'border-color:var(--new);' : ''}">${esc(v[0])}${pr >= 100 ? ' ✓' : ''}</button>`; }).join('')}</div>` : ''}
       ${lv.grammar.length ? `<div class="sec-t">Gramática</div>${lv.grammar.map(g => `<div class="gram"><b class="ko">${esc(g[0])}</b><div class="small">${esc(g[1])}</div>${g[2].map(x => `<div class="ex"><span class="ko" data-say="${esc(x[0])}" style="cursor:pointer">🔊 ${esc(x[0])}</span> <span class="small">${esc(x[1])}</span></div>`).join('')}</div>`).join('')}` : ''}
       <div class="sec-t">Practicar</div><div class="row" style="margin-top:4px">${lv.topics.map(t => `<button class="btn ${lv.id === cur ? '' : 'sec'}" data-topic="${esc(t)}">${esc(t)}</button>`).join('')}</div>`;
     d.querySelectorAll('[data-w]').forEach(b => b.onclick = () => { const w = LEVEL_WORDS[b.dataset.w]; openWord({ t: w.lemma, lemma: w.lemma, pos: w.pos, gloss: w.gloss, form: '' }, null); });
@@ -1121,7 +1202,7 @@ function drawDict(){
   for (const e of list.slice(0, 400)) {
     const d = document.createElement('div'); d.className = 'ent';
     const nForms = Object.keys(e.forms || {}).length;
-    d.innerHTML = `<div class="top"><span class="ko">${esc(e.lemma)}</span><button class="spk" title="Escuchar">🔊</button><span class="g">${e.pos ? `<span class="pos">${esc(e.pos)}</span>` : ''}${esc(e.gloss || '')}${nForms ? ` · ${nForms} forma${nForms > 1 ? 's' : ''}` : ''}</span><span class="st ${e.status === 'conocida' ? 'conocida' : 'nueva'}">${e.status === 'conocida' ? 'ya sé' : 'por aprender'}</span></div>`;
+    d.innerHTML = `<div class="top"><span class="ko">${esc(e.lemma)}</span><button class="spk" title="Escuchar">🔊</button><span class="g">${e.pos ? `<span class="pos">${esc(e.pos)}</span>` : ''}${esc(e.gloss || '')}${nForms ? ` · ${nForms} forma${nForms > 1 ? 's' : ''}` : ''}</span><span class="st ${e.status === 'conocida' ? 'conocida' : 'nueva'}">${e.status === 'conocida' ? 'ya sé' : wordProgress(e.lemma) + ' %'}</span></div><div class="bar"><i style="width:${wordProgress(e.lemma)}%"></i></div>`;
     d.querySelector('.spk').onclick = ev => { ev.stopPropagation(); speak(e.lemma); };
     d.querySelector('.top').onclick = () => { DOPEN = DOPEN === e.lemma ? '' : e.lemma; drawDict(); };
     if (DOPEN === e.lemma) {
@@ -1181,7 +1262,7 @@ function openSettings(){
     <div class="field"><label>OpenAI (sk-…) · solo si eliges GPT</label><input type="password" id="kO" autocomplete="off" value="${esc(KEYS.openai)}" placeholder="sk-..."></div>
     <p class="small">Las claves se guardan solo en este navegador y se envían directamente a api.anthropic.com o api.openai.com. No están en el archivo, así que puedes compartir la app sin peligro; eso sí, no compartas el navegador con la clave puesta.</p>
     <div class="sec-t">Lectura y ayudas</div>
-    <label class="check"><input type="checkbox" id="oGloss" ${S.inlineGloss ? 'checked' : ''}><span>Mostrar el significado encima de las palabras nuevas</span></label>
+    <label class="check"><input type="checkbox" id="oGloss" ${S.inlineGloss ? 'checked' : ''}><span>Mostrar siempre el significado encima de las palabras nuevas (si no, se ve al pasar el mouse o al tocar la palabra)</span></label>
     <label class="check"><input type="checkbox" id="oDef" ${S.autoDefine ? 'checked' : ''}><span>Definir automáticamente las palabras nuevas con el modelo caro (más lento; si está apagado, el modelo caro se usa solo cuando aprietas «Explicar»)</span></label>
     <div class="sec-t">Audio</div>
     <label class="check"><input type="checkbox" id="oSpeak" ${S.autoSpeak ? 'checked' : ''}><span>Leer en voz alta cada respuesta</span></label>
@@ -1226,6 +1307,7 @@ function openSettings(){
 
 /* ---------- frases rápidas y controles ---------- */
 const QUICK = [['뭐예요?','¿Qué es?'],['다시 말해 주세요','¿Puedes repetir?'],['천천히 말해 주세요','Más despacio, por favor'],['잘 모르겠어요','No entiendo bien'],['네','Sí'],['아니요','No'],['감사합니다','Gracias']];
+let SUG_SENT = '';
 // arriba del cuadro de texto: las respuestas sugeridas para el último mensaje de 지수, y después las frases fijas
 function renderQuick(){
   const q = $('quick'); q.innerHTML = '<div id="sugs"></div><div id="fixed"></div>';
@@ -1235,8 +1317,9 @@ function renderQuick(){
   for (const sg of sugs) {
     // tocarla la dice y la envía (para conversar sin hablar ni escribir); ✏ la deja escrita para cambiarla
     const b = document.createElement('div'); b.className = 'chip sug';
-    b.innerHTML = `<button class="pick" title="Responder esto"><span class="ko">${esc(sg.ko)}</span><small>${esc(sg.es)}</small></button><button class="ed" title="Escribirla para cambiarla antes de enviar">✏</button>`;
-    b.querySelector('.pick').onclick = () => { if (busy) return; const inp = $('inp'); inp.value = sg.ko; autosize(); speak(sg.ko); send(); };
+    b.innerHTML = `<button class="pick" title="Responder esto"><span class="ko">${esc(sg.ko)}</span><small hidden>${esc(sg.es)}</small></button><button class="tr" title="Ver la traducción">›</button><button class="ed" title="Escribirla para cambiarla antes de enviar">✏</button>`;
+    b.querySelector('.tr').onclick = ev => { const sm = b.querySelector('.pick small'); sm.hidden = !sm.hidden; ev.currentTarget.textContent = sm.hidden ? '›' : '‹'; ev.currentTarget.title = sm.hidden ? 'Ver la traducción' : 'Ocultar la traducción'; };
+    b.querySelector('.pick').onclick = () => { if (busy) return; const inp = $('inp'); inp.value = sg.ko; SUG_SENT = sg.ko; autosize(); speak(sg.ko); send(true); };
     b.querySelector('.ed').onclick = () => { speak(sg.ko); const inp = $('inp'); inp.value = sg.ko; autosize(); inp.focus(); };
     sq.appendChild(b);
   }
