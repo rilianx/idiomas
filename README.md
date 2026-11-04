@@ -40,7 +40,7 @@ Una app para aprender idiomas conversando con una IA, empezando por el coreano. 
 | Conversar, analizar cada palabra y responder «…뭐예요?» | **Claude Haiku 5.5** (o GPT-5.4 mini, o Sonnet 5.5) | En cada mensaje: es rápido |
 | Explicaciones | **Claude Opus 5.5** (o Sonnet 5.5, Fable 5.1, GPT-5.4 mini) | **Solo cuando lo pides**: «🎓 Explicar frase» bajo una respuesta, o «Explicar» en una palabra |
 
-«Explicar frase» da la traducción, una traducción literal, cada palabra con su forma de diccionario y su función, los puntos de gramática y un consejo. Las palabras quedan en el diccionario. Si quieres que el modelo caro defina solo las palabras nuevas (más lento), se activa en ⚙ Ajustes.
+Las explicaciones ven los últimos 3 mensajes de la conversación y el nivel, y explican en contexto, no solo traducen. «Explicar frase» da: a qué responde la frase y qué se espera que contestes; una explicación detallada (formas, por qué se usan aquí, registro, matices, datos culturales); respuestas posibles (al tocarlas quedan escritas para enviarlas); la gramática con otro ejemplo; y, plegado, palabra por palabra. Las palabras quedan en el diccionario. «Explicar error» también usa el contexto: qué querías decir y si hay una respuesta más natural para esa conversación. Si quieres que el modelo caro defina solo las palabras nuevas (más lento), se activa en ⚙ Ajustes.
 
 ## Cómo usarla
 

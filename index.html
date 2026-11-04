@@ -442,7 +442,8 @@ const CHAT_SCHEMA = obj({ reply: obj({ ko: STR, es: STR, tokens: TOKENS }), stud
 const ENTRY = obj({ query: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, meaning: STR, explanation: STR, hanja: STR, irregular: STR,
   conjugations: { type: 'array', items: obj({ form: STR, label: STR }) }, examples: { type: 'array', items: obj({ ko: STR, es: STR }) }, in_context: STR });
 const DEF_SCHEMA = obj({ entries: { type: 'array', items: ENTRY } });
-const SENT_SCHEMA = obj({ translation: STR, literal: STR,
+const SENT_SCHEMA = obj({ translation: STR, explanation: STR, context: STR, literal: STR,
+  answers: { type: 'array', items: obj({ ko: STR, es: STR }) },
   words: { type: 'array', items: obj({ t: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, meaning: STR, explanation: STR }) },
   grammar: { type: 'array', items: obj({ point: STR, explanation: STR }) }, tip: STR });
 
@@ -477,13 +478,18 @@ function chatSystem(levelId){
   ].join('\n');
 }
 const SENT_SYSTEM = [
-  'Eres un profesor experto de coreano para hispanohablantes. Explicas una frase coreana a un estudiante, en español, de forma clara y breve.',
+  'Eres un profesor experto y cercano de coreano para hispanohablantes. El estudiante está conversando con 지수 y apretó «Explicar» sobre una frase porque necesita entenderla de verdad: no te limites a traducir ni a ir palabra por palabra.',
+  'Recibes los últimos mensajes de la conversación y la frase a explicar. Usa ese contexto: qué se venía diciendo, a qué responde la frase y qué espera la otra persona.',
+  'Escribe todo en español (con el coreano entre comillas cuando lo cites):',
   '- translation: traducción natural al español.',
-  '- literal: traducción literal palabra por palabra que muestre el orden coreano (p. ej. «yo-TEMA escuela-A voy»).',
-  '- words: cada palabra de la frase en orden (sin signos de puntuación): t es la palabra tal como aparece; lemma, su forma de diccionario (verbos y adjetivos con -다, sustantivos sin partícula); gloss, el significado en 1 a 4 palabras; meaning, una definición de diccionario breve en español (sentidos principales, en una frase); explanation, en una frase, qué forma tiene aquí y qué aporta (partícula, conjugación, matiz).',
-  '- grammar: los 1 a 3 puntos gramaticales clave de la frase, cada uno con una explicación corta y cómo se forma.',
-  '- tip: un consejo breve para usar la frase o algo parecido (o "").',
-  'Sé exacto.'
+  '- explanation: la explicación principal, detallada y en prosa (2 a 4 párrafos cortos separados por una línea en blanco). Explica qué quiere decir la frase en ESTA conversación y cómo se construye: las formas gramaticales importantes y por qué se usan aquí (y no otras), el registro y la cortesía, matices, lo que en español se diría distinto, y cualquier dato cultural útil. Adáptate al nivel del estudiante: si algo es nuevo para su nivel, explícalo desde lo básico.',
+  '- context: en una o dos frases, cómo se conecta con los mensajes anteriores (a qué responde o qué pregunta) y qué se espera que conteste el estudiante; "" si no hay mensajes anteriores.',
+  '- literal: traducción literal que muestre el orden coreano (p. ej. «yo-TEMA escuela-A voy»).',
+  '- grammar: los 1 a 3 puntos gramaticales clave, cada uno con cómo se forma y otro ejemplo distinto al de la frase.',
+  '- answers: 2 o 3 respuestas posibles que el estudiante podría dar ahora, cortas y naturales para su nivel, con su traducción.',
+  '- words: cada palabra de la frase en orden (sin signos de puntuación), para el diccionario: t es la palabra tal como aparece; lemma, su forma de diccionario (verbos y adjetivos con -다, sustantivos sin partícula); gloss, el significado en 1 a 4 palabras; meaning, una definición de diccionario breve (en una frase); explanation, en una frase, qué forma tiene aquí y qué aporta.',
+  '- tip: un consejo práctico breve (o "").',
+  'Sé exacto y no inventes.'
 ].join('\n');
 const DEF_SYSTEM = [
   'Eres un profesor experto de coreano para hispanohablantes y escribes un diccionario de aprendizaje preciso.',
@@ -499,7 +505,7 @@ const DEF_SYSTEM = [
   '- irregular: si es un verbo o adjetivo irregular, de qué tipo y cómo cambia (p. ej. "irregular en ㅂ: 춥다 → 추워요"), o "".',
   '- conjugations: para verbos y adjetivos, 6 a 8 formas comunes con su etiqueta en español (presente cortés -아/어요, pasado cortés, futuro -(으)ㄹ 거예요, formal -(스)ㅂ니다, -고 싶어요 si es verbo, -(으)세요, -고, -지만…). Para otras categorías, [].',
   '- examples: 2 oraciones de ejemplo cortas y naturales (en estilo cortés -요) con su traducción.',
-  '- in_context: si vino una oración, explica en español qué forma tiene el término EN ESA oración y qué aporta (partícula, conjugación, matiz); si no vino oración, "".',
+  '- in_context: si vino una oración, explica con detalle (2 a 4 frases) qué forma tiene el término EN ESA oración, qué aporta (partícula, conjugación, matiz, registro) y qué significa en esa conversación (usa los mensajes anteriores si vienen); si no vino oración, "".',
   'Sé exacto: no inventes formas ni significados.'
 ].join('\n');
 
@@ -596,7 +602,7 @@ function mergeEntry(x, surface, form){
   return e;
 }
 async function define(items, model = S.defModel){
-  const user = 'TÉRMINOS:\n' + items.map((it, i) => `${i + 1}. «${it.term}»` + (it.lemma ? ` (forma de diccionario probable: ${it.lemma})` : '') + (it.sentence ? ` — en la oración: «${it.sentence}»` : '')).join('\n');
+  const user = (items[0]?.context ? 'ÚLTIMOS MENSAJES DE LA CONVERSACIÓN:\n' + items[0].context + '\n\n' : '') + 'TÉRMINOS:\n' + items.map((it, i) => `${i + 1}. «${it.term}»` + (it.lemma ? ` (forma de diccionario probable: ${it.lemma})` : '') + (it.sentence ? ` — en la oración: «${it.sentence}»` : '')).join('\n');
   const out = await ask(model, DEF_SYSTEM, user, DEF_SCHEMA, { effort: 'low', maxTokens: 16000, ms: 120000 });
   return out.entries || [];
 }
@@ -614,11 +620,20 @@ async function defineInBackground(m){
   finally { lemmas.forEach(l => pendingDefs.delete(l)); }
 }
 
+/* ---------- contexto: los mensajes anteriores a uno dado ---------- */
+function contextBefore(m, n = 3){
+  if (!CONV || !m) return '';
+  const msgs = CONV.msgs.filter(x => x.role === 'me' || x.role === 'ai');
+  const i = msgs.indexOf(m); if (i <= 0) return '';
+  return msgs.slice(Math.max(0, i - n), i).map(x => (x.role === 'me' ? 'Estudiante: ' : '지수: ') + x.ko + (x.role === 'me' && x.correction ? ` (corregido: ${x.correction})` : '')).join('\n');
+}
+const ctxBlock = (m, label) => { const c = contextBefore(m); return (c ? 'ÚLTIMOS MENSAJES DE LA CONVERSACIÓN:\n' + c + '\n\n' : '') + `NIVEL DEL ESTUDIANTE: ${LV(CONV?.level || S.level || 1).name}\n\n` + label; };
+
 /* ---------- explicar una frase (modelo caro, solo cuando se pide) ---------- */
 async function explainSentence(m){
   m.explBusy = true; m.explErr = ''; renderAll();
   try {
-    const x = await ask(S.defModel, SENT_SYSTEM, 'FRASE: «' + m.ko + '»', SENT_SCHEMA, { effort: 'low', maxTokens: 12000, ms: 120000 });
+    const x = await ask(S.defModel, SENT_SYSTEM, ctxBlock(m, 'FRASE A EXPLICAR (la dijo ' + (m.role === 'me' ? 'el estudiante' : '지수') + '): «' + m.ko + '»'), SENT_SCHEMA, { effort: 'low', maxTokens: 16000, ms: 150000 });
     m.expl = x; m.showExpl = true;
     // las palabras explicadas quedan en el diccionario (sin contar como vistas otra vez)
     // cada palabra queda en el diccionario: definición, la forma que tiene aquí y la frase como ejemplo
@@ -646,30 +661,39 @@ async function explainSentence(m){
 function explBlock(m){
   const x = m.expl, d = document.createElement('div'); d.className = 'es';
   d.innerHTML = `<div><b style="color:var(--fg)">${esc(x.translation)}</b></div>${x.literal ? `<div class="small">Literal: ${esc(x.literal)}</div>` : ''}
-    <div class="sec-t">Palabra por palabra</div><div class="conj">${(x.words || []).map(w => `<span class="ko" data-say="${esc(w.t)}" style="cursor:pointer;color:var(--fg)">${esc(w.t)}</span><span><b style="color:var(--fg)">${esc(w.gloss)}</b>${w.lemma && w.lemma !== w.t ? ` <span class="ko">(${esc(w.lemma)})</span>` : ''} · ${esc(w.explanation)}</span>`).join('')}</div>
+    ${x.context ? `<div class="form">💬 ${esc(x.context)}</div>` : ''}
+    ${x.explanation ? `<div class="sec-t">Explicación</div>${paras(x.explanation)}` : ''}
+    ${(x.answers || []).length ? `<div class="sec-t">Puedes responder</div>${x.answers.map(a => `<div class="ex"><span class="ko" data-say="${esc(a.ko)}" data-use="${esc(a.ko)}" style="cursor:pointer;color:var(--fg)">🔊 ${esc(a.ko)}</span> <span class="small">${esc(a.es)}</span></div>`).join('')}` : ''}
+    <details style="margin-top:8px"><summary class="sec-t" style="cursor:pointer;display:list-item">Palabra por palabra</summary><div class="conj">${(x.words || []).map(w => `<span class="ko" data-say="${esc(w.t)}" style="cursor:pointer;color:var(--fg)">${esc(w.t)}</span><span><b style="color:var(--fg)">${esc(w.gloss)}</b>${w.lemma && w.lemma !== w.t ? ` <span class="ko">(${esc(w.lemma)})</span>` : ''} · ${esc(w.explanation)}</span>`).join('')}</div></details>
     ${(x.grammar || []).length ? `<div class="sec-t">Gramática</div>${x.grammar.map(g => `<div class="gram"><b class="ko" style="color:var(--fg)">${esc(g.point)}</b><div>${esc(g.explanation)}</div></div>`).join('')}` : ''}
     ${x.tip ? `<div class="form">💡 ${esc(x.tip)}</div>` : ''}
     ${m.explDict ? `<div class="small" style="margin-top:6px">📖 ${m.explDict.added ? `${m.explDict.added} palabra${m.explDict.added > 1 ? 's' : ''} nueva${m.explDict.added > 1 ? 's' : ''} en tu diccionario` : 'Ninguna palabra nueva'}${m.explDict.updated ? ` · ${m.explDict.updated} actualizada${m.explDict.updated > 1 ? 's' : ''}` : ''}.</div>` : ''}`;
   d.querySelectorAll('[data-say]').forEach(e => e.onclick = () => speak(e.dataset.say));
+  // una respuesta sugerida: se oye y queda escrita, lista para enviar o cambiar
+  d.querySelectorAll('[data-use]').forEach(e => e.onclick = () => { speak(e.dataset.use); $('inp').value = e.dataset.use; autosize(); $('inp').focus(); });
   return d;
 }
+// texto en párrafos (separados por una línea en blanco)
+const paras = t => String(t || '').split(/\n\s*\n/).map(p => `<p style="margin:.35em 0;color:var(--fg)">${esc(p.trim()).replace(/\n/g, '<br>')}</p>`).join('');
 
 /* ---------- mis errores ---------- */
 const ERR_SCHEMA = obj({ category: STR, explanation: STR, rule: STR, examples: { type: 'array', items: obj({ ko: STR, es: STR }) } });
 const ERR_SYSTEM = [
-  'Eres un profesor experto de coreano para hispanohablantes. Un estudiante escribió una frase con errores y recibes también la versión corregida.',
-  '- category: el tipo de error en 2 a 5 palabras en español (p. ej. "Partícula 은/는 vs 이/가", "Conjugación del pasado").',
-  '- explanation: en español, claro y breve (2 a 4 frases): qué estaba mal, por qué, y qué cambia la corrección. Si hay varios errores, explica cada uno.',
+  'Eres un profesor experto y cercano de coreano para hispanohablantes. El estudiante apretó «Explicar error» porque quiere entender a fondo su error, no solo ver la corrección.',
+  'Recibes los últimos mensajes de la conversación, la frase del estudiante y la versión corregida. Usa el contexto: qué quería decir el estudiante, a qué estaba respondiendo y si la corrección es la mejor opción para ESA conversación (si hay una respuesta más natural para el contexto, dila).',
+  'Escribe en español (con el coreano entre comillas cuando lo cites):',
+  '- category: el tipo de error en 2 a 5 palabras (p. ej. "Partícula 은/는 vs 이/가", "Conjugación del pasado").',
+  '- explanation: explicación detallada en prosa (2 a 4 párrafos cortos separados por una línea en blanco): qué estaba mal y por qué, cómo lo entendería un coreano (si cambia el sentido o solo suena raro), por qué la corrección funciona en este contexto, y de dónde suele venir este error en hispanohablantes. Si hay varios errores, explica cada uno. Si la frase en realidad estaba bien, dilo.',
   '- rule: la regla para no volver a equivocarse, en una o dos frases, con la fórmula (p. ej. "consonante final + 을, vocal final + 를").',
   '- examples: 2 o 3 oraciones correctas cortas y naturales, en estilo cortés (-요), que usen la misma regla, con su traducción.',
-  'Sé exacto. Si la frase del estudiante en realidad estaba bien, dilo en explanation.'
+  'Sé exacto y no inventes.'
 ].join('\n');
 const ERR_BUSY = new Set();
 // explicar un error del chat: solo si la explicación llega, el error se guarda en «Mis errores»
 async function explainMsgError(m){
   ERR_BUSY.add(m.id); m.errErr = ''; renderAll();
   try {
-    const x = await ask(S.defModel, ERR_SYSTEM, `FRASE DEL ESTUDIANTE: «${m.ko}»\nCORREGIDA: «${m.correction}»` + (m.note ? `\nNOTA BREVE: ${m.note}` : ''), ERR_SCHEMA, { effort: 'low', maxTokens: 12000, ms: 120000 });
+    const x = await ask(S.defModel, ERR_SYSTEM, ctxBlock(m, `FRASE DEL ESTUDIANTE: «${m.ko}»\nCORREGIDA: «${m.correction}»` + (m.note ? `\nNOTA BREVE: ${m.note}` : '')), ERR_SCHEMA, { effort: 'low', maxTokens: 16000, ms: 150000 });
     if (!ERRS.some(e => e.msgId === m.id))
       ERRS.push({ id: uid(), msgId: m.id, wrong: m.ko, right: m.correction, note: m.note || '', category: m.category || x.category || 'Otros', level: CONV?.level || null, date: Date.now(), done: false, expl: x, showExpl: true });
     saveErrs();
@@ -694,7 +718,7 @@ async function explainError(er){
 }
 function errExplBlock(er){
   const x = er.expl, d = document.createElement('div'); d.style.marginTop = '6px';
-  d.innerHTML = `<div>${esc(x.explanation)}</div>${x.rule ? `<div class="form">📏 ${esc(x.rule)}</div>` : ''}
+  d.innerHTML = `${paras(x.explanation)}${x.rule ? `<div class="form">📏 ${esc(x.rule)}</div>` : ''}
     ${(x.examples || []).map(e => `<div class="ex"><span class="ko" data-say="${esc(e.ko)}" style="cursor:pointer">🔊 ${esc(e.ko)}</span> <span class="small">${esc(e.es)}</span></div>`).join('')}`;
   d.querySelectorAll('[data-say]').forEach(e => e.onclick = () => speak(e.dataset.say));
   return d;
@@ -910,7 +934,7 @@ function refreshSheet(){
     SHEET.busy = true; SHEET.err = ''; refreshSheet();
     const mine = SHEET;
     try {
-      const [x] = await define([{ term: tok.t, lemma, sentence: msg?.ko || '' }]);
+      const [x] = await define([{ term: tok.t, lemma, sentence: msg?.ko || '', context: msg ? contextBefore(msg) : '' }]);
       const ne = mergeEntry(x, tok.t, tok.form);
       if (ne && msg) { const t = msg.tokens.find(t => t.t === tok.t); if (t && !t.lemma) { t.lemma = ne.lemma; t.gloss = ne.gloss; t.pos = ne.pos; saveConv(); } }
       saveDict();
