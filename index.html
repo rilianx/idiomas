@@ -613,11 +613,11 @@ async function aiTurn(userMsg){
       userMsg.category = userMsg.correction ? (out.student.category || '').trim() : '';
       if (S.learnProfile) userMsg.learned = learnFacts(out.student.learned);
       learnTokens(userMsg.tokens, userMsg.ko, 'tú');
-      // usarla uno mismo llena la palabra; elegir una sugerencia cuenta solo como leerla
-      for (const t of userMsg.tokens) {
+      // usarla uno mismo (escrita o hablada) llena la palabra; elegir una respuesta sugerida no cuenta
+      if (!userMsg.fromSug) for (const t of userMsg.tokens) {
         if (!t.lemma || t.pos === 'puntuación' || t.pos === 'partícula' || !DICT[t.lemma]) continue;
         if (userMsg.correction && !userMsg.correction.includes(t.t)) continue;
-        bump(t.lemma, userMsg.fromSug ? 'heard' : 'used');
+        bump(t.lemma, 'used');
       }
     }
     const r = out.reply || {};
@@ -643,8 +643,11 @@ function send(fromSug){
   if (!text || busy) return;
   if (!CONV) { CONV = { level: S.level || 1, topic: LV(S.level || 1).topics[0], msgs: [] }; }
   $('inp').value = ''; autosize();
+  // ¿es una respuesta sugerida tal cual (tocada, o puesta con ✏ y enviada sin cambios)?
+  const isSug = (fromSug === true && text === SUG_SENT) || (!!SUG_PLACED && text === SUG_PLACED);
+  SUG_SENT = SUG_PLACED = '';
   creditHeard();
-  const m = { id: uid(), role: 'me', ko: text, tokens: [], fromSug: fromSug === true && text === SUG_SENT };
+  const m = { id: uid(), role: 'me', ko: text, tokens: [], fromSug: isSug };
   CONV.msgs.push(m); saveConv(); renderAll(); scrollEnd();
   const q = detectQuestion(text);
   if (q) lookup(q, text);
@@ -1322,7 +1325,7 @@ function openSettings(){
 
 /* ---------- frases rápidas y controles ---------- */
 const QUICK = [['뭐예요?','¿Qué es?'],['다시 말해 주세요','¿Puedes repetir?'],['천천히 말해 주세요','Más despacio, por favor'],['잘 모르겠어요','No entiendo bien'],['네','Sí'],['아니요','No'],['감사합니다','Gracias']];
-let SUG_SENT = '';
+let SUG_SENT = '', SUG_PLACED = '';   // la sugerencia tocada, y la puesta en el cuadro con ✏
 // arriba del cuadro de texto: las respuestas sugeridas para el último mensaje de 지수, y después las frases fijas
 function renderQuick(){
   const q = $('quick'); q.innerHTML = '<div id="sugs"></div><div id="fixed"></div>';
@@ -1335,7 +1338,7 @@ function renderQuick(){
     b.innerHTML = `<button class="pick" title="Responder esto"><span class="ko">${esc(sg.ko)}</span><small hidden>${esc(sg.es)}</small></button><button class="tr" title="Ver la traducción">›</button><button class="ed" title="Escribirla para cambiarla antes de enviar">✏</button>`;
     b.querySelector('.tr').onclick = ev => { const sm = b.querySelector('.pick small'); sm.hidden = !sm.hidden; ev.currentTarget.textContent = sm.hidden ? '›' : '‹'; ev.currentTarget.title = sm.hidden ? 'Ver la traducción' : 'Ocultar la traducción'; };
     b.querySelector('.pick').onclick = () => { if (busy) return; const inp = $('inp'); inp.value = sg.ko; SUG_SENT = sg.ko; autosize(); speak(sg.ko); send(true); };
-    b.querySelector('.ed').onclick = () => { speak(sg.ko); const inp = $('inp'); inp.value = sg.ko; autosize(); inp.focus(); };
+    b.querySelector('.ed').onclick = () => { speak(sg.ko); const inp = $('inp'); inp.value = sg.ko; SUG_PLACED = sg.ko.trim(); autosize(); inp.focus(); };
     sq.appendChild(b);
   }
   for (const [ko, es] of QUICK) {
