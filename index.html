@@ -494,7 +494,7 @@ const POS = ['sustantivo','verbo','adjetivo','adverbio','pronombre','número','p
 const obj = (props) => ({ type: 'object', additionalProperties: false, required: Object.keys(props), properties: props });
 const STR = { type: 'string' };
 const TOKENS = { type: 'array', items: obj({ t: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, form: STR }) };
-const CHAT_SCHEMA = obj({ reply: obj({ ko: STR, es: STR, tokens: TOKENS, suggestions: { type: 'array', items: obj({ ko: STR, es: STR }) } }), student: obj({ tokens: TOKENS, correction: STR, note: STR, category: STR, learned: { type: 'array', items: obj({ kind: { type: 'string', enum: ['dato', 'interés'] }, text: STR }) } }) });
+const CHAT_SCHEMA = obj({ reply: obj({ ko: STR, es: STR, tokens: TOKENS }), student: obj({ tokens: TOKENS, correction: STR, note: STR, category: STR, learned: { type: 'array', items: obj({ kind: { type: 'string', enum: ['dato', 'interés'] }, text: STR }) } }), student_next_lines: { type: 'array', items: obj({ ko: STR, es: STR }) } });
 const ENTRY = obj({ query: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, meaning: STR, explanation: STR, hanja: STR, irregular: STR,
   conjugations: { type: 'array', items: obj({ form: STR, label: STR }) }, examples: { type: 'array', items: obj({ ko: STR, es: STR }) }, in_context: STR });
 const DEF_SCHEMA = obj({ entries: { type: 'array', items: ENTRY } });
@@ -528,7 +528,11 @@ function chatSystem(levelId){
     '- gloss: significado breve en español del lemma (1 a 4 palabras).',
     '- form: si la palabra está conjugada o lleva partícula, explica en español, muy breve, qué forma es: por ejemplo "-았어요: pasado cortés", "에: partícula de lugar (a, en)", "-고 싶어요: querer hacer", "이에요: cópula «es»". Usa "" si es la forma básica.',
     '- reply.es: traducción natural al español de reply.ko.',
-    '- reply.suggestions: 3 o 4 cosas que el estudiante podría decirte ahora, en coreano, cortas (una o dos oraciones) y de su nivel, cada una con su traducción en es. No sigas un patrón fijo: que lleven la conversación por caminos distintos y naturales, por ejemplo responder a lo que preguntaste, contar algo propio, preguntarte algo a ti, mostrar interés o gusto por algo, reaccionar (sorpresa, acuerdo, duda) o proponer otro tema relacionado con sus intereses o con lo que se ha hablado. Varíalas de un mensaje a otro. Si la conversación terminó con una despedida, propone cómo despedirse o empezar otro tema.',
+    '- student_next_lines: 3 o 4 frases que EL ESTUDIANTE podría decirte a ti (지수) como respuesta a tu reply.ko. Las escribe el estudiante, en primera persona, hablándote a ti: NO son frases tuyas, no repiten ni reformulan lo que tú dijiste y no hablan como 지수.',
+    '  · Si en reply.ko le hiciste una pregunta, al menos una frase la responde. Ejemplo: si preguntaste «이름이 뭐예요?», una opción buena es «저는 [su nombre]예요.» y una mala es «이름이 뭐예요?» o «저는 지수예요.».',
+    '  · Usa los datos reales del PERFIL DEL ESTUDIANTE cuando los haya (su nombre, su país, sus gustos). Si no los sabes, inventa un dato plausible y sencillo (él puede editarlo).',
+    '  · Que lleven la conversación por caminos distintos y naturales: responder, contar algo propio, preguntarte algo a ti, mostrar interés o gusto, reaccionar (sorpresa, acuerdo, duda) o proponer otro tema relacionado con sus intereses. Sin un patrón fijo; varíalas de un mensaje a otro.',
+    '  · En coreano, cortas (una o dos oraciones) y de su nivel, en estilo cortés (-요); es es la traducción al español, con el género del estudiante si lo sabes por su perfil (si no, neutra).',
     '- student: analiza del mismo modo el ÚLTIMO mensaje del estudiante (student.tokens, solo las partes en coreano). En student.correction escribe la versión corregida y natural en coreano si tenía errores, o "" si estaba bien (o si no hay mensaje del estudiante). En student.note explica en español, en una o dos frases, el error principal, o "". En student.category da el tipo de error en 2 a 5 palabras en español, siempre con el mismo nombre para el mismo tipo (p. ej. "Partícula 은/는 vs 이/가", "Partícula de objeto 을/를", "Conjugación del pasado", "Orden de las palabras", "Vocabulario", "Ortografía", "Cortesía (-요)"), o "" si no hubo error.',
     '- student.learned: lo NUEVO que el último mensaje del estudiante revela sobre él: datos personales (kind "dato": nombre, país, ciudad, edad, trabajo o estudios, familia, mascotas, planes) o gustos e intereses (kind "interés"). En español, frases cortas en tercera persona ("Se llama Ignacio", "Vive en Valparaíso", "Le gusta el cine coreano"). Solo lo que el estudiante dijo de sí mismo; no repitas lo que ya está en su perfil; [] si no hay nada nuevo.',
     '- Si en el pedido viene el PERFIL DEL ESTUDIANTE, úsalo como alguien que lo conoce: recuerda lo que sabes de él (no vuelvas a preguntar su nombre si ya lo sabes), pregúntale por sus intereses y su vida, y propón en reply.suggestions temas relacionados con ellos.',
@@ -599,7 +603,10 @@ async function aiTurn(userMsg){
       learnTokens(userMsg.tokens, userMsg.ko, 'tú');
     }
     const r = out.reply || {};
-    const m = { id: uid(), role: 'ai', ko: (r.ko || '').trim(), es: (r.es || '').trim(), tokens: r.tokens || [], suggestions: (r.suggestions || []).filter(x => x && x.ko).slice(0, 4) };
+    // las frases sugeridas para el estudiante: se descartan las que solo repiten lo que dijo 지수
+    const said = (r.ko || '').split(/(?<=[.?!])\s+/).map(norm).filter(Boolean);
+    const suggestions = (out.student_next_lines || []).filter(x => x && x.ko && !said.includes(norm(x.ko)) && norm(x.ko) !== norm(r.ko)).slice(0, 4);
+    const m = { id: uid(), role: 'ai', ko: (r.ko || '').trim(), es: (r.es || '').trim(), tokens: r.tokens || [], suggestions };
     m.fresh = learnTokens(m.tokens, m.ko, 'conversación');
     CONV.msgs.push(m); saveConv(); saveDict();
     busy = false; renderTyping(false); renderAll(); scrollEnd();
