@@ -254,9 +254,10 @@ const DEFAULT_SET = { chatModel: 'claude-haiku-5-5', defModel: 'claude-opus-5-5'
 const S = Object.assign({}, DEFAULT_SET, load('hab-set', {}));
 const KEYS = Object.assign({ anthropic: '', openai: '', workspace: '' }, load('hab-keys', {}));
 let DICT = load('hab-dict', {});
+let ERRS = load('hab-errs', []);   // los errores corregidos: [{ id, msgId, wrong, right, note, category, level, date, done, expl }]
 let CONV = load('hab-conv', null);   // { level, topic, msgs: [...] }
 let LISTEN = false;                  // modo escucha: el coreano queda borroso hasta tocarlo
-const saveSet = () => save('hab-set', S), saveKeys = () => save('hab-keys', KEYS), saveDict = () => save('hab-dict', DICT);
+const saveSet = () => save('hab-set', S), saveKeys = () => save('hab-keys', KEYS), saveDict = () => save('hab-dict', DICT), saveErrs = () => save('hab-errs', ERRS.slice(-500));
 const saveConv = () => { if (CONV) CONV.msgs = CONV.msgs.slice(-200); save('hab-conv', CONV); };
 // (desde la v2 el modelo caro se usa solo cuando el estudiante lo pide)
 if (!S.v2) { S.autoDefine = false; S.v2 = true; saveSet(); }
@@ -436,7 +437,7 @@ const POS = ['sustantivo','verbo','adjetivo','adverbio','pronombre','número','p
 const obj = (props) => ({ type: 'object', additionalProperties: false, required: Object.keys(props), properties: props });
 const STR = { type: 'string' };
 const TOKENS = { type: 'array', items: obj({ t: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, form: STR }) };
-const CHAT_SCHEMA = obj({ reply: obj({ ko: STR, es: STR, tokens: TOKENS }), student: obj({ tokens: TOKENS, correction: STR, note: STR }) });
+const CHAT_SCHEMA = obj({ reply: obj({ ko: STR, es: STR, tokens: TOKENS }), student: obj({ tokens: TOKENS, correction: STR, note: STR, category: STR }) });
 const ENTRY = obj({ query: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, meaning: STR, explanation: STR, hanja: STR, irregular: STR,
   conjugations: { type: 'array', items: obj({ form: STR, label: STR }) }, examples: { type: 'array', items: obj({ ko: STR, es: STR }) }, in_context: STR });
 const DEF_SCHEMA = obj({ entries: { type: 'array', items: ENTRY } });
@@ -469,7 +470,8 @@ function chatSystem(levelId){
     '- gloss: significado breve en español del lemma (1 a 4 palabras).',
     '- form: si la palabra está conjugada o lleva partícula, explica en español, muy breve, qué forma es: por ejemplo "-았어요: pasado cortés", "에: partícula de lugar (a, en)", "-고 싶어요: querer hacer", "이에요: cópula «es»". Usa "" si es la forma básica.',
     '- reply.es: traducción natural al español de reply.ko.',
-    '- student: analiza del mismo modo el ÚLTIMO mensaje del estudiante (student.tokens, solo las partes en coreano). En student.correction escribe la versión corregida y natural en coreano si tenía errores, o "" si estaba bien (o si no hay mensaje del estudiante). En student.note explica en español, en una o dos frases, el error principal, o "".',
+    '- student: analiza del mismo modo el ÚLTIMO mensaje del estudiante (student.tokens, solo las partes en coreano). En student.correction escribe la versión corregida y natural en coreano si tenía errores, o "" si estaba bien (o si no hay mensaje del estudiante). En student.note explica en español, en una o dos frases, el error principal, o "". En student.category da el tipo de error en 2 a 5 palabras en español, siempre con el mismo nombre para el mismo tipo (p. ej. "Partícula 은/는 vs 이/가", "Partícula de objeto 을/를", "Conjugación del pasado", "Orden de las palabras", "Vocabulario", "Ortografía", "Cortesía (-요)"), o "" si no hubo error.',
+    '- Si en el pedido vienen los ERRORES FRECUENTES del estudiante, de vez en cuando haz preguntas que lo lleven a usar esas formas (sin decirle que es por sus errores), para que las practique.',
     ...(free ? [] : ['', 'VOCABULARIO (de este nivel y de los anteriores):', vocab, '', 'GRAMÁTICA (de este nivel y de los anteriores):', grammar])
   ].join('\n');
 }
@@ -515,7 +517,9 @@ async function aiTurn(userMsg){
   if (!CONV) return;
   busy = true; renderTyping(true);
   const lv = CONV.level;
-  const user = (CONV.msgs.some(m => m.role === 'me' || m.role === 'ai') ? 'CONVERSACIÓN HASTA AHORA:\n' + transcript() + '\n\n' : '') +
+  const frequent = frequentErrors();
+  const user = (frequent.length ? 'ERRORES FRECUENTES DEL ESTUDIANTE (para practicarlos con naturalidad):\n' + frequent.map(g => `- ${g.category} (${g.items.length} veces). Correcto: «${g.items[g.items.length - 1].right}»`).join('\n') + '\n\n' : '') +
+    (CONV.msgs.some(m => m.role === 'me' || m.role === 'ai') ? 'CONVERSACIÓN HASTA AHORA:\n' + transcript() + '\n\n' : '') +
     (userMsg ? 'Responde al último mensaje del estudiante.' : `Empieza tú la conversación. Tema: «${CONV.topic}». Saluda y haz una pregunta sencilla.`);
   try {
     const out = await ask(S.chatModel, chatSystem(lv), user, CHAT_SCHEMA, { effort: 'low', maxTokens: 8000, ms: 60000 });
@@ -524,6 +528,7 @@ async function aiTurn(userMsg){
       userMsg.correction = (out.student.correction || '').trim();
       userMsg.note = (out.student.note || '').trim();
       if (userMsg.correction && norm(userMsg.correction) === norm(userMsg.ko)) userMsg.correction = '';
+      if (userMsg.correction) recordError(userMsg, (out.student.category || '').trim());
       learnTokens(userMsg.tokens, userMsg.ko, 'tú');
     }
     const r = out.reply || {};
@@ -648,6 +653,46 @@ function explBlock(m){
   return d;
 }
 
+/* ---------- mis errores ---------- */
+const ERR_SCHEMA = obj({ category: STR, explanation: STR, rule: STR, examples: { type: 'array', items: obj({ ko: STR, es: STR }) } });
+const ERR_SYSTEM = [
+  'Eres un profesor experto de coreano para hispanohablantes. Un estudiante escribió una frase con errores y recibes también la versión corregida.',
+  '- category: el tipo de error en 2 a 5 palabras en español (p. ej. "Partícula 은/는 vs 이/가", "Conjugación del pasado").',
+  '- explanation: en español, claro y breve (2 a 4 frases): qué estaba mal, por qué, y qué cambia la corrección. Si hay varios errores, explica cada uno.',
+  '- rule: la regla para no volver a equivocarse, en una o dos frases, con la fórmula (p. ej. "consonante final + 을, vocal final + 를").',
+  '- examples: 2 o 3 oraciones correctas cortas y naturales, en estilo cortés (-요), que usen la misma regla, con su traducción.',
+  'Sé exacto. Si la frase del estudiante en realidad estaba bien, dilo en explanation.'
+].join('\n');
+const ERR_BUSY = new Set();
+function recordError(m, category){
+  if (ERRS.some(e => e.msgId === m.id)) return;
+  ERRS.push({ id: uid(), msgId: m.id, wrong: m.ko, right: m.correction, note: m.note || '', category: category || 'Otros', level: CONV?.level || null, date: Date.now(), done: false });
+  saveErrs();
+}
+function errGroups(list){
+  const g = {};
+  for (const e of list) (g[e.category] = g[e.category] || { category: e.category, items: [] }).items.push(e);
+  return Object.values(g).sort((a, b) => b.items.length - a.items.length || Math.max(...b.items.map(x => x.date)) - Math.max(...a.items.map(x => x.date)));
+}
+// los tipos de error que se repiten (2 o más veces sin marcar como aprendidos), para que 지수 los haga practicar
+const frequentErrors = () => errGroups(ERRS.filter(e => !e.done && e.category !== 'Otros')).filter(g => g.items.length >= 2).slice(0, 3);
+async function explainError(er){
+  ERR_BUSY.add(er.id); er.err = ''; renderAll(); if (PANEL === 'dict') drawDict();
+  try {
+    const x = await ask(S.defModel, ERR_SYSTEM, `FRASE DEL ESTUDIANTE: «${er.wrong}»\nCORREGIDA: «${er.right}»` + (er.note ? `\nNOTA BREVE: ${er.note}` : ''), ERR_SCHEMA, { effort: 'low', maxTokens: 12000, ms: 120000 });
+    er.expl = x; er.showExpl = true;
+    if (x.category && (!er.category || er.category === 'Otros')) er.category = x.category;
+  } catch (e) { er.err = e instanceof NoKey ? 'Falta la clave de la API (⚙ Ajustes).' : 'No se pudo explicar: ' + e.message; }
+  ERR_BUSY.delete(er.id); saveErrs(); renderAll(); if (PANEL === 'dict') drawDict();
+}
+function errExplBlock(er){
+  const x = er.expl, d = document.createElement('div'); d.style.marginTop = '6px';
+  d.innerHTML = `<div>${esc(x.explanation)}</div>${x.rule ? `<div class="form">📏 ${esc(x.rule)}</div>` : ''}
+    ${(x.examples || []).map(e => `<div class="ex"><span class="ko" data-say="${esc(e.ko)}" style="cursor:pointer">🔊 ${esc(e.ko)}</span> <span class="small">${esc(e.es)}</span></div>`).join('')}`;
+  d.querySelectorAll('[data-say]').forEach(e => e.onclick = () => speak(e.dataset.say));
+  return d;
+}
+
 /* ---------- «¿qué es…?»: traducción automática ---------- */
 const DEMONST = /^(이거|그거|저거|이것|그것|저것|여기|거기|저기|이게|그게|저게|이건|그건|저건|이름|취미|직업)$/;
 function stripParticle(w){
@@ -766,6 +811,19 @@ function renderMsg(m){
       const f = document.createElement('div'); f.className = 'fix';
       f.innerHTML = `<b>Mejor:</b> <span class="ko">${esc(m.correction)}</span> <button class="spk" title="Escuchar">🔊</button>${m.note ? `<div>${esc(m.note)}</div>` : ''}`;
       f.querySelector('.spk').onclick = () => speak(m.correction);
+      const er = ERRS.find(e => e.msgId === m.id);
+      if (er) {
+        const tl = document.createElement('div'); tl.className = 'tools';
+        const eb = document.createElement('button'); eb.className = 'chip';
+        eb.textContent = ERR_BUSY.has(er.id) ? 'Explicando…' : er.expl ? (er.showExpl === false ? 'Ver explicación' : 'Ocultar explicación') : '🎓 Explicar error';
+        eb.disabled = ERR_BUSY.has(er.id);
+        eb.onclick = () => { if (er.expl) { er.showExpl = er.showExpl === false; saveErrs(); renderAll(); } else explainError(er); };
+        tl.appendChild(eb);
+        if (er.category) { const c = document.createElement('span'); c.className = 'small'; c.style.alignSelf = 'center'; c.textContent = '· ' + er.category; tl.appendChild(c); }
+        f.appendChild(tl);
+        if (er.err) { const x = document.createElement('div'); x.textContent = er.err; f.appendChild(x); }
+        if (er.expl && er.showExpl !== false) f.appendChild(errExplBlock(er));
+      }
       d.appendChild(f);
     }
   }
@@ -882,18 +940,59 @@ function openLevels(){
 }
 
 let DFILTER = 'todas', DQUERY = '', DOPEN = '';
-function openDict(){ openPanel('Diccionario', 'dict'); drawDict(); }
+let DTAB = 'palabras', EFILTER = 'pendientes';
+function openDict(tab){ if (tab) DTAB = tab; openPanel('Diccionario', 'dict'); drawDict(); }
+function tabsHTML(){
+  const n = ERRS.filter(e => !e.done).length;
+  return `<div class="filters" style="margin-top:0"><button class="chip ${DTAB === 'palabras' ? 'on' : ''}" data-tab="palabras">📖 Palabras (${Object.keys(DICT).length})</button><button class="chip ${DTAB === 'errores' ? 'on' : ''}" data-tab="errores">✍ Mis errores${n ? ` (${n})` : ''}</button></div>`;
+}
+function bindTabs(pb){ pb.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => { DTAB = b.dataset.tab; drawDict(); }); }
+function drawErrors(){
+  const pb = $('pbody');
+  const list = ERRS.filter(e => EFILTER === 'pendientes' ? !e.done : e.done);
+  const groups = errGroups(list);
+  pb.innerHTML = tabsHTML() + `<div class="filters"><button class="chip ${EFILTER === 'pendientes' ? 'on' : ''}" data-ef="pendientes">Por repasar</button><button class="chip ${EFILTER === 'aprendidos' ? 'on' : ''}" data-ef="aprendidos">Aprendidos</button></div>
+    <p class="small">Cada corrección de 지수 queda aquí, agrupada por tipo. Los tipos que repites, 지수 los hace practicar en la conversación. «Explicar» usa el modelo caro.</p><div id="elist"></div>`;
+  bindTabs(pb);
+  pb.querySelectorAll('[data-ef]').forEach(b => b.onclick = () => { EFILTER = b.dataset.ef; drawDict(); });
+  const el = pb.querySelector('#elist');
+  if (!list.length) el.innerHTML = `<p class="small">${EFILTER === 'pendientes' ? 'No hay errores por repasar. Cuando 지수 corrija algo que escribas, aparecerá aquí.' : 'Todavía no marcas errores como aprendidos.'}</p>`;
+  for (const g of groups) {
+    const box = document.createElement('div'); box.className = 'lv';
+    box.innerHTML = `<h3>${esc(g.category)} <span class="small">· ${g.items.length} ${g.items.length === 1 ? 'vez' : 'veces'}</span></h3>`;
+    for (const er of [...g.items].reverse()) {
+      const it = document.createElement('div'); it.className = 'gram';
+      it.innerHTML = `<div class="ko" style="font-size:17px;text-decoration:line-through;color:var(--muted)">${esc(er.wrong)}</div>
+        <div class="ko" style="font-size:18px">${esc(er.right)} <button class="spk" data-say="${esc(er.right)}">🔊</button></div>
+        ${er.note ? `<div class="small">${esc(er.note)}</div>` : ''}
+        <div class="small">${new Date(er.date).toLocaleDateString()}${er.level ? ' · ' + esc(LV(er.level).name) : ''}</div>`;
+      if (er.err) { const x = document.createElement('div'); x.className = 'fix'; x.textContent = er.err; it.appendChild(x); }
+      if (er.expl) it.appendChild(errExplBlock(er));
+      const row = document.createElement('div'); row.className = 'tools';
+      const btn = (label, fn) => { const b = document.createElement('button'); b.className = 'chip'; b.textContent = label; b.onclick = fn; row.appendChild(b); return b; };
+      if (!er.expl) { const b = btn(ERR_BUSY.has(er.id) ? 'Explicando…' : '🎓 Explicar', () => explainError(er)); b.disabled = ERR_BUSY.has(er.id); }
+      btn(er.done ? 'Volver a repasar' : 'Ya lo aprendí ✓', () => { er.done = !er.done; saveErrs(); drawDict(); });
+      btn('Borrar', () => { if (confirm('¿Borrar este error?')) { ERRS = ERRS.filter(x => x !== er); saveErrs(); drawDict(); renderAll(); } });
+      it.appendChild(row);
+      it.querySelectorAll('[data-say]').forEach(x => x.onclick = () => speak(x.dataset.say));
+      box.appendChild(it);
+    }
+    el.appendChild(box);
+  }
+}
 function drawDict(){
+  if (DTAB === 'errores') return drawErrors();
   const pb = $('pbody');
   const all = Object.values(DICT);
   const groups = { todas: () => true, verbos: e => e.pos === 'verbo' || e.pos === 'adjetivo', sustantivos: e => e.pos === 'sustantivo', otras: e => !['verbo','adjetivo','sustantivo'].includes(e.pos), nuevas: e => e.status !== 'conocida', conocidas: e => e.status === 'conocida' };
   const q = DQUERY.trim().toLowerCase();
   const list = all.filter(groups[DFILTER]).filter(e => !q || e.lemma.includes(q) || (e.gloss || '').toLowerCase().includes(q) || Object.keys(e.forms || {}).some(f => f.includes(q)))
     .sort((a, b) => (b.last || b.added || 0) - (a.last || a.added || 0));
-  pb.innerHTML = `<input class="search ko" id="dq" placeholder="Buscar en coreano o en español (también formas conjugadas)…" value="${esc(DQUERY)}">
+  pb.innerHTML = tabsHTML() + `<input class="search ko" id="dq" placeholder="Buscar en coreano o en español (también formas conjugadas)…" value="${esc(DQUERY)}">
     <div class="filters">${Object.keys(groups).map(k => `<button class="chip ${k === DFILTER ? 'on' : ''}" data-f="${k}">${{ todas: 'Todas', verbos: 'Verbos y adjetivos', sustantivos: 'Sustantivos', otras: 'Otras', nuevas: 'Por aprender', conocidas: 'Ya sé' }[k]}</button>`).join('')}</div>
     <div class="small" style="margin-bottom:8px">${list.length} de ${all.length} palabras.</div><div id="dlist"></div>
     <div class="row"><button class="btn sec" id="dExport">Exportar (JSON)</button><label class="btn sec" style="cursor:pointer">Importar<input type="file" id="dImport" accept=".json,application/json" hidden></label></div>`;
+  bindTabs(pb);
   const dl = pb.querySelector('#dlist');
   if (!all.length) dl.innerHTML = '<p class="small">Todavía está vacío. Las palabras se agregan solas cuando conversas, cuando las tocas y cuando preguntas «…뭐예요?».</p>';
   for (const e of list.slice(0, 400)) {
@@ -961,7 +1060,7 @@ function openSettings(){
     <div class="sec-t">Apariencia</div>
     <div class="field"><select id="oTheme"><option value="">Según el sistema</option><option value="light" ${S.theme === 'light' ? 'selected' : ''}>Claro</option><option value="dark" ${S.theme === 'dark' ? 'selected' : ''}>Oscuro</option></select></div>
     <div class="sec-t">Datos</div>
-    <div class="row"><button class="btn sec" id="xConv">Borrar la conversación</button><button class="btn sec" id="xDict">Borrar el diccionario</button></div>`;
+    <div class="row"><button class="btn sec" id="xConv">Borrar la conversación</button><button class="btn sec" id="xDict">Borrar el diccionario</button><button class="btn sec" id="xErrs">Borrar mis errores</button></div>`;
   const on = (id, ev, fn) => $(id).addEventListener(ev, fn);
   on('sChat', 'change', e => { S.chatModel = e.target.value; saveSet(); });
   on('sDef', 'change', e => { S.defModel = e.target.value; saveSet(); });
@@ -977,6 +1076,7 @@ function openSettings(){
   on('oTest', 'click', () => speak('안녕하세요, 만나서 반가워요'));
   on('oTheme', 'change', e => { S.theme = e.target.value; saveSet(); if (S.theme) document.documentElement.dataset.theme = S.theme; else delete document.documentElement.dataset.theme; });
   on('xConv', 'click', () => { if (confirm('¿Borrar la conversación?')) { CONV = null; saveConv(); renderAll(); closePanel(); } });
+  on('xErrs', 'click', () => { if (confirm('¿Borrar todos tus errores guardados?')) { ERRS = []; saveErrs(); renderAll(); } });
   on('xDict', 'click', () => { if (confirm('¿Borrar todo el diccionario? No se puede deshacer.')) { DICT = {}; saveDict(); renderAll(); } });
 }
 
@@ -993,7 +1093,7 @@ $('inp').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey
 $('send').onclick = send;
 $('mic').onclick = toggleMic;
 $('bLevels').onclick = openLevels;
-$('bDict').onclick = openDict;
+$('bDict').onclick = () => openDict();
 $('bSettings').onclick = openSettings;
 $('bListen').onclick = () => { LISTEN = !LISTEN; $('bListen').classList.toggle('on', LISTEN); $('bListen').title = LISTEN ? 'Modo escucha activado: toca un mensaje para ver el texto' : 'Modo escucha: ocultar el texto coreano'; renderAll(); };
 document.addEventListener('keydown', e => { if (e.key === 'Escape') { if (SHEET) closeSheet(); else if (PANEL) closePanel(); } });

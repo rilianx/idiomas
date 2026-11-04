@@ -28,7 +28,10 @@ Una app para aprender idiomas conversando con una IA, empezando por el coreano. 
   5. Planes y deseos
   6. Cortesía y conectores
   7. Libre
-- **Correcciones.** Si lo que escribes tiene errores, debajo aparece la versión correcta con una explicación breve.
+- **Correcciones.** Si lo que escribes tiene errores, el modelo de la conversación muestra debajo la versión correcta («Mejor: …») con una explicación breve y el tipo de error.
+  - **«🎓 Explicar error»**: el modelo caro explica qué estaba mal y por qué, da la regla y ejemplos para escuchar. Solo se usa si aprietas el botón.
+  - **✍ Mis errores** (en 📖): cada corrección queda guardada y agrupada por tipo (p. ej. «Partícula de objeto 을/를 · 3 veces»), para repasarla, explicarla o marcarla como aprendida.
+  - Los tipos de error que repites (2 o más veces, sin marcar como aprendidos), 지수 los hace practicar en la conversación con preguntas que te llevan a usar esas formas.
 
 ## Dos modelos: uno barato y uno caro
 
