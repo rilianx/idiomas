@@ -321,8 +321,12 @@ function romanize(s){
     const d = dec(ch[i]);
     if (!d) { out += ch[i]; carry = null; continue; }
     const n = dec(ch[i + 1]);
-    out += (carry !== null && d.l === 11 ? carry : RI[d.l]) + RV[d.v]; carry = null;
-    if (d.t) { if (n && n.l === 11 && LINK[d.t]) { out += LINK[d.t][0]; carry = LINK[d.t][1]; } else out += RF[d.t]; }
+    out += (carry !== null && (d.l === 11 || d.l === 5) ? carry : RI[d.l]) + RV[d.v]; carry = null;
+    if (d.t) {
+      if (n && n.l === 11 && LINK[d.t]) { out += LINK[d.t][0]; carry = LINK[d.t][1]; }
+      else if (d.t === 8 && n && n.l === 5) { out += 'l'; carry = 'l'; }   // ㄹ+ㄹ → ll
+      else out += RF[d.t];
+    }
   }
   return out;
 }
@@ -402,7 +406,7 @@ let rec = null, recBase = '', recBase0 = '', recHeld = false, recCancel = false,
 function recBar(state){
   const bar = $('recbar'); bar.className = state || '';
   bar.hidden = !state;
-  bar.textContent = { rec: '● Grabando… suelta para enviar · desliza fuera del botón para cancelar', cancel: '✕ Suelta para cancelar', proc: 'Procesando…', stt: 'Transcribiendo…', hint: 'Mantén presionado 🎤 para hablar' }[state] || '';
+  bar.textContent = { rec: '● Grabando… suelta para enviar · desliza fuera del botón para cancelar', cancel: '✕ Suelta para cancelar', proc: 'Procesando…', fix: 'Revisando si dijiste palabras en español…', stt: 'Transcribiendo…', hint: 'Mantén presionado 🎤 para hablar' }[state] || '';
 }
 // un aviso de error del micrófono, con botón para reintentar (si se puede) y para cerrarlo
 function recError(msg, retry){
@@ -412,6 +416,39 @@ function recError(msg, retry){
   if (retry) bar.querySelector('[data-a=retry]').onclick = () => { recBar(null); retry(); };
 }
 // al soltar: enviar lo dictado (si 지수 todavía está respondiendo, queda en el cuadro)
+/* ---------- modo 한+ES: rescatar las palabras en español que quedaron escritas en hangul ----------
+   (los reconocedores escriben en coreano lo que suena: «película» puede quedar como «뻴리꿀라») */
+const mixFixSchema = () => obj({ text: STR, changes: { type: 'array', items: obj({ from: STR, to: STR }) } });   // (obj y STR se definen más abajo)
+const MIX_FIX_SYSTEM = [
+  'Revisas la transcripción automática de lo que dijo un estudiante hispanohablante de coreano. Habla en coreano y, cuando no sabe una palabra, la dice en español en medio de la frase.',
+  'El reconocedor de voz a veces escribe esas palabras en español con hangul, según cómo suenan (p. ej. «película» → «뻴리꿀라», «biblioteca» → «비블리오테카», «manzana» → «만사나»).',
+  'Para cada palabra recibes también su pronunciación en letras latinas. Busca las que NO son coreano real (o no tienen sentido en la frase ni en la conversación) y suenan a una palabra en español, y reemplázalas por esa palabra en español, bien escrita.',
+  '- Mantén pegadas las partículas o terminaciones coreanas que lleve: «뻴리꿀라를» → «película를».',
+  '- No cambies el coreano real, aunque tenga errores, ni los préstamos que ya son palabras coreanas (영화, 커피, 카페, 컴퓨터…). No corrijas la gramática ni traduzcas nada.',
+  '- Si no hay nada que cambiar, devuelve el texto igual y changes vacío.',
+  '- text: la transcripción completa con los reemplazos. changes: cada reemplazo, con from (lo que estaba en hangul) y to (la palabra en español).'
+].join('\n');
+let PENDING_FIXES = [];
+async function fixMixed(text){
+  const prev = CONV?.msgs.filter(m => m.role === 'ai').slice(-1)[0];
+  const words = text.split(/\s+/).filter(Boolean).map(w => /[\uAC00-\uD7A3]/.test(w) ? `${w} (${romanize(w.replace(/[^\uAC00-\uD7A3]/g, ''))})` : w).join(' · ');
+  const user = (prev ? `ÚLTIMO MENSAJE DE 지수: «${prev.ko}»\n` : '') + `TRANSCRIPCIÓN: «${text}»\nPALABRAS Y SU PRONUNCIACIÓN: ${words}`;
+  const out = await ask(S.chatModel, MIX_FIX_SYSTEM, user, mixFixSchema(), { effort: 'low', maxTokens: 2000, ms: 20000, fast: true });
+  const fixed = (out.text || '').trim();
+  return fixed ? { text: fixed, changes: (out.changes || []).filter(c => c && c.from && c.to && c.from !== c.to) } : { text, changes: [] };
+}
+// lo dictado ya está en el cuadro después de «base»: en modo mixto se revisa; después se envía
+async function finishDictation(base){
+  const dictated = $('inp').value.slice(base.length).trim();
+  PENDING_FIXES = [];
+  if (micLang() === 'mix' && /[\uAC00-\uD7A3]/.test(dictated) && KEYS[provOf(S.chatModel)]) {
+    recBar('fix');
+    try { const r = await fixMixed(dictated); if (r.changes.length) { $('inp').value = base + r.text; autosize(); PENDING_FIXES = r.changes; } }
+    catch (e) { console.warn('revisión de español:', e.message); }
+    recBar(null);
+  }
+  sendDictated();
+}
 function sendDictated(){
   if (!$('inp').value.trim()) return;
   if (busy) { recError('지수 todavía está respondiendo: tu mensaje quedó en el cuadro, envíalo con ➤ cuando termine.'); return; }
@@ -420,7 +457,7 @@ function sendDictated(){
 const IS_ANDROID = /Android/i.test(navigator.userAgent);
 // el idioma del micrófono: 'mix' (coreano con palabras en español; por defecto), 'ko' o 'es'.
 // El reconocimiento del navegador no sabe mezclar: ahí 'mix' funciona como coreano.
-const micLang = () => { const l = S.micLang || 'mix'; return l === 'mix' && S.stt !== 'openai' ? 'ko' : l; };
+const micLang = () => S.micLang || 'mix';
 // juntar un trozo reconocido con lo anterior: si el trozo repite o contiene lo anterior, lo reemplaza en vez de sumarse
 function joinHeard(prev, piece){
   const sq = t => t.replace(/\s+/g, '');
@@ -479,7 +516,7 @@ function startRec(){
     if (recCancel) return;
     // (lo dicho puede venir de varios tramos: se compara con lo que había antes de grabar)
     if ($('inp').value.trim() === recBase0.trim()) { recError('No se escuchó nada. Mantén presionado 🎤 mientras hablas.'); return; }
-    sendDictated();
+    finishDictation(recBase0);
   };
   rec.start();
 }
@@ -592,7 +629,7 @@ async function transcribe(blob, secs){
     k.n++; k.cost += (secs / 60) * (STT_PRICES[model] || 0.006); saveUsage();
     recBar(null);
     if (!text) recError('No se entendió lo que dijiste. Intenta de nuevo, hablando un poco más cerca del micrófono.');
-    else sendDictated();
+    else finishDictation(base);
   } catch (e) {
     recBar(null);
     const msg = e.name === 'AbortError' ? 'la transcripción tardó demasiado' : e.message === 'Failed to fetch' ? 'sin conexión con OpenAI' : e.message;
@@ -983,7 +1020,8 @@ function send(fromSug){
   if (prevAi?.sawEs) msgLemmas(prevAi).forEach(l => VIEWED.add(l));
   const q0 = detectQuestion(text);
   if (q0) { VIEWED.add(q0); const g = guessLemma(q0); if (g) VIEWED.add(g); }
-  const m = { id: uid(), role: 'me', ko: text, tokens: [], fromSug: isSug, viewed: [...VIEWED], esPending: /[A-Za-zÁÉÍÓÚáéíóúÑñÜü]{2,}/.test(text) };
+  const sttFixes = PENDING_FIXES.filter(c => text.includes(c.to)); PENDING_FIXES = [];
+  const m = { id: uid(), role: 'me', ko: text, tokens: [], sttFixes, fromSug: isSug, viewed: [...VIEWED], esPending: /[A-Za-zÁÉÍÓÚáéíóúÑñÜü]{2,}/.test(text) };
   VIEWED.clear();
   CONV.msgs.push(m); saveConv(); renderAll(); scrollEnd();
   const q = detectQuestion(text);
@@ -1502,6 +1540,7 @@ function renderMsg(m){
       l.innerHTML = '👤 Anotado en tu perfil: ' + m.learned.map(esc).join(' · ');
       l.title = 'Puedes verlo y editarlo en ⚙ Ajustes'; d.appendChild(l);
     }
+    if (m.sttFixes?.length) { const w = document.createElement('div'); w.className = 'small'; w.style.marginTop = '6px'; w.innerHTML = '🎤 Entendido como español: ' + m.sttFixes.map(c => `<span class="ko">${esc(c.from)}</span> → ${esc(c.to)}`).join(' · '); d.appendChild(w); }
     if (m.esPending) { const w = document.createElement('div'); w.className = 'small'; w.style.marginTop = '6px'; w.textContent = 'Traduciendo al coreano…'; d.appendChild(w); }
     if (m.korean) {
       const f = document.createElement('div'); f.className = 'form';
@@ -1869,11 +1908,11 @@ function micLangUI(){
   const b = $('mlang'), l = S.micLang || 'mix', eff = micLang();
   b.textContent = { mix: '한+ES', ko: '한', es: 'ES' }[l];
   b.classList.toggle('es', l === 'es'); b.classList.toggle('mix', l === 'mix');
-  b.title = { mix: eff === 'mix' ? 'Hablas en coreano y puedes meter palabras en español' : 'Mezcla de coreano y español: necesita el reconocimiento de OpenAI (⚙ Ajustes); con el del navegador se reconoce solo coreano', ko: 'Hablas solo en coreano', es: 'Hablas en español' }[l] + ' · toca para cambiar';
+  b.title = { mix: 'Hablas en coreano y puedes meter palabras en español', ko: 'Hablas solo en coreano', es: 'Hablas en español' }[l] + ' · toca para cambiar';
 }
 $('mlang').onclick = () => {
   S.micLang = { mix: 'ko', ko: 'es', es: 'mix' }[S.micLang || 'mix']; saveSet(); micLangUI();
-  const l = S.micLang, txt = { mix: 'Micrófono: coreano con palabras en español' + (micLang() === 'mix' ? '' : ' (con el reconocimiento del navegador, solo coreano; para mezclar, elige OpenAI en ⚙ Ajustes)'), ko: 'Micrófono: solo coreano', es: 'Micrófono: español' }[l];
+  const l = S.micLang, txt = { mix: 'Micrófono: coreano con palabras en español', ko: 'Micrófono: solo coreano', es: 'Micrófono: español' }[l];
   const bar = $('recbar'); bar.className = 'hint'; bar.hidden = false; bar.textContent = txt;
   clearTimeout(recBar.hintTimer); recBar.hintTimer = setTimeout(() => { recBar.hintTimer = 0; if (!recHeld) recBar(null); }, 2200);
 };
