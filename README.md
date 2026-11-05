@@ -61,7 +61,7 @@ La voz usa lo que trae el navegador: la síntesis de voz con una voz coreana (en
 ## Cómo está hecho
 
 - **Un solo archivo**, sin bibliotecas ni compilación. La conversación, el diccionario y los ajustes se guardan en `localStorage`.
-- **Respuestas en JSON fijo.** La IA de la conversación responde con un esquema fijo (salida estructurada): el texto en coreano, la traducción, y cada palabra con su forma de diccionario, significado y forma gramatical. También analiza y corrige el último mensaje del estudiante.
+- **Dos pedidos por mensaje, para que 지수 responda rápido.** Primero, uno corto que trae solo lo que dice 지수 (coreano y traducción), sin razonamiento previo: aparece y se oye de inmediato. Después, en segundo plano, otro analiza cada palabra (forma de diccionario, significado, forma gramatical), corrige el mensaje del estudiante, anota su perfil y la gramática nueva; y un tercero propone las respuestas sugeridas. Todos usan salida estructurada (JSON fijo).
 - **Caché.** Las instrucciones fijas de cada nivel van primero, para que el proveedor las guarde en caché.
 - **Esfuerzo y respaldo.** La conversación usa esfuerzo bajo, para que sea rápida y barata; las definiciones, esfuerzo medio. En Opus, Sonnet y Fable, si el modelo declina una respuesta, el servidor la reintenta en otro modelo.
 - **Sin IA para lo básico.** El reconocimiento de verbos sin IA descompone el hangul en jamos, quita terminaciones y deshace contracciones e irregulares, y valida cada candidato contra el diccionario y el vocabulario de los niveles.
