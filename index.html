@@ -670,6 +670,7 @@ function chatSystem(levelId){
     'CÓMO CONVERSAS',
     `- Escribe ko SIEMPRE en coreano, en estilo cortés (-요)${levelId >= 6 ? ', y formal (-ㅂ니다) cuando la situación lo pida' : ''}; es es su traducción natural al español.`,
     '- Mensajes cortos: de 1 a 3 oraciones simples. Casi siempre termina con una pregunta fácil para que la conversación siga.',
+    '- No repitas: en un mismo mensaje no digas dos frases que signifiquen lo mismo (p. ej. dos saludos, o «반가워요» y «만나서 반가워요»), y no repitas lo que ya dijiste en mensajes anteriores.',
     free ? '- Usa coreano natural pero sencillo, de nivel básico-intermedio.' :
       '- Usa sobre todo el vocabulario y la gramática de las listas de abajo. Como mucho introduce una o dos palabras nuevas por mensaje, solo si son útiles y fáciles.',
     '- Si el estudiante escribe en español o mezcla idiomas, entiéndelo y responde en coreano sencillo, incluyendo la forma coreana de lo que quiso decir.',
@@ -757,8 +758,10 @@ function transcript(){
   return msgs.map(m => (m.role === 'me' ? 'Estudiante: ' : 'Tú (지수): ') + m.ko).join('\n');
 }
 function newConversation(levelId, topic){
+  if (busy) return;   // (no empezar otra mientras 지수 está respondiendo)
   CONV = { level: levelId, topic: topic || LV(levelId).topics[0], msgs: [] };
-  saveConv(); closePanel(); renderAll(); aiTurn(null);
+  saveConv(); closePanel(); renderAll();
+  STARTING = true; aiTurn(null).finally(() => { STARTING = false; });
 }
 async function aiTurn(userMsg){
   if (!CONV) return;
@@ -767,19 +770,20 @@ async function aiTurn(userMsg){
   const frequent = frequentErrors();
   const user = profileText() + extText(CONV.level) + (frequent.length ? 'ERRORES FRECUENTES DEL ESTUDIANTE (para practicarlos con naturalidad):\n' + frequent.map(g => `- ${g.category} (${g.items.length} veces). Correcto: «${g.items[g.items.length - 1].right}»`).join('\n') + '\n\n' : '') +
     (CONV.msgs.some(m => m.role === 'me' || m.role === 'ai') ? 'CONVERSACIÓN HASTA AHORA:\n' + transcript() + '\n\n' : '') +
-    (userMsg ? 'Responde al último mensaje del estudiante.' : `Empieza tú la conversación. Tema: «${CONV.topic}». Saluda y haz una pregunta sencilla.`);
+    (userMsg ? 'Responde al último mensaje del estudiante.' : `Empieza tú la conversación. Tema: «${CONV.topic}». Escribe un solo saludo breve (una vez) y después una pregunta sencilla sobre el tema; nada más.`);
   try {
     // 1) lo que dice 지수: un pedido corto, sin razonar, que se va mostrando (y leyendo) a medida que llega
     const m = { id: uid(), role: 'ai', ko: '', es: '', tokens: [], suggestions: [], streaming: true };
-    let shown = false, spoken = 0;
+    let shown = false, spoken = 0, lastSaid = '', streamedKo = '';
+    const say = t => { t = t.trim(); if (!t || t === lastSaid) return; lastSaid = t; speak(t, S.rate, true); };
     const onText = raw => {
       const ko = partialString(raw, 'ko'); if (!ko || ko === m.ko) return;
-      m.ko = ko;
+      m.ko = ko; streamedKo = ko;
       if (!shown) { shown = true; CONV.msgs.push(m); renderTyping(false); renderAll(); scrollEnd(); }
       const el = document.querySelector(`.msg[data-id="${m.id}"] .text`);
       if (el) { el.textContent = ko + ' ▍'; const ch = $('chat'); if (ch.scrollHeight - ch.scrollTop - ch.clientHeight < 120) scrollEnd(); }
       // la voz: cada oración apenas termina
-      if (S.autoSpeak) { let end = -1; const re = /[.?!~]+\s/g; let x; while ((x = re.exec(ko))) end = x.index + x[0].length; if (end > spoken) { speak(ko.slice(spoken, end).trim(), S.rate, true); spoken = end; } }
+      if (S.autoSpeak) { let end = -1; const re = /[.?!~]+\s/g; let x; while ((x = re.exec(ko))) end = x.index + x[0].length; if (end > spoken) { say(ko.slice(spoken, end)); spoken = end; } }
     };
     let r;
     try { r = await ask(S.chatModel, chatSystem(lv), user, REPLY_SCHEMA, { effort: 'low', maxTokens: 2000, ms: 45000, fast: true, onText }); }
@@ -788,7 +792,8 @@ async function aiTurn(userMsg){
     if (!shown) CONV.msgs.push(m);
     saveConv();
     busy = false; renderTyping(false); renderAll(); scrollEnd();
-    if (S.autoSpeak && m.ko.length > spoken) speak(m.ko.slice(spoken).trim(), S.rate, true);
+    // lo que falte por leer (si el texto final no empieza igual que lo leído, no se vuelve a leer nada)
+    if (S.autoSpeak && m.ko.length > spoken && m.ko.startsWith(streamedKo.slice(0, spoken).trim())) say(m.ko.slice(spoken));
     // 2) en segundo plano y en paralelo: las palabras de 지수 y las respuestas sugeridas
     if (S.suggest) fetchSuggestions(m);
     analyzeReply(m, lv);
@@ -1457,9 +1462,10 @@ let PANEL = '';
 function openPanel(title, kind){ PANEL = kind; $('ptitle').textContent = title; $('panel').hidden = false; $('pbody').scrollTop = 0; }
 function closePanel(){ PANEL = ''; $('panel').hidden = true; }
 // si no hay conversación y ya está la clave, 지수 la empieza sola
+let STARTING = false;
 const hasTalk = () => !!CONV && CONV.msgs.some(m => m.role === 'ai' || m.role === 'me');
 function maybeAutoStart(){
-  if (busy || hasTalk() || !KEYS[provOf(S.chatModel)]) return false;
+  if (busy || STARTING || hasTalk() || !KEYS[provOf(S.chatModel)]) return false;
   newConversation(CONV?.level || S.level || 1, CONV?.topic);
   return true;
 }
