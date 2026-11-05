@@ -429,8 +429,8 @@ const MIX_FIX_SYSTEM = [
   '- text: la transcripción completa con los reemplazos. changes: cada reemplazo, con from (lo que estaba en hangul) y to (la palabra en español).'
 ].join('\n');
 let PENDING_FIXES = [];
-// ¿hay palabras en hangul que la app no reconoce? (si todas son conocidas, es muy probable que no se haya dicho nada en español,
-// y se envía sin la revisión, que tarda alrededor de un segundo)
+// ¿hay palabras en hangul que la app no reconoce? (con el reconocimiento del navegador, la revisión solo se hace si las hay:
+// sin una segunda transcripción en español, no hay cómo saber más)
 function unknownHangul(text){
   return text.split(/\s+/).map(w => w.replace(/[^\uAC00-\uD7A3]/g, '')).filter(Boolean).filter(w => !guessLemma(w));
 }
@@ -608,6 +608,8 @@ async function startRecording(){
   gate = silenceGate(mstream, mrec);
 }
 const KO_PROMPT = '한국어를 배우는 학생의 말입니다. 틀린 발음이나 문법도 고치지 말고 들리는 그대로 적어 주세요.';
+// en 한+ES: además, que deje las palabras en español en letras latinas (sin «coreanizarlas»)
+const KO_MIX_PROMPT = KO_PROMPT + ' 학생은 모르는 단어를 스페인어로 말하기도 합니다. 스페인어 단어는 한글로 바꾸지 말고 스페인어 철자 그대로 적어 주세요. 예: 저는 película를 좋아해요.';
 const ES_PROMPT = 'Transcribe exactamente lo que dice la persona, sin corregir nada.';
 // en modo 한+ES, la transcripción «esperando español»: lo coreano quedará como sílabas sin sentido, pero el español sale bien escrito
 const ES_MIX_PROMPT = 'Transcribe en español lo que dice la persona. Es un estudiante que habla coreano y mete palabras en español: escribe bien las palabras en español (por ejemplo «película», «biblioteca») y lo que no sea español escríbelo como suene.';
@@ -627,13 +629,15 @@ async function transcribe(blob, secs){
     return collapseRepeats((data.text || '').trim());
   };
   try {
-    let text, merged = null, minutes = secs / 60, es_ok = false;
+    let text, merged = null, minutes = secs / 60, es_ok = false, es_text = '';
     if (lang === 'mix') {
       // 한+ES: el mismo audio dos veces a la vez, esperando coreano y esperando español; después se combinan
-      const [ko, es] = await Promise.allSettled([once('ko', KO_PROMPT), once('es', ES_MIX_PROMPT)]);
+      const [ko, es] = await Promise.allSettled([once('ko', KO_MIX_PROMPT), once('es', ES_MIX_PROMPT)]);
       if (ko.status === 'rejected') throw ko.reason;
-      text = ko.value; es_ok = es.status === 'fulfilled'; minutes *= es_ok ? 2 : 1;
-      if (text && es.status === 'fulfilled' && /[A-Za-zÁÉÍÓÚáéíóúÑñ]{3,}/.test(es.value) && unknownHangul(text).length) {
+      text = ko.value; es_ok = es.status === 'fulfilled'; es_text = es_ok ? es.value : ''; minutes *= es_ok ? 2 : 1;
+      // se combina siempre: una palabra dicha en español puede quedar en KO como una palabra coreana conocida y parecida en
+      // sonido («película» → 브로콜리, brócoli), y eso solo se nota comparando significados
+      if (text && es.status === 'fulfilled' && /[A-Za-zÁÉÍÓÚáéíóúÑñ]{3,}/.test(es.value)) {
         recBar('fix');
         try { merged = await mergeMixed(text, es.value); } catch (e) { console.warn('combinar transcripciones:', e.message); }
       }
@@ -644,7 +648,6 @@ async function transcribe(blob, secs){
     recBar(null);
     if (!text) { recError('No se entendió lo que dijiste. Intenta de nuevo, hablando un poco más cerca del micrófono.'); return; }
     if (merged) { $('inp').value = base + merged.text; autosize(); PENDING_FIXES = merged.changes; sendDictated(); }
-    else if (lang === 'mix' && es_ok && !unknownHangul(text).length) { $('inp').value = base + text; autosize(); sendDictated(); }   // todo conocido: enviar ya
     else { $('inp').value = base + text; autosize(); finishDictation(base); }   // (sin la transcripción en español: la revisión de respaldo)
   } catch (e) {
     recBar(null);
@@ -656,11 +659,14 @@ async function transcribe(blob, secs){
 // combinar las dos transcripciones del mismo audio (esperando coreano y esperando español)
 const MERGE_SYSTEM = [
   'Recibes dos transcripciones automáticas del MISMO audio de un estudiante hispanohablante de coreano, que habla coreano y, cuando no sabe una palabra, la dice en español en medio de la frase.',
-  '- KO se hizo esperando coreano: el coreano está bien, pero las palabras en español quedaron escritas en hangul según cómo suenan (p. ej. «película» → «뻴리꿀라» o algo parecido).',
-  '- ES se hizo esperando español: las palabras en español están bien escritas, pero lo que era coreano quedó como sílabas sin sentido en letras latinas (o mal traducido).',
-  'Arma la frase que realmente dijo: el coreano tomado de KO y las palabras en español tomadas de ES, en el lugar donde se dijeron, manteniendo pegadas las partículas o terminaciones coreanas («película를»).',
-  '- Solo reemplaza en KO lo que no es coreano real (o no tiene sentido) y corresponde a una palabra en español de ES. No cambies el coreano real, aunque tenga errores, ni los préstamos que ya son coreanos (영화, 커피, 카페…). No corrijas ni traduzcas nada.',
+  '- KO se hizo esperando coreano: el coreano está bien, pero una palabra dicha en español puede haber quedado escrita en hangul según cómo suena, o convertida en una palabra coreana PARECIDA EN SONIDO pero de otro significado (p. ej. «película» → «브로콜리», que es brócoli).',
+  '- ES se hizo esperando español: las palabras en español están bien escritas, pero lo que era coreano quedó como sílabas sin sentido en letras latinas.',
+  'Arma la frase que realmente dijo. Para cada palabra de ES que sea una palabra española real (no sílabas sin sentido): mira qué hay en KO en ese mismo lugar.',
+  '  · Si en KO hay algo que NO significa lo mismo (hangul sin sentido, o una palabra coreana de otro significado), el estudiante dijo la palabra en español: ponla en español en ese lugar, manteniendo pegadas las partículas coreanas («película를»).',
+  '  · Si en KO hay una palabra coreana que significa lo mismo (p. ej. «브로콜리» y «brócoli», «커피» y «café»), el estudiante la dijo en coreano: déjala en coreano.',
+  '- No cambies el resto del coreano, aunque tenga errores. No corrijas ni traduzcas nada. Si KO ya tiene palabras en letras latinas, déjalas.',
   '- Si el estudiante no dijo nada en español, devuelve KO tal cual y changes vacío. Si dijo todo en español, devuelve el texto de ES.',
+  'Ejemplo: KO «저는 브로콜리를 좋아해요.» · ES «Choné película rul choaheyo.» → «저는 película를 좋아해요.» (en ES dice película, no brócoli), changes [{from: «브로콜리», to: «película»}].',
   '- text: la frase completa. changes: cada reemplazo, con from (lo que estaba en KO) y to (la palabra en español).'
 ].join('\n');
 async function mergeMixed(ko, es){
