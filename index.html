@@ -94,8 +94,9 @@ footer{display:flex;align-items:flex-end;gap:8px;padding:8px 12px calc(10px + en
 #recbar.err{color:var(--warn);font-weight:normal}
 #recbar.err .chip{margin-left:6px;font-size:13px}
 #send.ready{animation:pulse 1.2s 2}
-#mlang{width:34px;height:46px;border:1px solid var(--line);border-radius:10px;background:var(--card);font-size:14px;flex:none;padding:0}
+#mlang{width:42px;height:46px;border:1px solid var(--line);border-radius:10px;background:var(--card);font-size:14px;flex:none;padding:0}
 #mlang.es{background:var(--warn-soft);color:var(--warn)}
+#mlang.mix{font-size:11px;line-height:1.1;background:var(--new-soft);color:var(--new)}
 #mic.rec{background:var(--accent);color:#fff;animation:pulse 1.2s infinite}
 #send{background:var(--accent);color:#fff}
 @keyframes pulse{50%{box-shadow:0 0 0 7px var(--accent-soft)}}
@@ -417,6 +418,9 @@ function sendDictated(){
   send();
 }
 const IS_ANDROID = /Android/i.test(navigator.userAgent);
+// el idioma del micrófono: 'mix' (coreano con palabras en español; por defecto), 'ko' o 'es'.
+// El reconocimiento del navegador no sabe mezclar: ahí 'mix' funciona como coreano.
+const micLang = () => { const l = S.micLang || 'mix'; return l === 'mix' && S.stt !== 'openai' ? 'ko' : l; };
 // juntar un trozo reconocido con lo anterior: si el trozo repite o contiene lo anterior, lo reemplaza en vez de sumarse
 function joinHeard(prev, piece){
   const sq = t => t.replace(/\s+/g, '');
@@ -445,7 +449,7 @@ function collapseRepeats(text){
   return w.join(' ');
 }
 function startRec(){
-  rec = new SR(); rec.lang = S.micLang === 'es' ? 'es-ES' : 'ko-KR'; rec.interimResults = true;
+  rec = new SR(); rec.lang = micLang() === 'es' ? 'es-ES' : 'ko-KR'; rec.interimResults = true;
   // en Android el modo continuo entrega de nuevo todo lo dicho tras cada pausa (y se repite): ahí se usa por tramos,
   // y al cortarse por la pausa se vuelve a empezar (ver onend)
   rec.continuous = !IS_ANDROID;
@@ -461,7 +465,7 @@ function startRec(){
     if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') { recHeld = false; recCancel = true; rec.failMsg = 'No hay permiso para usar el micrófono. Permítelo en el navegador (el candado junto a la dirección).'; }
     else if (ev.error === 'network') { recHeld = false; rec.failMsg = 'El reconocimiento de voz del navegador necesita conexión a internet.'; }
     else if (ev.error === 'audio-capture') { recHeld = false; recCancel = true; rec.failMsg = 'No se encontró un micrófono.'; }
-    else if (ev.error === 'language-not-supported') { recHeld = false; recCancel = true; rec.failMsg = 'Este navegador no reconoce ' + (S.micLang === 'es' ? 'español' : 'coreano') + '. Prueba con «OpenAI» en ⚙ Ajustes → Reconocimiento de voz.'; }
+    else if (ev.error === 'language-not-supported') { recHeld = false; recCancel = true; rec.failMsg = 'Este navegador no reconoce ' + (micLang() === 'es' ? 'español' : 'coreano') + '. Prueba con «OpenAI» en ⚙ Ajustes → Reconocimiento de voz.'; }
   };
   rec.onend = () => {
     const failMsg = rec?.failMsg; rec = null;
@@ -519,6 +523,7 @@ function micUp(e, cancel){
 // dólares por minuto (estimación con los precios publicados de OpenAI)
 const STT_PRICES = { 'gpt-transcribe': 0.0045, 'gpt-4o-transcribe': 0.006, 'gpt-4o-mini-transcribe': 0.003, 'whisper-1': 0.006 };
 const STT_DEFAULT = 'gpt-transcribe';
+const MIX_PROMPT = 'Un estudiante de coreano habla en coreano y, cuando no sabe una palabra, la dice en español en medio de la frase. Escribe cada palabra en el idioma en que se dijo: el coreano en hangul y el español en letras latinas, sin traducir ni corregir nada. Ejemplo: 저는 manzana를 좋아해요. 어제 biblioteca에 갔어요.';
 let mrec = null, mstream = null, mchunks = [], mT0 = 0, sttBusy = false, gate = null;
 function stopTracks(){ gate?.stop(); gate = null; mstream?.getTracks().forEach(t => t.stop()); mstream = null; }
 // mientras se graba: pausar cuando no se habla y seguir cuando se vuelve a hablar, para que a la transcripción no le lleguen
@@ -567,8 +572,10 @@ async function transcribe(blob, secs){
     const fd = new FormData();
     fd.append('file', blob, 'voz.' + ext);
     fd.append('model', model);
-    if (withLang) fd.append('language', S.micLang === 'es' ? 'es' : 'ko');
-    fd.append('prompt', S.micLang === 'es' ? 'Transcribe exactamente lo que dice la persona, sin corregir nada.' : '한국어를 배우는 학생의 말입니다. 틀린 발음이나 문법도 고치지 말고 들리는 그대로 적어 주세요.');
+    const lang = micLang();
+    // con mezcla de idiomas no se fuerza uno (forzarlo hace que el modelo «traduzca» o invente las palabras del otro)
+    if (withLang && lang !== 'mix') fd.append('language', lang);
+    fd.append('prompt', lang === 'mix' ? MIX_PROMPT : lang === 'es' ? 'Transcribe exactamente lo que dice la persona, sin corregir nada.' : '한국어를 배우는 학생의 말입니다. 틀린 발음이나 문법도 고치지 말고 들리는 그대로 적어 주세요.');
     return fd;
   };
   const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 60000);
@@ -1814,7 +1821,7 @@ function openSettings(){
   on('oGloss', 'change', e => { S.inlineGloss = e.target.checked; saveSet(); renderAll(); });
   on('oDef', 'change', e => { S.autoDefine = e.target.checked; saveSet(); });
   on('oSpeak', 'change', e => { S.autoSpeak = e.target.checked; saveSet(); });
-  on('oStt', 'change', e => { const [stt, model] = e.target.value.split(':'); S.stt = stt; if (model) S.sttModel = model; saveSet(); });
+  on('oStt', 'change', e => { const [stt, model] = e.target.value.split(':'); S.stt = stt; if (model) S.sttModel = model; saveSet(); micLangUI(); });
   on('oSug', 'change', e => { S.suggest = e.target.checked; saveSet(); const last = CONV?.msgs.filter(m => m.role === 'ai').slice(-1)[0]; if (S.suggest && last && !last.suggestions?.length && !last.sugBusy) fetchSuggestions(last); renderQuick(); });
   on('oRate', 'input', e => { S.rate = +e.target.value; $('rv').textContent = S.rate; saveSet(); });
   on('oVoice', 'change', e => { S.voice = e.target.value; saveSet(); });
@@ -1858,8 +1865,18 @@ function autosize(){ const t = $('inp'); t.style.height = 'auto'; t.style.height
 $('inp').addEventListener('input', autosize);
 $('inp').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });
 $('send').onclick = send;
-function micLangUI(){ const b = $('mlang'); const es = S.micLang === 'es'; b.textContent = es ? 'ES' : '한'; b.classList.toggle('es', es); b.title = es ? 'Vas a hablar en español (toca para cambiar a coreano)' : 'Vas a hablar en coreano (toca para cambiar a español)'; }
-$('mlang').onclick = () => { S.micLang = S.micLang === 'es' ? 'ko' : 'es'; saveSet(); micLangUI(); };
+function micLangUI(){
+  const b = $('mlang'), l = S.micLang || 'mix', eff = micLang();
+  b.textContent = { mix: '한+ES', ko: '한', es: 'ES' }[l];
+  b.classList.toggle('es', l === 'es'); b.classList.toggle('mix', l === 'mix');
+  b.title = { mix: eff === 'mix' ? 'Hablas en coreano y puedes meter palabras en español' : 'Mezcla de coreano y español: necesita el reconocimiento de OpenAI (⚙ Ajustes); con el del navegador se reconoce solo coreano', ko: 'Hablas solo en coreano', es: 'Hablas en español' }[l] + ' · toca para cambiar';
+}
+$('mlang').onclick = () => {
+  S.micLang = { mix: 'ko', ko: 'es', es: 'mix' }[S.micLang || 'mix']; saveSet(); micLangUI();
+  const l = S.micLang, txt = { mix: 'Micrófono: coreano con palabras en español' + (micLang() === 'mix' ? '' : ' (con el reconocimiento del navegador, solo coreano; para mezclar, elige OpenAI en ⚙ Ajustes)'), ko: 'Micrófono: solo coreano', es: 'Micrófono: español' }[l];
+  const bar = $('recbar'); bar.className = 'hint'; bar.hidden = false; bar.textContent = txt;
+  clearTimeout(recBar.hintTimer); recBar.hintTimer = setTimeout(() => { recBar.hintTimer = 0; if (!recHeld) recBar(null); }, 2200);
+};
 micLangUI();
 $('mic').addEventListener('pointerdown', micDown);
 $('mic').addEventListener('pointermove', micMove);
