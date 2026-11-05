@@ -88,7 +88,10 @@ footer{display:flex;align-items:flex-end;gap:8px;padding:8px 12px calc(10px + en
 #inp{flex:1;resize:none;border:1px solid var(--line);border-radius:12px;padding:9px 12px;font:18px/1.35 inherit;background:var(--card);color:var(--fg);max-height:120px;min-height:44px}
 #inp:focus{outline:2px solid var(--accent);outline-offset:-1px}
 #mic,#send{width:46px;height:46px;border-radius:50%;border:none;font-size:20px;flex:none}
-#mic{background:var(--card);border:1px solid var(--line)}
+#mic{background:var(--card);border:1px solid var(--line);touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
+#recbar{padding:6px 12px 0;font-size:14px;text-align:center;color:var(--accent);font-weight:600}
+#recbar.cancel,#recbar.hint{color:var(--muted);font-weight:normal}
+#send.ready{animation:pulse 1.2s 2}
 #mic.rec{background:var(--accent);color:#fff;animation:pulse 1.2s infinite}
 #send{background:var(--accent);color:#fff}
 @keyframes pulse{50%{box-shadow:0 0 0 7px var(--accent-soft)}}
@@ -152,8 +155,9 @@ footer{display:flex;align-items:flex-end;gap:8px;padding:8px 12px calc(10px + en
 </header>
 <main id="chat" aria-live="polite"></main>
 <div id="quick"></div>
+<div id="recbar" hidden></div>
 <footer>
-  <button id="mic" title="Hablar en coreano">🎤</button>
+  <button id="mic" title="Mantén presionado para hablar en coreano">🎤</button>
   <textarea id="inp" rows="1" class="ko" placeholder="Escribe o habla en coreano…"></textarea>
   <button id="send" title="Enviar">➤</button>
 </footer>
@@ -381,22 +385,62 @@ function speak(text, rate = S.rate, queue = false){
   speechSynthesis.speak(u);
 }
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let rec = null, recBase = '';
-function toggleMic(){
-  if (!SR) { note('Este navegador no reconoce voz. Prueba con Chrome (computador o Android) o Safari.'); return; }
-  if (rec) { rec.stop(); return; }
-  speechSynthesis?.cancel();
-  rec = new SR(); rec.lang = 'ko-KR'; rec.interimResults = true; rec.continuous = false;
-  recBase = $('inp').value ? $('inp').value + ' ' : '';
-  let finalText = '';
+/* el micrófono, como en WhatsApp: mantener presionado graba; al soltar, el texto queda en el cuadro para revisarlo
+   y enviarlo (no se envía solo); deslizar fuera del botón antes de soltar cancela */
+let rec = null, recBase = '', recHeld = false, recCancel = false, recT0 = 0, recText = '';
+function recBar(state){
+  const bar = $('recbar'); bar.className = state || '';
+  bar.hidden = !state;
+  bar.textContent = { rec: '● Grabando… suelta para terminar · desliza fuera del botón para cancelar', cancel: '✕ Suelta para cancelar', proc: 'Procesando…', hint: 'Mantén presionado 🎤 para hablar' }[state] || '';
+}
+function startRec(){
+  rec = new SR(); rec.lang = 'ko-KR'; rec.interimResults = true; rec.continuous = true;
   rec.onresult = ev => {
-    let interim = ''; finalText = '';
-    for (const r of ev.results) (r.isFinal ? (finalText += r[0].transcript) : (interim += r[0].transcript));
-    $('inp').value = recBase + finalText + interim; autosize();
+    let txt = '';
+    for (const r of ev.results) txt += r[0].transcript;
+    recText = txt; if (!recCancel) { $('inp').value = recBase + txt; autosize(); }
   };
-  rec.onerror = ev => { if (ev.error !== 'no-speech' && ev.error !== 'aborted') note('Micrófono: ' + (ev.error === 'not-allowed' ? 'no hay permiso para usarlo.' : ev.error)); };
-  rec.onend = () => { rec = null; $('mic').classList.remove('rec'); if (S.autoSend && finalText.trim()) send(); };
-  rec.start(); $('mic').classList.add('rec');
+  rec.onerror = ev => { if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') { recHeld = false; recCancel = true; note('Micrófono: no hay permiso para usarlo. Permítelo en el navegador (el candado junto a la dirección).'); } };
+  rec.onend = () => {
+    rec = null;
+    if (recHeld && !recCancel) { recBase = $('inp').value ? $('inp').value + ' ' : ''; recText = ''; try { startRec(); return; } catch (e) {} }   // el navegador cortó por silencio: seguir
+    $('mic').classList.remove('rec');
+    if (recCancel) $('inp').value = recBase.trimEnd();
+    autosize();
+    if (recBar.hintTimer) return;
+    recBar(null);
+    if (!recCancel && $('inp').value.trim()) { const sb = $('send'); sb.classList.remove('ready'); void sb.offsetWidth; sb.classList.add('ready'); }
+  };
+  rec.start();
+}
+function micDown(e){
+  if (e.button > 0) return;
+  e.preventDefault();
+  if (!SR) { note('Este navegador no reconoce voz. Prueba con Chrome (computador o Android) o Safari.'); return; }
+  if (rec || recHeld) return;
+  try { $('mic').setPointerCapture(e.pointerId); } catch (_) {}
+  recHeld = true; recCancel = false; recT0 = Date.now(); recText = '';
+  clearTimeout(recBar.hintTimer); recBar.hintTimer = 0;
+  speechSynthesis?.cancel(); hideTip();
+  recBase = $('inp').value.trim() ? $('inp').value.trim() + ' ' : '';
+  $('mic').classList.add('rec'); recBar('rec');
+  try { startRec(); } catch (err) { recHeld = false; $('mic').classList.remove('rec'); recBar(null); }
+}
+function micMove(e){
+  if (!recHeld) return;
+  const r = $('mic').getBoundingClientRect(), m = 50;
+  const away = e.clientX < r.left - m || e.clientX > r.right + m || e.clientY < r.top - m || e.clientY > r.bottom + m;
+  if (away !== recCancel) { recCancel = away; recBar(away ? 'cancel' : 'rec'); if (away) { $('inp').value = recBase.trimEnd(); autosize(); } else { $('inp').value = recBase + recText; autosize(); } }
+}
+function micUp(e, cancel){
+  if (!recHeld) return;
+  recHeld = false;
+  if (cancel) recCancel = true;
+  if (Date.now() - recT0 < 350) {        // un toque corto: explicar cómo se usa
+    recCancel = true; recBar('hint');
+    recBar.hintTimer = setTimeout(() => { recBar.hintTimer = 0; if (!recHeld) recBar(null); }, 1800);
+  } else recBar(recCancel ? null : 'proc');
+  if (rec) rec.stop(); else { $('mic').classList.remove('rec'); if (!recBar.hintTimer) recBar(null); }
 }
 
 /* ---------- la IA: un modelo barato conversa, uno caro define y explica ---------- */
@@ -1305,7 +1349,6 @@ function openSettings(){
     <div class="sec-t">Audio</div>
     <label class="check"><input type="checkbox" id="oSpeak" ${S.autoSpeak ? 'checked' : ''}><span>Leer en voz alta cada respuesta</span></label>
     <label class="check"><input type="checkbox" id="oSug" ${S.suggest ? 'checked' : ''}><span>Mostrar respuestas sugeridas sobre el cuadro de texto</span></label>
-    <label class="check"><input type="checkbox" id="oSend" ${S.autoSend ? 'checked' : ''}><span>Enviar solo al terminar de hablar 🎤</span></label>
     <div class="field"><label>Velocidad de la voz: <b id="rv">${S.rate}</b></label><input type="range" id="oRate" min="0.5" max="1.3" step="0.05" value="${S.rate}" style="width:100%"></div>
     <div class="field"><label>Voz coreana</label><select id="oVoice">${VOICES.length ? VOICES.map(v => `<option ${v.name === S.voice ? 'selected' : ''}>${esc(v.name)}</option>`).join('') : '<option value="">(predeterminada)</option>'}</select>
       ${VOICES.length ? '' : '<div class="small">No se encontró una voz coreana instalada. En el celular suele venir; en el computador puedes agregarla en los ajustes de idioma o voz del sistema.</div>'}
@@ -1332,7 +1375,6 @@ function openSettings(){
   on('oDef', 'change', e => { S.autoDefine = e.target.checked; saveSet(); });
   on('oSpeak', 'change', e => { S.autoSpeak = e.target.checked; saveSet(); });
   on('oSug', 'change', e => { S.suggest = e.target.checked; saveSet(); renderQuick(); });
-  on('oSend', 'change', e => { S.autoSend = e.target.checked; saveSet(); });
   on('oRate', 'input', e => { S.rate = +e.target.value; $('rv').textContent = S.rate; saveSet(); });
   on('oVoice', 'change', e => { S.voice = e.target.value; saveSet(); });
   on('oTest', 'click', () => speak('안녕하세요, 만나서 반가워요'));
@@ -1373,7 +1415,14 @@ function autosize(){ const t = $('inp'); t.style.height = 'auto'; t.style.height
 $('inp').addEventListener('input', autosize);
 $('inp').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });
 $('send').onclick = send;
-$('mic').onclick = toggleMic;
+$('mic').addEventListener('pointerdown', micDown);
+$('mic').addEventListener('pointermove', micMove);
+$('mic').addEventListener('pointerup', e => micUp(e));
+$('mic').addEventListener('pointercancel', e => micUp(e, true));
+$('mic').addEventListener('contextmenu', e => e.preventDefault());
+// con el teclado: mantener Espacio o Enter sobre el botón
+$('mic').addEventListener('keydown', e => { if ((e.key === ' ' || e.key === 'Enter') && !e.repeat) { e.preventDefault(); micDown({ button: 0, pointerId: 0, preventDefault(){} }); } });
+$('mic').addEventListener('keyup', e => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); micUp(e); } });
 $('bLevels').onclick = openLevels;
 $('bDict').onclick = () => openDict();
 $('bSettings').onclick = openSettings;
