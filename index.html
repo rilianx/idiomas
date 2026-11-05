@@ -459,7 +459,8 @@ function micUp(e, cancel){
 
 /* ---------- la voz con OpenAI: grabar mientras se mantiene 🎤, y al soltar transcribir ---------- */
 // dólares por minuto (estimación con los precios publicados de OpenAI)
-const STT_PRICES = { 'gpt-4o-transcribe': 0.006, 'gpt-4o-mini-transcribe': 0.003, 'whisper-1': 0.006 };
+const STT_PRICES = { 'gpt-transcribe': 0.0045, 'gpt-4o-transcribe': 0.006, 'gpt-4o-mini-transcribe': 0.003, 'whisper-1': 0.006 };
+const STT_DEFAULT = 'gpt-transcribe';
 let mrec = null, mstream = null, mchunks = [], mT0 = 0, sttBusy = false;
 function stopTracks(){ mstream?.getTracks().forEach(t => t.stop()); mstream = null; }
 async function startRecording(){
@@ -482,21 +483,27 @@ async function startRecording(){
 async function transcribe(blob, secs){
   sttBusy = true; recBar('stt');
   const base = recBase, ext = /mp4/.test(blob.type) ? 'mp4' : /ogg/.test(blob.type) ? 'ogg' : 'webm';
-  const fd = new FormData();
-  fd.append('file', blob, 'voz.' + ext);
-  fd.append('model', S.sttModel || 'gpt-4o-transcribe');
-  fd.append('language', S.micLang === 'es' ? 'es' : 'ko');
-  fd.append('prompt', S.micLang === 'es' ? 'Transcribe exactamente lo que dice la persona, sin corregir nada.' : '한국어를 배우는 학생의 말입니다. 틀린 발음이나 문법도 고치지 말고 들리는 그대로 적어 주세요.');
+  const model = S.sttModel || STT_DEFAULT;
+  const form = withLang => {
+    const fd = new FormData();
+    fd.append('file', blob, 'voz.' + ext);
+    fd.append('model', model);
+    if (withLang) fd.append('language', S.micLang === 'es' ? 'es' : 'ko');
+    fd.append('prompt', S.micLang === 'es' ? 'Transcribe exactamente lo que dice la persona, sin corregir nada.' : '한국어를 배우는 학생의 말입니다. 틀린 발음이나 문법도 고치지 말고 들리는 그대로 적어 주세요.');
+    return fd;
+  };
   const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 60000);
   try {
-    const res = await fetch('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', headers: { authorization: 'Bearer ' + KEYS.openai }, body: fd, signal: ctl.signal });
-    const data = await res.json().catch(() => ({}));
+    const go = withLang => fetch('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', headers: { authorization: 'Bearer ' + KEYS.openai }, body: form(withLang), signal: ctl.signal });
+    let res = await go(true), data = await res.json().catch(() => ({}));
+    // (si el modelo no acepta el parámetro de idioma, se pide de nuevo sin él)
+    if (res.status === 400 && /language/i.test(data.error?.message || '')) { res = await go(false); data = await res.json().catch(() => ({})); }
     if (!res.ok) throw httpError(res, data);
     const text = (data.text || '').trim();
     $('inp').value = base + text; autosize();
     // gasto: por minuto de audio
     const day = USAGE[today()] || (USAGE[today()] = {}); const k = day.chat || (day.chat = { n: 0, tin: 0, tout: 0, cost: 0, unpriced: 0 });
-    k.n++; k.cost += (secs / 60) * (STT_PRICES[S.sttModel || 'gpt-4o-transcribe'] || 0.006); saveUsage();
+    k.n++; k.cost += (secs / 60) * (STT_PRICES[model] || 0.006); saveUsage();
     recBar(null);
     if (text) { const sb = $('send'); sb.classList.remove('ready'); void sb.offsetWidth; sb.classList.add('ready'); }
   } catch (e) { recBar(null); note('No se pudo transcribir la voz: ' + (e.name === 'AbortError' ? 'tardó demasiado' : e.message) + '.'); }
@@ -1677,10 +1684,11 @@ function openSettings(){
     <div class="sec-t">Audio</div>
     <div class="field"><label>Reconocimiento de voz (🎤)</label><select id="oStt">
       <option value="browser" ${S.stt !== 'openai' ? 'selected' : ''}>Navegador · gratis (Chrome o Safari)</option>
-      <option value="openai:gpt-4o-transcribe" ${S.stt === 'openai' && (S.sttModel || 'gpt-4o-transcribe') === 'gpt-4o-transcribe' ? 'selected' : ''}>OpenAI · gpt-4o-transcribe (más fiel)</option>
-      <option value="openai:gpt-4o-mini-transcribe" ${S.stt === 'openai' && S.sttModel === 'gpt-4o-mini-transcribe' ? 'selected' : ''}>OpenAI · gpt-4o-mini-transcribe (más barato)</option>
-      <option value="openai:whisper-1" ${S.stt === 'openai' && S.sttModel === 'whisper-1' ? 'selected' : ''}>OpenAI · whisper-1</option></select>
-      <div class="small">El del navegador muestra el texto mientras hablas, pero tiende a «corregir» lo que dices (y no está en Firefox). OpenAI graba y transcribe al soltar, más fiel a lo que dijiste (errores incluidos); usa tu clave de OpenAI y cuesta del orden de medio centavo de dólar por minuto.${S.stt === 'openai' && !KEYS.openai ? ' <b>Falta la clave de OpenAI (más abajo).</b>' : ''}</div></div>
+      <option value="openai:gpt-transcribe" ${S.stt === 'openai' && (S.sttModel || STT_DEFAULT) === 'gpt-transcribe' ? 'selected' : ''}>OpenAI · GPT-Transcribe (el más nuevo, recomendado)</option>
+      <option value="openai:gpt-4o-transcribe" ${S.stt === 'openai' && S.sttModel === 'gpt-4o-transcribe' ? 'selected' : ''}>OpenAI · gpt-4o-transcribe (se retira en feb. 2027)</option>
+      <option value="openai:gpt-4o-mini-transcribe" ${S.stt === 'openai' && S.sttModel === 'gpt-4o-mini-transcribe' ? 'selected' : ''}>OpenAI · gpt-4o-mini-transcribe (más barato; se retira en feb. 2027)</option>
+      <option value="openai:whisper-1" ${S.stt === 'openai' && S.sttModel === 'whisper-1' ? 'selected' : ''}>OpenAI · whisper-1 (se retira en feb. 2027)</option></select>
+      <div class="small">El del navegador muestra el texto mientras hablas, pero tiende a «corregir» lo que dices (y no está en Firefox). OpenAI graba y transcribe al soltar, más fiel a lo que dijiste (errores incluidos); usa tu clave de OpenAI y cuesta del orden de medio centavo de dólar por minuto (GPT-Transcribe: US$ 0,0045 por minuto).${S.stt === 'openai' && !KEYS.openai ? ' <b>Falta la clave de OpenAI (más abajo).</b>' : ''}</div></div>
     <label class="check"><input type="checkbox" id="oSpeak" ${S.autoSpeak ? 'checked' : ''}><span>Leer en voz alta cada respuesta</span></label>
     <label class="check"><input type="checkbox" id="oSug" ${S.suggest ? 'checked' : ''}><span>Mostrar respuestas sugeridas sobre el cuadro de texto</span></label>
     <div class="field"><label>Velocidad de la voz: <b id="rv">${S.rate}</b></label><input type="range" id="oRate" min="0.5" max="1.3" step="0.05" value="${S.rate}" style="width:100%"></div>
