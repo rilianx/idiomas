@@ -428,7 +428,7 @@ const MIX_FIX_SYSTEM = [
   '- Si no hay nada que cambiar, devuelve el texto igual y changes vacío.',
   '- text: la transcripción completa con los reemplazos. changes: cada reemplazo, con from (lo que estaba en hangul) y to (la palabra en español).'
 ].join('\n');
-let PENDING_FIXES = [];
+let PENDING_FIXES = [], PENDING_RAW = null;
 // ¿hay palabras en hangul que la app no reconoce? (con el reconocimiento del navegador, la revisión solo se hace si las hay:
 // sin una segunda transcripción en español, no hay cómo saber más)
 function unknownHangul(text){
@@ -650,6 +650,7 @@ async function transcribe(blob, secs){
     k.n++; k.cost += minutes * (STT_PRICES[model] || 0.006); saveUsage();
     recBar(null);
     if (!text) { recError('No se entendió lo que dijiste. Intenta de nuevo, hablando un poco más cerca del micrófono.'); return; }
+    PENDING_RAW = lang === 'mix' ? { ko: text, es: es_text } : null;
     if (merged) { $('inp').value = base + merged.text; autosize(); PENDING_FIXES = merged.changes; sendDictated(); }
     else { $('inp').value = base + text; autosize(); finishDictation(base); }   // (sin la transcripción en español: la revisión de respaldo)
   } catch (e) {
@@ -674,9 +675,26 @@ const MERGE_SYSTEM = [
 ].join('\n');
 async function mergeMixed(ko, es){
   const words = ko.split(/\s+/).filter(Boolean).map(w => /[가-힣]/.test(w) ? `${w} (${romanize(w.replace(/[^가-힣]/g, ''))})` : w).join(' · ');
-  const out = await ask(S.chatModel, MERGE_SYSTEM, `KO: «${ko}»\nPRONUNCIACIÓN DE KO: ${words}\nES: «${es}»`, mixFixSchema(), { effort: 'low', maxTokens: 2000, ms: 20000, fast: true });
-  const text = (out.text || '').trim();
-  return text ? { text, changes: (out.changes || []).filter(c => c && c.from && c.to && c.from !== c.to) } : null;
+  // (con un poco de razonamiento: sin él, a veces cambiaba una palabra por otra coreana)
+  const out = await ask(S.chatModel, MERGE_SYSTEM, `KO: «${ko}»\nPRONUNCIACIÓN DE KO: ${words}\nES: «${es}»`, mixFixSchema(), { effort: 'low', maxTokens: 4000, ms: 30000 });
+  // la app valida: solo valen los cambios a palabras en letras latinas que estén de verdad en ES, y la frase la arma ella
+  const plain = t => (t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  const latin = t => plain(t).split(/[^a-zñ]+/).filter(Boolean);
+  const esWords = new Set(latin(es));
+  const merged = (out.text || '').trim();
+  // todo en español: vale si no queda hangul y todas sus palabras están en ES
+  if (merged && !/[가-힣]/.test(merged) && latin(merged).length && latin(merged).every(w => esWords.has(w)) && latin(merged).length >= latin(es).length * 0.6)
+    return { text: merged, changes: [] };
+  const PART = ['에서', '으로', '이랑', '하고', '을', '를', '이', '가', '은', '는', '에', '도', '로', '와', '과', '랑', '의'];
+  let text = ko; const changes = [];
+  for (const c of out.changes || []) {
+    if (!c || !c.from || !c.to || /[가-힣]/.test(c.to) || !latin(c.to).length || !latin(c.to).every(w => esWords.has(w)) || !text.includes(c.from)) continue;
+    // si el cambio se llevó la partícula coreana, se la devuelve («베리코리아를» → «película» → «película를»)
+    const part = PART.find(x => c.from.endsWith(x) && c.from.length > x.length && !c.to.endsWith(x));
+    const to = part && /[가-힣]/.test(c.from.slice(0, -part.length)) ? c.to + part : c.to;
+    text = text.replace(c.from, to); changes.push({ from: part ? c.from.slice(0, -part.length) : c.from, to: c.to });
+  }
+  return { text, changes };
 }
 // los errores de la transcripción, explicados
 function sttError(res, data, model){
@@ -1061,8 +1079,8 @@ function send(fromSug){
   if (prevAi?.sawEs) msgLemmas(prevAi).forEach(l => VIEWED.add(l));
   const q0 = detectQuestion(text);
   if (q0) { VIEWED.add(q0); const g = guessLemma(q0); if (g) VIEWED.add(g); }
-  const sttFixes = PENDING_FIXES.filter(c => text.includes(c.to)); PENDING_FIXES = [];
-  const m = { id: uid(), role: 'me', ko: text, tokens: [], sttFixes, fromSug: isSug, viewed: [...VIEWED], esPending: /[A-Za-zÁÉÍÓÚáéíóúÑñÜü]{2,}/.test(text) };
+  const sttFixes = PENDING_FIXES.filter(c => text.includes(c.to)), sttRaw = PENDING_RAW; PENDING_FIXES = []; PENDING_RAW = null;
+  const m = { id: uid(), role: 'me', ko: text, tokens: [], sttFixes, sttRaw, fromSug: isSug, viewed: [...VIEWED], esPending: /[A-Za-zÁÉÍÓÚáéíóúÑñÜü]{2,}/.test(text) };
   VIEWED.clear();
   CONV.msgs.push(m); saveConv(); renderAll(); scrollEnd();
   const q = detectQuestion(text);
@@ -1582,6 +1600,7 @@ function renderMsg(m){
       l.title = 'Puedes verlo y editarlo en ⚙ Ajustes'; d.appendChild(l);
     }
     if (m.sttFixes?.length) { const w = document.createElement('div'); w.className = 'small'; w.style.marginTop = '6px'; w.innerHTML = '🎤 Entendido como español: ' + m.sttFixes.map(c => `<span class="ko">${esc(c.from)}</span> → ${esc(c.to)}`).join(' · '); d.appendChild(w); }
+    if (m.sttRaw) { const w = document.createElement('details'); w.className = 'small'; w.style.marginTop = '4px'; w.innerHTML = `<summary style="cursor:pointer">ver transcripciones</summary><div>Esperando coreano: <span class="ko">${esc(m.sttRaw.ko)}</span></div><div>Esperando español: ${esc(m.sttRaw.es || '(falló)')}</div>`; d.appendChild(w); }
     if (m.esPending) { const w = document.createElement('div'); w.className = 'small'; w.style.marginTop = '6px'; w.textContent = 'Traduciendo al coreano…'; d.appendChild(w); }
     if (m.korean) {
       const f = document.createElement('div'); f.className = 'form';
