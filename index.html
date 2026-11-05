@@ -178,6 +178,7 @@ footer{display:flex;align-items:flex-end;gap:8px;padding:8px 12px calc(10px + en
    Todo vive en el navegador: las claves, la conversación y el diccionario.
    ===================================================================== */
 
+const APP_VERSION = '2026-11-05 · 4';   // (subir en cada cambio: sirve para confirmar que el navegador tiene la última)
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const load = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } catch (e) { return d; } };
@@ -446,6 +447,8 @@ async function fixMixed(text){
 async function finishDictation(base){
   const dictated = $('inp').value.slice(base.length).trim();
   PENDING_FIXES = [];
+  if (S.stt !== 'openai') PENDING_RAW = { engine: 'navegador (' + (micLang() === 'es' ? 'español' : 'coreano') + ')', heard: dictated };
+  else if (PENDING_RAW) PENDING_RAW.engine = 'OpenAI · ' + (S.sttModel || STT_DEFAULT);
   if (micLang() === 'mix' && unknownHangul(dictated).length && KEYS[provOf(S.chatModel)]) {
     recBar('fix');
     try { const r = await fixMixed(dictated); if (r.changes.length) { $('inp').value = base + r.text; autosize(); PENDING_FIXES = r.changes; } }
@@ -650,7 +653,7 @@ async function transcribe(blob, secs){
     k.n++; k.cost += minutes * (STT_PRICES[model] || 0.006); saveUsage();
     recBar(null);
     if (!text) { recError('No se entendió lo que dijiste. Intenta de nuevo, hablando un poco más cerca del micrófono.'); return; }
-    PENDING_RAW = lang === 'mix' ? { ko: text, es: es_text } : null;
+    PENDING_RAW = { engine: 'OpenAI · ' + model, ko: text, es: lang === 'mix' ? es_text : undefined };
     if (merged) { $('inp').value = base + merged.text; autosize(); PENDING_FIXES = merged.changes; sendDictated(); }
     else { $('inp').value = base + text; autosize(); finishDictation(base); }   // (sin la transcripción en español: la revisión de respaldo)
   } catch (e) {
@@ -1600,7 +1603,12 @@ function renderMsg(m){
       l.title = 'Puedes verlo y editarlo en ⚙ Ajustes'; d.appendChild(l);
     }
     if (m.sttFixes?.length) { const w = document.createElement('div'); w.className = 'small'; w.style.marginTop = '6px'; w.innerHTML = '🎤 Entendido como español: ' + m.sttFixes.map(c => `<span class="ko">${esc(c.from)}</span> → ${esc(c.to)}`).join(' · '); d.appendChild(w); }
-    if (m.sttRaw) { const w = document.createElement('details'); w.className = 'small'; w.style.marginTop = '4px'; w.innerHTML = `<summary style="cursor:pointer">ver transcripciones</summary><div>Esperando coreano: <span class="ko">${esc(m.sttRaw.ko)}</span></div><div>Esperando español: ${esc(m.sttRaw.es || '(falló)')}</div>`; d.appendChild(w); }
+    if (m.sttRaw) {
+      const r = m.sttRaw, w = document.createElement('details'); w.className = 'small'; w.style.marginTop = '4px';
+      w.innerHTML = `<summary style="cursor:pointer">ver transcripciones</summary><div>Reconocimiento: ${esc(r.engine || '')}</div>` +
+        (r.heard !== undefined ? `<div>Entendido: <span class="ko">${esc(r.heard)}</span></div>` : `<div>Esperando coreano: <span class="ko">${esc(r.ko || '')}</span></div>` + (r.es !== undefined ? `<div>Esperando español: ${esc(r.es || '(falló)')}</div>` : ''));
+      d.appendChild(w);
+    }
     if (m.esPending) { const w = document.createElement('div'); w.className = 'small'; w.style.marginTop = '6px'; w.textContent = 'Traduciendo al coreano…'; d.appendChild(w); }
     if (m.korean) {
       const f = document.createElement('div'); f.className = 'form';
@@ -1903,7 +1911,8 @@ function openSettings(){
     <div class="sec-t">Apariencia</div>
     <div class="field"><select id="oTheme"><option value="">Según el sistema</option><option value="light" ${S.theme === 'light' ? 'selected' : ''}>Claro</option><option value="dark" ${S.theme === 'dark' ? 'selected' : ''}>Oscuro</option></select></div>
     <div class="sec-t">Datos</div>
-    <div class="row"><button class="btn sec" id="xConv">Borrar la conversación</button><button class="btn sec" id="xDict">Borrar el diccionario</button><button class="btn sec" id="xErrs">Borrar mis errores</button><button class="btn sec" id="xProf">Borrar mi perfil</button><button class="btn sec" id="xExt">Borrar lo extendido de los niveles</button></div>`;
+    <div class="row"><button class="btn sec" id="xConv">Borrar la conversación</button><button class="btn sec" id="xDict">Borrar el diccionario</button><button class="btn sec" id="xErrs">Borrar mis errores</button><button class="btn sec" id="xProf">Borrar mi perfil</button><button class="btn sec" id="xExt">Borrar lo extendido de los niveles</button></div>
+    <p class="small" style="margin-top:18px">Versión de la app: <b>${APP_VERSION}</b> · reconocimiento de voz: <b>${S.stt === 'openai' ? 'OpenAI · ' + (S.sttModel || STT_DEFAULT) : 'navegador'}</b></p>`;
   const on = (id, ev, fn) => $(id).addEventListener(ev, fn);
   pb.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { PROFILE.facts = PROFILE.facts.filter(f => f.id !== b.dataset.del); saveProfile(); const y = $('pbody').scrollTop; openSettings(); $('pbody').scrollTop = y; });
   const addFact = () => { const t = $('pfText').value.trim(); if (!t) return; learnFacts([{ kind: $('pfKind').value, text: t }]); openSettings(); };
