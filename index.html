@@ -178,7 +178,7 @@ footer{display:flex;align-items:flex-end;gap:8px;padding:8px 12px calc(10px + en
    Todo vive en el navegador: las claves, la conversación y el diccionario.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-05 · 8';   // (subir en cada cambio: sirve para confirmar que el navegador tiene la última)
+const APP_VERSION = '2026-11-05 · 9';   // (subir en cada cambio: sirve para confirmar que el navegador tiene la última)
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const load = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } catch (e) { return d; } };
@@ -450,7 +450,6 @@ async function finishDictation(base){
   const dictated = $('inp').value.slice(base.length).trim();
   PENDING_FIXES = [];
   if (S.stt !== 'openai') PENDING_RAW = { engine: 'navegador (' + (micLang() === 'es' ? 'español' : 'coreano') + ')', heard: dictated };
-  else if (PENDING_RAW) PENDING_RAW.engine = 'OpenAI · ' + (S.sttModel || STT_DEFAULT);
   if (micLang() === 'mix' && unknownHangul(dictated).length && KEYS[provOf(S.chatModel)]) {
     recBar('fix');
     try { const r = await fixMixed(dictated); if (r.changes.length) { $('inp').value = base + r.text; autosize(); PENDING_FIXES = r.changes; } }
@@ -573,7 +572,7 @@ function micUp(e, cancel){
 // dólares por minuto (estimación con los precios publicados de OpenAI)
 const STT_PRICES = { 'gpt-transcribe': 0.0045, 'gpt-4o-transcribe': 0.006, 'gpt-4o-mini-transcribe': 0.003, 'whisper-1': 0.006 };
 const STT_DEFAULT = 'gpt-transcribe';
-// (ya no se usa: en 한+ES se transcribe dos veces y se combinan)
+// (para la transcripción de una pasada)
 const MIX_PROMPT = 'Un estudiante de coreano habla en coreano y, cuando no sabe una palabra, la dice en español en medio de la frase. Escribe cada palabra en el idioma en que se dijo: el coreano en hangul y el español en letras latinas, sin traducir ni corregir nada. Ejemplo: 저는 manzana를 좋아해요. 어제 biblioteca에 갔어요.';
 let mrec = null, mstream = null, mchunks = [], mT0 = 0, sttBusy = false, gate = null;
 function stopTracks(){ gate?.stop(); gate = null; mstream?.getTracks().forEach(t => t.stop()); mstream = null; }
@@ -643,7 +642,9 @@ async function transcribe(blob, secs){
   try {
     let text, minutes = secs / 60, es_ok = false, es_text = '';
     const t0 = Date.now();
-    if (lang === 'mix') {
+    const single = lang === 'mix' && S.sttPasses === 1;
+    if (single) text = await once(null, MIX_PROMPT);   // una pasada: sin idioma, explicando la mezcla
+    else if (lang === 'mix') {
       // el mismo audio dos veces a la vez, esperando coreano y esperando español
       const [ko, es] = await Promise.allSettled([once('ko', KO_MIX_PROMPT), once('es', ES_MIX_PROMPT)]);
       if (ko.status === 'rejected') throw ko.reason;
@@ -655,7 +656,7 @@ async function transcribe(blob, secs){
     k.n++; k.cost += minutes * (STT_PRICES[model] || 0.006); saveUsage();
     recBar(null);
     if (!text && !es_text) { recError('No se entendió lo que dijiste. Intenta de nuevo, hablando un poco más cerca del micrófono.'); return; }
-    PENDING_RAW = { engine: 'OpenAI · ' + model, ko: text, es: lang === 'mix' ? es_text : undefined, tStt };
+    PENDING_RAW = single ? { engine: 'OpenAI · ' + model + ' · una pasada', heard: text, tStt } : { engine: 'OpenAI · ' + model + (lang === 'mix' ? ' · dos pasadas' : ''), ko: text, es: lang === 'mix' ? es_text : undefined, tStt };
     if (lang === 'mix' && es_ok && /[A-Za-zÁÉÍÓÚáéíóúÑñ]{3,}/.test(es_text)) {
       // orden: 1) las dos transcripciones (listo); 2) se pone la coreana en el mensaje; 3) se envía y 지수 responde con las
       // dos versiones (entiende ambas); 4) en paralelo se arregla el mensaje: la fusión (lo dicho en español) y después
@@ -665,6 +666,7 @@ async function transcribe(blob, secs){
       PENDING_MERGE = text ? mergeMixed(text, es_text).then(r => ({ r, ms: Date.now() - t1 }), e => ({ r: null, ms: Date.now() - t1, err: e.message })) : null;
       $('inp').value = base + provisional; autosize(); sendDictated();
     }
+    else if (single) { $('inp').value = base + text; autosize(); sendDictated(); }
     else { $('inp').value = base + (text || es_text); autosize(); finishDictation(base); }   // (sin la transcripción en español: la revisión de respaldo)
   } catch (e) {
     recBar(null);
@@ -1924,6 +1926,9 @@ function openSettings(){
       <option value="openai:gpt-4o-mini-transcribe" ${S.stt === 'openai' && S.sttModel === 'gpt-4o-mini-transcribe' ? 'selected' : ''}>OpenAI · gpt-4o-mini-transcribe (más barato; se retira en feb. 2027)</option>
       <option value="openai:whisper-1" ${S.stt === 'openai' && S.sttModel === 'whisper-1' ? 'selected' : ''}>OpenAI · whisper-1 (se retira en feb. 2027)</option></select>
       <div class="small">El del navegador muestra el texto mientras hablas, pero tiende a «corregir» lo que dices (y no está en Firefox). OpenAI graba y transcribe al soltar, más fiel a lo que dijiste (errores incluidos); usa tu clave de OpenAI y cuesta del orden de medio centavo de dólar por minuto (GPT-Transcribe: US$ 0,0045 por minuto).${S.stt === 'openai' && !KEYS.openai ? ' <b>Falta la clave de OpenAI (más abajo).</b>' : ''}</div></div>
+    <div class="field"><label>Transcripción con OpenAI</label><select id="oPasses">
+      <option value="2" ${S.sttPasses !== 1 ? 'selected' : ''}>Dos pasadas: coreano y español en paralelo, y fusión (más fiable al mezclar)</option>
+      <option value="1" ${S.sttPasses === 1 ? 'selected' : ''}>Una pasada: el modelo detecta los idiomas (más barato)</option></select></div>
     <label class="check"><input type="checkbox" id="oSpeak" ${S.autoSpeak ? 'checked' : ''}><span>Leer en voz alta cada respuesta</span></label>
     <label class="check"><input type="checkbox" id="oSug" ${S.suggest ? 'checked' : ''}><span>Mostrar respuestas sugeridas sobre el cuadro de texto</span></label>
     <div class="field"><label>Velocidad de la voz: <b id="rv">${S.rate}</b></label><input type="range" id="oRate" min="0.5" max="1.3" step="0.05" value="${S.rate}" style="width:100%"></div>
@@ -1952,6 +1957,7 @@ function openSettings(){
   on('oGloss', 'change', e => { S.inlineGloss = e.target.checked; saveSet(); renderAll(); });
   on('oDef', 'change', e => { S.autoDefine = e.target.checked; saveSet(); });
   on('oSpeak', 'change', e => { S.autoSpeak = e.target.checked; saveSet(); });
+  on('oPasses', 'change', e => { S.sttPasses = +e.target.value; saveSet(); });
   on('oStt', 'change', e => { const [stt, model] = e.target.value.split(':'); S.stt = stt; if (model) S.sttModel = model; saveSet(); micLangUI(); });
   on('oSug', 'change', e => { S.suggest = e.target.checked; saveSet(); const last = CONV?.msgs.filter(m => m.role === 'ai').slice(-1)[0]; if (S.suggest && last && !last.suggestions?.length && !last.sugBusy) fetchSuggestions(last); renderQuick(); });
   on('oRate', 'input', e => { S.rate = +e.target.value; $('rv').textContent = S.rate; saveSet(); });
