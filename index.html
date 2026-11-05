@@ -429,6 +429,11 @@ const MIX_FIX_SYSTEM = [
   '- text: la transcripción completa con los reemplazos. changes: cada reemplazo, con from (lo que estaba en hangul) y to (la palabra en español).'
 ].join('\n');
 let PENDING_FIXES = [];
+// ¿hay palabras en hangul que la app no reconoce? (si todas son conocidas, es muy probable que no se haya dicho nada en español,
+// y se envía sin la revisión, que tarda alrededor de un segundo)
+function unknownHangul(text){
+  return text.split(/\s+/).map(w => w.replace(/[^\uAC00-\uD7A3]/g, '')).filter(Boolean).filter(w => !guessLemma(w));
+}
 async function fixMixed(text){
   const prev = CONV?.msgs.filter(m => m.role === 'ai').slice(-1)[0];
   const words = text.split(/\s+/).filter(Boolean).map(w => /[\uAC00-\uD7A3]/.test(w) ? `${w} (${romanize(w.replace(/[^\uAC00-\uD7A3]/g, ''))})` : w).join(' · ');
@@ -441,7 +446,7 @@ async function fixMixed(text){
 async function finishDictation(base){
   const dictated = $('inp').value.slice(base.length).trim();
   PENDING_FIXES = [];
-  if (micLang() === 'mix' && /[\uAC00-\uD7A3]/.test(dictated) && KEYS[provOf(S.chatModel)]) {
+  if (micLang() === 'mix' && unknownHangul(dictated).length && KEYS[provOf(S.chatModel)]) {
     recBar('fix');
     try { const r = await fixMixed(dictated); if (r.changes.length) { $('inp').value = base + r.text; autosize(); PENDING_FIXES = r.changes; } }
     catch (e) { console.warn('revisión de español:', e.message); }
@@ -622,13 +627,13 @@ async function transcribe(blob, secs){
     return collapseRepeats((data.text || '').trim());
   };
   try {
-    let text, merged = null, minutes = secs / 60;
+    let text, merged = null, minutes = secs / 60, es_ok = false;
     if (lang === 'mix') {
       // 한+ES: el mismo audio dos veces a la vez, esperando coreano y esperando español; después se combinan
       const [ko, es] = await Promise.allSettled([once('ko', KO_PROMPT), once('es', ES_MIX_PROMPT)]);
       if (ko.status === 'rejected') throw ko.reason;
-      text = ko.value; minutes *= es.status === 'fulfilled' ? 2 : 1;
-      if (text && es.status === 'fulfilled' && /[A-Za-zÁÉÍÓÚáéíóúÑñ]{3,}/.test(es.value)) {
+      text = ko.value; es_ok = es.status === 'fulfilled'; minutes *= es_ok ? 2 : 1;
+      if (text && es.status === 'fulfilled' && /[A-Za-zÁÉÍÓÚáéíóúÑñ]{3,}/.test(es.value) && unknownHangul(text).length) {
         recBar('fix');
         try { merged = await mergeMixed(text, es.value); } catch (e) { console.warn('combinar transcripciones:', e.message); }
       }
@@ -639,6 +644,7 @@ async function transcribe(blob, secs){
     recBar(null);
     if (!text) { recError('No se entendió lo que dijiste. Intenta de nuevo, hablando un poco más cerca del micrófono.'); return; }
     if (merged) { $('inp').value = base + merged.text; autosize(); PENDING_FIXES = merged.changes; sendDictated(); }
+    else if (lang === 'mix' && es_ok && !unknownHangul(text).length) { $('inp').value = base + text; autosize(); sendDictated(); }   // todo conocido: enviar ya
     else { $('inp').value = base + text; autosize(); finishDictation(base); }   // (sin la transcripción en español: la revisión de respaldo)
   } catch (e) {
     recBar(null);
