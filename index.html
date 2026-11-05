@@ -178,7 +178,7 @@ footer{display:flex;align-items:flex-end;gap:8px;padding:8px 12px calc(10px + en
    Todo vive en el navegador: las claves, la conversación y el diccionario.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-05 · 9';   // (subir en cada cambio: sirve para confirmar que el navegador tiene la última)
+const APP_VERSION = '2026-11-05 · 10';   // (subir en cada cambio: sirve para confirmar que el navegador tiene la última)
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const load = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } catch (e) { return d; } };
@@ -573,7 +573,7 @@ function micUp(e, cancel){
 const STT_PRICES = { 'gpt-transcribe': 0.0045, 'gpt-4o-transcribe': 0.006, 'gpt-4o-mini-transcribe': 0.003, 'whisper-1': 0.006 };
 const STT_DEFAULT = 'gpt-transcribe';
 // (para la transcripción de una pasada)
-const MIX_PROMPT = 'Un estudiante de coreano habla en coreano y, cuando no sabe una palabra, la dice en español en medio de la frase. Escribe cada palabra en el idioma en que se dijo: el coreano en hangul y el español en letras latinas, sin traducir ni corregir nada. Ejemplo: 저는 manzana를 좋아해요. 어제 biblioteca에 갔어요.';
+const MIX_PROMPT = 'Transcripción literal de un estudiante hispanohablante que aprende coreano: habla coreano y, cuando no sabe una palabra, la dice en español en medio de la frase. Escribe cada palabra con el alfabeto de su idioma: el coreano en hangul y el español en letras latinas, con sus tildes. Nunca escribas en hangul una palabra española ni en letras latinas una coreana. No traduzcas ni corrijas nada. 학생은 한국어와 스페인어를 섞어서 말합니다. 한국어는 한글로, 스페인어 단어는 한글로 바꾸지 말고 스페인어 철자 그대로 적어 주세요. 저는 película를 좋아해요. 어제 biblioteca에 갔어요. 이 manzana는 맛있어요. ¿Cómo se dice? 잘 모르겠어요.';
 let mrec = null, mstream = null, mchunks = [], mT0 = 0, sttBusy = false, gate = null;
 function stopTracks(){ gate?.stop(); gate = null; mstream?.getTracks().forEach(t => t.stop()); mstream = null; }
 // mientras se graba: pausar cuando no se habla y seguir cuando se vuelve a hablar, para que a la transcripción no le lleguen
@@ -642,7 +642,7 @@ async function transcribe(blob, secs){
   try {
     let text, minutes = secs / 60, es_ok = false, es_text = '';
     const t0 = Date.now();
-    const single = lang === 'mix' && S.sttPasses === 1;
+    const single = lang === 'mix' && S.sttPasses !== 2;   // (una pasada por defecto; dos si se eligió)
     if (single) text = await once(null, MIX_PROMPT);   // una pasada: sin idioma, explicando la mezcla
     else if (lang === 'mix') {
       // el mismo audio dos veces a la vez, esperando coreano y esperando español
@@ -1927,8 +1927,8 @@ function openSettings(){
       <option value="openai:whisper-1" ${S.stt === 'openai' && S.sttModel === 'whisper-1' ? 'selected' : ''}>OpenAI · whisper-1 (se retira en feb. 2027)</option></select>
       <div class="small">El del navegador muestra el texto mientras hablas, pero tiende a «corregir» lo que dices (y no está en Firefox). OpenAI graba y transcribe al soltar, más fiel a lo que dijiste (errores incluidos); usa tu clave de OpenAI y cuesta del orden de medio centavo de dólar por minuto (GPT-Transcribe: US$ 0,0045 por minuto).${S.stt === 'openai' && !KEYS.openai ? ' <b>Falta la clave de OpenAI (más abajo).</b>' : ''}</div></div>
     <div class="field"><label>Transcripción con OpenAI</label><select id="oPasses">
-      <option value="2" ${S.sttPasses !== 1 ? 'selected' : ''}>Dos pasadas: coreano y español en paralelo, y fusión (más fiable al mezclar)</option>
-      <option value="1" ${S.sttPasses === 1 ? 'selected' : ''}>Una pasada: el modelo detecta los idiomas (más barato)</option></select></div>
+      <option value="1" ${S.sttPasses !== 2 ? 'selected' : ''}>Una pasada: el modelo escribe cada idioma en su alfabeto (más simple y barato)</option>
+      <option value="2" ${S.sttPasses === 2 ? 'selected' : ''}>Dos pasadas: coreano y español en paralelo, y fusión (por si una pasada falla)</option></select></div>
     <label class="check"><input type="checkbox" id="oSpeak" ${S.autoSpeak ? 'checked' : ''}><span>Leer en voz alta cada respuesta</span></label>
     <label class="check"><input type="checkbox" id="oSug" ${S.suggest ? 'checked' : ''}><span>Mostrar respuestas sugeridas sobre el cuadro de texto</span></label>
     <div class="field"><label>Velocidad de la voz: <b id="rv">${S.rate}</b></label><input type="range" id="oRate" min="0.5" max="1.3" step="0.05" value="${S.rate}" style="width:100%"></div>
