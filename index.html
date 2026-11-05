@@ -91,6 +91,8 @@ footer{display:flex;align-items:flex-end;gap:8px;padding:8px 12px calc(10px + en
 #mic{background:var(--card);border:1px solid var(--line);touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none}
 #recbar{padding:6px 12px 0;font-size:14px;text-align:center;color:var(--accent);font-weight:600}
 #recbar.cancel,#recbar.hint{color:var(--muted);font-weight:normal}
+#recbar.err{color:var(--warn);font-weight:normal}
+#recbar.err .chip{margin-left:6px;font-size:13px}
 #send.ready{animation:pulse 1.2s 2}
 #mlang{width:34px;height:46px;border:1px solid var(--line);border-radius:10px;background:var(--card);font-size:14px;flex:none;padding:0}
 #mlang.es{background:var(--warn-soft);color:var(--warn)}
@@ -399,7 +401,20 @@ let rec = null, recBase = '', recHeld = false, recCancel = false, recT0 = 0, rec
 function recBar(state){
   const bar = $('recbar'); bar.className = state || '';
   bar.hidden = !state;
-  bar.textContent = { rec: '● Grabando… suelta para terminar · desliza fuera del botón para cancelar', cancel: '✕ Suelta para cancelar', proc: 'Procesando…', stt: 'Transcribiendo…', hint: 'Mantén presionado 🎤 para hablar' }[state] || '';
+  bar.textContent = { rec: '● Grabando… suelta para enviar · desliza fuera del botón para cancelar', cancel: '✕ Suelta para cancelar', proc: 'Procesando…', stt: 'Transcribiendo…', hint: 'Mantén presionado 🎤 para hablar' }[state] || '';
+}
+// un aviso de error del micrófono, con botón para reintentar (si se puede) y para cerrarlo
+function recError(msg, retry){
+  const bar = $('recbar'); bar.className = 'err'; bar.hidden = false;
+  bar.innerHTML = '⚠ ' + esc(msg) + (retry ? ' <button class="chip" data-a="retry">Reintentar</button>' : '') + ' <button class="chip" data-a="close">Cerrar</button>';
+  bar.querySelector('[data-a=close]').onclick = () => recBar(null);
+  if (retry) bar.querySelector('[data-a=retry]').onclick = () => { recBar(null); retry(); };
+}
+// al soltar: enviar lo dictado (si 지수 todavía está respondiendo, queda en el cuadro)
+function sendDictated(){
+  if (!$('inp').value.trim()) return;
+  if (busy) { recError('지수 todavía está respondiendo: tu mensaje quedó en el cuadro, envíalo con ➤ cuando termine.'); return; }
+  send();
 }
 function startRec(){
   rec = new SR(); rec.lang = S.micLang === 'es' ? 'es-ES' : 'ko-KR'; rec.interimResults = true; rec.continuous = true;
@@ -408,16 +423,24 @@ function startRec(){
     for (const r of ev.results) txt += r[0].transcript;
     recText = txt; if (!recCancel) { $('inp').value = recBase + txt; autosize(); }
   };
-  rec.onerror = ev => { if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') { recHeld = false; recCancel = true; note('Micrófono: no hay permiso para usarlo. Permítelo en el navegador (el candado junto a la dirección).'); } };
+  rec.onerror = ev => {
+    if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') { recHeld = false; recCancel = true; rec.failMsg = 'No hay permiso para usar el micrófono. Permítelo en el navegador (el candado junto a la dirección).'; }
+    else if (ev.error === 'network') { recHeld = false; rec.failMsg = 'El reconocimiento de voz del navegador necesita conexión a internet.'; }
+    else if (ev.error === 'audio-capture') { recHeld = false; recCancel = true; rec.failMsg = 'No se encontró un micrófono.'; }
+    else if (ev.error === 'language-not-supported') { recHeld = false; recCancel = true; rec.failMsg = 'Este navegador no reconoce ' + (S.micLang === 'es' ? 'español' : 'coreano') + '. Prueba con «OpenAI» en ⚙ Ajustes → Reconocimiento de voz.'; }
+  };
   rec.onend = () => {
-    rec = null;
+    const failMsg = rec?.failMsg; rec = null;
     if (recHeld && !recCancel) { recBase = $('inp').value ? $('inp').value + ' ' : ''; recText = ''; try { startRec(); return; } catch (e) {} }   // el navegador cortó por silencio: seguir
     $('mic').classList.remove('rec');
     if (recCancel) $('inp').value = recBase.trimEnd();
     autosize();
     if (recBar.hintTimer) return;
     recBar(null);
-    if (!recCancel && $('inp').value.trim()) { const sb = $('send'); sb.classList.remove('ready'); void sb.offsetWidth; sb.classList.add('ready'); }
+    if (failMsg) { recError(failMsg); return; }
+    if (recCancel) return;
+    if (!recText.trim()) { recError('No se escuchó nada. Mantén presionado 🎤 mientras hablas.'); return; }
+    sendDictated();
   };
   rec.start();
 }
@@ -426,7 +449,7 @@ function micDown(e){
   e.preventDefault();
   const useOpenAI = S.stt === 'openai';
   if (useOpenAI) {
-    if (!KEYS.openai) { note('Para transcribir la voz con OpenAI falta la clave de OpenAI (⚙ Ajustes). También puedes volver al reconocimiento del navegador.'); return; }
+    if (!KEYS.openai) { recError('Para transcribir tu voz con OpenAI falta la clave de OpenAI (⚙ Ajustes), o vuelve al reconocimiento del navegador.'); return; }
     if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) { note('Este navegador no puede grabar audio.'); return; }
   } else if (!SR) { note('Este navegador no reconoce voz. Prueba con Chrome o Safari, o elige «OpenAI» en ⚙ Ajustes → Reconocimiento de voz.'); return; }
   if (rec || recHeld || mrec || sttBusy) return;
@@ -465,7 +488,7 @@ let mrec = null, mstream = null, mchunks = [], mT0 = 0, sttBusy = false;
 function stopTracks(){ mstream?.getTracks().forEach(t => t.stop()); mstream = null; }
 async function startRecording(){
   try { mstream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
-  catch (e) { recHeld = false; recCancel = true; $('mic').classList.remove('rec'); recBar(null); note('Micrófono: no hay permiso para usarlo. Permítelo en el navegador (el candado junto a la dirección).'); return; }
+  catch (e) { recHeld = false; recCancel = true; $('mic').classList.remove('rec'); recError(e.name === 'NotFoundError' ? 'No se encontró un micrófono.' : 'No hay permiso para usar el micrófono. Permítelo en el navegador (el candado junto a la dirección).'); return; }
   if (!recHeld) { stopTracks(); return; }          // ya soltó antes de que el micrófono estuviera listo
   const type = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg'].find(t => window.MediaRecorder.isTypeSupported?.(t)) || '';
   mrec = new MediaRecorder(mstream, type ? { mimeType: type } : undefined);
@@ -498,16 +521,35 @@ async function transcribe(blob, secs){
     let res = await go(true), data = await res.json().catch(() => ({}));
     // (si el modelo no acepta el parámetro de idioma, se pide de nuevo sin él)
     if (res.status === 400 && /language/i.test(data.error?.message || '')) { res = await go(false); data = await res.json().catch(() => ({})); }
-    if (!res.ok) throw httpError(res, data);
+    if (!res.ok) throw sttError(res, data, model);
     const text = (data.text || '').trim();
     $('inp').value = base + text; autosize();
     // gasto: por minuto de audio
     const day = USAGE[today()] || (USAGE[today()] = {}); const k = day.chat || (day.chat = { n: 0, tin: 0, tout: 0, cost: 0, unpriced: 0 });
     k.n++; k.cost += (secs / 60) * (STT_PRICES[model] || 0.006); saveUsage();
     recBar(null);
-    if (text) { const sb = $('send'); sb.classList.remove('ready'); void sb.offsetWidth; sb.classList.add('ready'); }
-  } catch (e) { recBar(null); note('No se pudo transcribir la voz: ' + (e.name === 'AbortError' ? 'tardó demasiado' : e.message) + '.'); }
+    if (!text) recError('No se entendió lo que dijiste. Intenta de nuevo, hablando un poco más cerca del micrófono.');
+    else sendDictated();
+  } catch (e) {
+    recBar(null);
+    const msg = e.name === 'AbortError' ? 'la transcripción tardó demasiado' : e.message === 'Failed to fetch' ? 'sin conexión con OpenAI' : e.message;
+    recError('No se pudo transcribir tu voz con ' + model + ': ' + msg + '.', e.noRetry ? null : () => { recBase = base; transcribe(blob, secs); });
+  }
   finally { clearTimeout(timer); sttBusy = false; }
+}
+// los errores de la transcripción, explicados
+function sttError(res, data, model){
+  const m = data.error?.message || '';
+  const e = new Error(
+    res.status === 401 ? 'la clave de OpenAI no es válida (revísala en ⚙ Ajustes)' :
+    res.status === 403 ? 'tu clave de OpenAI no tiene permiso para este modelo' :
+    res.status === 404 || /model/i.test(m) && /not.*(found|exist|access)/i.test(m) ? `el modelo ${model} no está disponible para tu cuenta; elige otro en ⚙ Ajustes → Reconocimiento de voz` :
+    res.status === 429 ? (/quota|billing|credit/i.test(m) ? 'tu cuenta de OpenAI no tiene saldo' : 'demasiados pedidos seguidos; espera un poco') :
+    res.status === 413 ? 'la grabación es demasiado larga' :
+    res.status >= 500 ? 'OpenAI tuvo un problema; prueba de nuevo' :
+    'error ' + res.status + (m ? ' (' + m + ')' : ''));
+  e.noRetry = [401, 403, 404, 413].includes(res.status);
+  return e;
 }
 
 /* ---------- la IA: un modelo barato conversa, uno caro define y explica ---------- */
