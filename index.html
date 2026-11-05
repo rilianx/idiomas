@@ -282,6 +282,9 @@ let ERRS = load('hab-errs', []).filter(e => e.expl);
 // gasto estimado por día: { 'AAAA-MM-DD': { chat: { n, tin, tout, cost, unpriced }, explain: {…} } }
 let USAGE = load('hab-usage', {});
 const saveUsage = () => save('hab-usage', USAGE);
+// lo que apareció en las conversaciones y no estaba en la lista de cada nivel: { [nivel]: { words: [lemas], grammar: [{ form, label, example, count, date }] } }
+let EXT = load('hab-ext', {});
+const saveExt = () => save('hab-ext', EXT);
 let PROFILE = Object.assign({ facts: [] }, load('hab-profile', {}));
 const saveProfile = () => { PROFILE.facts = PROFILE.facts.slice(-80); save('hab-profile', PROFILE); };
 let CONV = load('hab-conv', null);   // { level, topic, msgs: [...] }
@@ -550,7 +553,7 @@ const POS = ['sustantivo','verbo','adjetivo','adverbio','pronombre','número','p
 const obj = (props) => ({ type: 'object', additionalProperties: false, required: Object.keys(props), properties: props });
 const STR = { type: 'string' };
 const TOKENS = { type: 'array', items: obj({ t: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, form: STR }) };
-const CHAT_SCHEMA = obj({ reply: obj({ ko: STR, es: STR, tokens: TOKENS }), student: obj({ tokens: TOKENS, correction: STR, note: STR, category: STR, learned: { type: 'array', items: obj({ kind: { type: 'string', enum: ['dato', 'interés'] }, text: STR }) } }), student_next_lines: { type: 'array', items: obj({ ko: STR, es: STR }) } });
+const CHAT_SCHEMA = obj({ reply: obj({ ko: STR, es: STR, tokens: TOKENS }), student: obj({ tokens: TOKENS, correction: STR, note: STR, category: STR, learned: { type: 'array', items: obj({ kind: { type: 'string', enum: ['dato', 'interés'] }, text: STR }) } }), new_grammar: { type: 'array', items: obj({ form: STR, label: STR, example: STR }) }, student_next_lines: { type: 'array', items: obj({ ko: STR, es: STR }) } });
 const ENTRY = obj({ query: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, meaning: STR, explanation: STR, hanja: STR, irregular: STR,
   conjugations: { type: 'array', items: obj({ form: STR, label: STR }) }, examples: { type: 'array', items: obj({ ko: STR, es: STR }) }, in_context: STR });
 const DEF_SCHEMA = obj({ entries: { type: 'array', items: ENTRY } });
@@ -584,6 +587,9 @@ function chatSystem(levelId){
     '- gloss: significado breve en español del lemma (1 a 4 palabras).',
     '- form: si la palabra está conjugada o lleva partícula, explica en español, muy breve, qué forma es: por ejemplo "-았어요: pasado cortés", "에: partícula de lugar (a, en)", "-고 싶어요: querer hacer", "이에요: cópula «es»". Usa "" si es la forma básica.',
     '- reply.es: traducción natural al español de reply.ko.',
+    free ? '- new_grammar: [] (en conversación libre no se registra).' :
+      '- new_grammar: las formas gramaticales (terminaciones, conectores, construcciones o partículas poco básicas) que aparecen en reply.ko o en el último mensaje del estudiante y que NO están en la lista de GRAMÁTICA de abajo (ni equivalen a una de ella). form: el patrón (p. ej. "-네요", "-(으)ㄹ까요?", "-기 전에"); label: qué expresa, en español, en pocas palabras; example: el trozo de la frase donde aparece. [] si todo lo usado está en la lista. No incluyas la cortesía -요, el presente -아/어요 ni partículas básicas ya listadas.',
+    '- Si en el pedido viene el VOCABULARIO Y GRAMÁTICA EXTENDIDOS del nivel (lo que ya apareció fuera de la lista), puedes reutilizarlos de vez en cuando para que el estudiante los practique.',
     '- student_next_lines: 3 o 4 frases que EL ESTUDIANTE podría decirte a ti (지수) como respuesta a tu reply.ko. Las escribe el estudiante, en primera persona, hablándote a ti: NO son frases tuyas, no repiten ni reformulan lo que tú dijiste y no hablan como 지수.',
     '  · Si en reply.ko le hiciste una pregunta, al menos una frase la responde. Ejemplo: si preguntaste «이름이 뭐예요?», una opción buena es «저는 [su nombre]예요.» y una mala es «이름이 뭐예요?» o «저는 지수예요.».',
     '  · Usa los datos reales del PERFIL DEL ESTUDIANTE cuando los haya (su nombre, su país, sus gustos). Si no los sabes, inventa un dato plausible y sencillo (él puede editarlo).',
@@ -644,7 +650,7 @@ async function aiTurn(userMsg){
   busy = true; renderTyping(true);
   const lv = CONV.level;
   const frequent = frequentErrors();
-  const user = profileText() + (frequent.length ? 'ERRORES FRECUENTES DEL ESTUDIANTE (para practicarlos con naturalidad):\n' + frequent.map(g => `- ${g.category} (${g.items.length} veces). Correcto: «${g.items[g.items.length - 1].right}»`).join('\n') + '\n\n' : '') +
+  const user = profileText() + extText(CONV.level) + (frequent.length ? 'ERRORES FRECUENTES DEL ESTUDIANTE (para practicarlos con naturalidad):\n' + frequent.map(g => `- ${g.category} (${g.items.length} veces). Correcto: «${g.items[g.items.length - 1].right}»`).join('\n') + '\n\n' : '') +
     (CONV.msgs.some(m => m.role === 'me' || m.role === 'ai') ? 'CONVERSACIÓN HASTA AHORA:\n' + transcript() + '\n\n' : '') +
     (userMsg ? 'Responde al último mensaje del estudiante.' : `Empieza tú la conversación. Tema: «${CONV.topic}». Saluda y haz una pregunta sencilla.`);
   try {
@@ -657,6 +663,7 @@ async function aiTurn(userMsg){
       userMsg.category = userMsg.correction ? (out.student.category || '').trim() : '';
       if (S.learnProfile) userMsg.learned = learnFacts(out.student.learned);
       learnTokens(userMsg.tokens, userMsg.ko, 'tú');
+      noteExtWords(userMsg.tokens);
       // usarla uno mismo (escrita o hablada) en una frase correcta llena la palabra;
       // si la frase tenía errores, o era una respuesta sugerida, no cuenta
       if (!userMsg.fromSug && !userMsg.correction) for (const t of userMsg.tokens) {
@@ -671,6 +678,8 @@ async function aiTurn(userMsg){
     const suggestions = (out.student_next_lines || []).filter(x => x && x.ko && !said.includes(norm(x.ko)) && norm(x.ko) !== norm(r.ko)).slice(0, 4);
     const m = { id: uid(), role: 'ai', ko: (r.ko || '').trim(), es: (r.es || '').trim(), tokens: r.tokens || [], suggestions };
     m.fresh = learnTokens(m.tokens, m.ko, 'conversación');
+    noteExtWords(m.tokens); noteExtGrammar(out.new_grammar);
+    saveExt();
     CONV.msgs.push(m); saveConv(); saveDict();
     busy = false; renderTyping(false); renderAll(); scrollEnd();
     if (S.autoSpeak && m.ko) speak(m.ko, S.rate, true);
@@ -859,6 +868,41 @@ function explBlock(m){
 }
 // texto en párrafos (separados por una línea en blanco)
 const paras = t => String(t || '').split(/\n\s*\n/).map(p => `<p style="margin:.35em 0;color:var(--fg)">${esc(p.trim()).replace(/\n/g, '<br>')}</p>`).join('');
+
+/* ---------- vocabulario y gramática extendidos de cada nivel ---------- */
+const extOf = lvl => EXT[lvl] || (EXT[lvl] = { words: [], grammar: [] });
+const hasList = lvl => LV(lvl).vocab.length > 0;
+function inBaseVocab(lemma, lvl){ return LEVELS.some(l => l.id <= lvl && l.vocab.some(v => v[0] === lemma)); }
+function inExtUpTo(lemma, lvl){ return LEVELS.some(l => l.id <= lvl && (EXT[l.id]?.words || []).includes(lemma)); }
+function noteExtWords(tokens){
+  const lvl = CONV?.level; if (!lvl || !hasList(lvl)) return;
+  for (const t of tokens || []) {
+    const lemma = (t.lemma || '').trim();
+    if (!lemma || !/[\uAC00-\uD7A3]/.test(lemma) || ['puntuación', 'partícula', 'nombre propio'].includes(t.pos)) continue;
+    if (inBaseVocab(lemma, lvl) || inExtUpTo(lemma, lvl)) continue;
+    extOf(lvl).words.push(lemma);
+  }
+}
+const normForm = f => (f || '').replace(/[\s~()\-–?.]/g, '');
+function noteExtGrammar(list){
+  const lvl = CONV?.level; if (!lvl || !hasList(lvl)) return;
+  const base = LEVELS.filter(l => l.id <= lvl).flatMap(l => l.grammar.map(g => normForm(g[0])));
+  for (const g of list || []) {
+    const k = normForm(g.form); if (!k || base.some(b => b.includes(k) || k.includes(b) && b.length > 2)) continue;
+    const prev = LEVELS.filter(l => l.id <= lvl).map(l => (EXT[l.id]?.grammar || []).find(x => normForm(x.form) === k)).find(Boolean);
+    if (prev) { prev.count = (prev.count || 1) + 1; prev.last = Date.now(); continue; }
+    extOf(lvl).grammar.push({ form: g.form.trim(), label: (g.label || '').trim(), example: (g.example || '').trim(), count: 1, date: Date.now() });
+  }
+}
+function extText(lvl){
+  if (!hasList(lvl)) return '';
+  const ws = LEVELS.filter(l => l.id <= lvl).flatMap(l => EXT[l.id]?.words || []).slice(-60);
+  const gs = LEVELS.filter(l => l.id <= lvl).flatMap(l => EXT[l.id]?.grammar || []).slice(-20);
+  if (!ws.length && !gs.length) return '';
+  return 'VOCABULARIO Y GRAMÁTICA EXTENDIDOS DEL NIVEL (ya aparecieron en sus conversaciones):\n' +
+    (ws.length ? 'Palabras: ' + ws.map(w => DICT[w]?.gloss ? `${w} (${DICT[w].gloss})` : w).join(', ') + '\n' : '') +
+    (gs.length ? 'Gramática: ' + gs.map(g => `${g.form} (${g.label})`).join('; ') + '\n' : '') + '\n';
+}
 
 /* ---------- perfil del estudiante ---------- */
 const normFact = t => (t || '').toLowerCase().replace(/[^a-záéíóúñü0-9\uAC00-\uD7A3 ]/g, '').replace(/\s+/g, ' ').trim();
@@ -1206,6 +1250,16 @@ function maybeAutoStart(){
 }
 $('pclose').onclick = () => { const wasSettings = PANEL === 'settings'; closePanel(); if (wasSettings) maybeAutoStart(); };
 
+// un chip de palabra que se llena según el avance
+function wordChip(lemma, gloss){
+  const pr = wordProgress(lemma);
+  return `<button class="chip ko" data-w="${esc(lemma)}" title="${esc(gloss || '')} · ${pr} %" style="background:linear-gradient(90deg,color-mix(in srgb,var(--new) 38%,var(--bg)) ${pr}%,var(--bg) ${pr}%);${pr >= 100 ? 'border-color:var(--new);' : ''}">${esc(lemma)}${pr >= 100 ? ' ✓' : ''}</button>`;
+}
+function extHTML(lvl){
+  const x = EXT[lvl]; if (!x || (!x.words.length && !x.grammar.length)) return '';
+  return (x.words.length ? `<div class="sec-t">Vocabulario extendido · apareció en tus conversaciones (${x.words.length})</div><div class="vocab">${x.words.map(w => wordChip(w, DICT[w]?.gloss)).join('')}</div>` : '') +
+    (x.grammar.length ? `<div class="sec-t">Gramática extendida · apareció en tus conversaciones (${x.grammar.length})</div>${[...x.grammar].sort((a, b) => (b.count || 1) - (a.count || 1)).map(g => `<div class="gram"><b class="ko">${esc(g.form)}</b> <span class="small">· ${g.count || 1} ${(g.count || 1) === 1 ? 'vez' : 'veces'}</span><div class="small">${esc(g.label)}</div>${g.example ? `<div class="ex"><span class="ko" data-say="${esc(g.example)}" style="cursor:pointer">🔊 ${esc(g.example)}</span></div>` : ''}</div>`).join('')}` : '');
+}
 function openLevels(){
   openPanel('Niveles', 'levels');
   const cur = CONV?.level || S.level || 1;
@@ -1215,10 +1269,11 @@ function openLevels(){
     const known = lv.vocab.filter(v => wordProgress(v[0]) >= 100).length;
     const avg = lv.vocab.length ? Math.round(lv.vocab.reduce((a, v) => a + wordProgress(v[0]), 0) / lv.vocab.length) : 0;
     d.innerHTML = `<h3>${esc(lv.name)}${lv.id === cur ? ' · actual' : ''}</h3><div class="small">${esc(lv.desc)}${lv.vocab.length ? ` · ${known}/${lv.vocab.length} palabras dominadas · ${avg} %` : ''}</div>${lv.vocab.length ? `<div class="bar"><i style="width:${avg}%"></i></div>` : ''}
-      ${lv.vocab.length ? `<div class="sec-t">Vocabulario</div><div class="vocab">${lv.vocab.map(v => { const pr = wordProgress(v[0]); return `<button class="chip ko" data-w="${esc(v[0])}" title="${esc(v[2])} · ${pr} %" style="background:linear-gradient(90deg,color-mix(in srgb,var(--new) 38%,var(--bg)) ${pr}%,var(--bg) ${pr}%);${pr >= 100 ? 'border-color:var(--new);' : ''}">${esc(v[0])}${pr >= 100 ? ' ✓' : ''}</button>`; }).join('')}</div>` : ''}
+      ${lv.vocab.length ? `<div class="sec-t">Vocabulario</div><div class="vocab">${lv.vocab.map(v => wordChip(v[0], v[2])).join('')}</div>` : ''}
       ${lv.grammar.length ? `<div class="sec-t">Gramática</div>${lv.grammar.map(g => `<div class="gram"><b class="ko">${esc(g[0])}</b><div class="small">${esc(g[1])}</div>${g[2].map(x => `<div class="ex"><span class="ko" data-say="${esc(x[0])}" style="cursor:pointer">🔊 ${esc(x[0])}</span> <span class="small">${esc(x[1])}</span></div>`).join('')}</div>`).join('')}` : ''}
+      ${extHTML(lv.id)}
       <div class="sec-t">Practicar</div><div class="row" style="margin-top:4px">${lv.topics.map(t => `<button class="btn ${lv.id === cur ? '' : 'sec'}" data-topic="${esc(t)}">${esc(t)}</button>`).join('')}</div>`;
-    d.querySelectorAll('[data-w]').forEach(b => b.onclick = () => { const w = LEVEL_WORDS[b.dataset.w]; openWord({ t: w.lemma, lemma: w.lemma, pos: w.pos, gloss: w.gloss, form: '' }, null); });
+    d.querySelectorAll('[data-w]').forEach(b => b.onclick = () => { const w = LEVEL_WORDS[b.dataset.w] || DICT[b.dataset.w] || { lemma: b.dataset.w }; openWord({ t: w.lemma, lemma: w.lemma, pos: w.pos || '', gloss: w.gloss || '', form: '' }, null); });
     d.querySelectorAll('[data-say]').forEach(b => b.onclick = () => speak(b.dataset.say));
     d.querySelectorAll('[data-topic]').forEach(b => b.onclick = () => { if (CONV?.msgs.length && !confirm('¿Empezar una conversación nueva? (la actual se borra; tu diccionario se mantiene)')) return; S.level = lv.id; saveSet(); newConversation(lv.id, b.dataset.topic); });
     pb.appendChild(d);
@@ -1357,7 +1412,7 @@ function openSettings(){
     <div class="sec-t">Apariencia</div>
     <div class="field"><select id="oTheme"><option value="">Según el sistema</option><option value="light" ${S.theme === 'light' ? 'selected' : ''}>Claro</option><option value="dark" ${S.theme === 'dark' ? 'selected' : ''}>Oscuro</option></select></div>
     <div class="sec-t">Datos</div>
-    <div class="row"><button class="btn sec" id="xConv">Borrar la conversación</button><button class="btn sec" id="xDict">Borrar el diccionario</button><button class="btn sec" id="xErrs">Borrar mis errores</button><button class="btn sec" id="xProf">Borrar mi perfil</button></div>`;
+    <div class="row"><button class="btn sec" id="xConv">Borrar la conversación</button><button class="btn sec" id="xDict">Borrar el diccionario</button><button class="btn sec" id="xErrs">Borrar mis errores</button><button class="btn sec" id="xProf">Borrar mi perfil</button><button class="btn sec" id="xExt">Borrar lo extendido de los niveles</button></div>`;
   const on = (id, ev, fn) => $(id).addEventListener(ev, fn);
   pb.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { PROFILE.facts = PROFILE.facts.filter(f => f.id !== b.dataset.del); saveProfile(); const y = $('pbody').scrollTop; openSettings(); $('pbody').scrollTop = y; });
   const addFact = () => { const t = $('pfText').value.trim(); if (!t) return; learnFacts([{ kind: $('pfKind').value, text: t }]); openSettings(); };
@@ -1380,6 +1435,7 @@ function openSettings(){
   on('oTest', 'click', () => speak('안녕하세요, 만나서 반가워요'));
   on('oTheme', 'change', e => { S.theme = e.target.value; saveSet(); if (S.theme) document.documentElement.dataset.theme = S.theme; else delete document.documentElement.dataset.theme; });
   on('xConv', 'click', () => { if (confirm('¿Borrar la conversación?')) { CONV = null; saveConv(); closePanel(); renderAll(); maybeAutoStart(); } });
+  on('xExt', 'click', () => { if (confirm('¿Borrar el vocabulario y la gramática extendidos de todos los niveles?')) { EXT = {}; saveExt(); } });
   on('xProf', 'click', () => { if (confirm('¿Borrar todo tu perfil?')) { PROFILE.facts = []; saveProfile(); openSettings(); } });
   on('xErrs', 'click', () => { if (confirm('¿Borrar todos tus errores guardados?')) { ERRS = []; saveErrs(); renderAll(); } });
   on('xDict', 'click', () => { if (confirm('¿Borrar todo el diccionario? No se puede deshacer.')) { DICT = {}; saveDict(); renderAll(); } });
