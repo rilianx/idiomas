@@ -462,7 +462,10 @@ function sendDictated(){
 const IS_ANDROID = /Android/i.test(navigator.userAgent);
 // el idioma del micrófono: 'mix' (coreano con palabras en español; por defecto), 'ko' o 'es'.
 // El reconocimiento del navegador no sabe mezclar: ahí 'mix' funciona como coreano.
-const micLang = () => S.micLang || 'mix';
+// el idioma del micrófono. Con OpenAI siempre 'mix': se transcribe en coreano y en español y se combina (sirve para coreano,
+// español o mezclado). Con el del navegador, que no puede transcribir dos veces: 'mix' (coreano, rescatando las palabras en
+// español) o 'es'.
+const micLang = () => S.stt === 'openai' ? 'mix' : (S.micLang === 'es' ? 'es' : 'mix');
 // juntar un trozo reconocido con lo anterior: si el trozo repite o contiene lo anterior, lo reemplaza en vez de sumarse
 function joinHeard(prev, piece){
   const sq = t => t.replace(/\s+/g, '');
@@ -1943,15 +1946,15 @@ $('inp').addEventListener('input', autosize);
 $('inp').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });
 $('send').onclick = send;
 function micLangUI(){
-  const b = $('mlang'), l = S.micLang || 'mix', eff = micLang();
-  b.textContent = { mix: '한+ES', ko: '한', es: 'ES' }[l];
-  b.classList.toggle('es', l === 'es'); b.classList.toggle('mix', l === 'mix');
-  b.title = { mix: 'Hablas en coreano y puedes meter palabras en español', ko: 'Hablas solo en coreano', es: 'Hablas en español' }[l] + ' · toca para cambiar';
+  const b = $('mlang'), l = micLang();
+  b.hidden = S.stt === 'openai';   // con OpenAI no hace falta elegir: entiende coreano, español y mezclado
+  b.textContent = l === 'es' ? 'ES' : '한';
+  b.classList.toggle('es', l === 'es'); b.classList.remove('mix');
+  b.title = (l === 'es' ? 'Hablas en español' : 'Hablas en coreano (puedes meter palabras sueltas en español)') + ' · toca para cambiar';
 }
 $('mlang').onclick = () => {
-  S.micLang = { mix: 'ko', ko: 'es', es: 'mix' }[S.micLang || 'mix']; saveSet(); micLangUI();
-  const l = S.micLang, txt = { mix: 'Micrófono: coreano con palabras en español', ko: 'Micrófono: solo coreano', es: 'Micrófono: español' }[l];
-  const bar = $('recbar'); bar.className = 'hint'; bar.hidden = false; bar.textContent = txt;
+  S.micLang = micLang() === 'es' ? 'mix' : 'es'; saveSet(); micLangUI();
+  const bar = $('recbar'); bar.className = 'hint'; bar.hidden = false; bar.textContent = micLang() === 'es' ? 'Micrófono: español' : 'Micrófono: coreano (con palabras sueltas en español)';
   clearTimeout(recBar.hintTimer); recBar.hintTimer = setTimeout(() => { recBar.hintTimer = 0; if (!recHeld) recBar(null); }, 2200);
 };
 micLangUI();
