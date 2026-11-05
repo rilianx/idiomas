@@ -182,7 +182,7 @@ footer{display:flex;align-items:flex-end;gap:8px;padding:8px 12px calc(10px + en
    Todo vive en el navegador: las claves, la conversación y el diccionario.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-05 · 11';   // (subir en cada cambio: sirve para confirmar que el navegador tiene la última)
+const APP_VERSION = '2026-11-05 · 12';   // (subir en cada cambio: sirve para confirmar que el navegador tiene la última)
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const load = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } catch (e) { return d; } };
@@ -300,6 +300,9 @@ let EXT = load('hab-ext', {});
 const saveExt = () => save('hab-ext', EXT);
 let PROFILE = Object.assign({ facts: [] }, load('hab-profile', {}));
 const saveProfile = () => { PROFILE.facts = PROFILE.facts.slice(-80); save('hab-profile', PROFILE); };
+// lo que 지수 ha contado de sí misma (para ser coherente en todas las conversaciones): { facts: [{ id, text, date }] }
+let JISU = Object.assign({ facts: [] }, load('hab-jisu', {}));
+const saveJisu = () => { JISU.facts = JISU.facts.slice(-80); save('hab-jisu', JISU); };
 let CONV = load('hab-conv', null);   // { level, topic, msgs: [...] }
 // (un mensaje de 지수 que quedó a medio escribir al cerrar la página se descarta)
 if (CONV?.msgs) CONV.msgs = CONV.msgs.filter(m => !m.streaming);
@@ -924,7 +927,7 @@ const TOKENS = { type: 'array', items: obj({ t: STR, lemma: STR, pos: { type: 's
 const REPLY_SCHEMA = obj({ ko: STR, es: STR });
 const NEWGRAM = { type: 'array', items: obj({ form: STR, label: STR, example: STR }) };
 const STUDENT_SCHEMA = obj({ tokens: TOKENS, korean: STR, es_words: { type: 'array', items: obj({ es: STR, ko: STR, lemma: STR, pos: { type: 'string', enum: POS } }) }, correction: STR, note: STR, category: STR, learned: { type: 'array', items: obj({ kind: { type: 'string', enum: ['dato', 'interés'] }, text: STR }) }, new_grammar: NEWGRAM });
-const REPLY_AN_SCHEMA = obj({ tokens: TOKENS, new_grammar: NEWGRAM });
+const REPLY_AN_SCHEMA = obj({ tokens: TOKENS, new_grammar: NEWGRAM, jisu_learned: { type: 'array', items: STR } });
 const ENTRY = obj({ query: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, meaning: STR, explanation: STR, hanja: STR, irregular: STR,
   conjugations: { type: 'array', items: obj({ form: STR, label: STR }) }, examples: { type: 'array', items: obj({ ko: STR, es: STR }) }, in_context: STR });
 const DEF_SCHEMA = obj({ entries: { type: 'array', items: ENTRY } });
@@ -956,6 +959,7 @@ function chatSystem(levelId){
     '- Si pregunta qué significa algo (뭐예요?, 무슨 뜻이에요?) explícalo en coreano muy simple (un sinónimo o un ejemplo) y sigue conversando; la traducción al español la muestra la app.',
     '- Si el estudiante pide que hables más despacio o que repitas, repite lo último con palabras más simples.',
     '- Nunca pongas romanización ni español dentro de ko.',
+    '- Tienes tu propia vida: gustos, familia, trabajo, rutina, opiniones. Si en el pedido viene LO QUE 지수 YA CONTÓ DE SÍ MISMA, es lo que ya contaste en conversaciones anteriores: sé coherente (no te contradigas) y retómalo cuando venga al caso. Cuando la conversación lo pida, cuenta detalles nuevos de tu vida, sencillos y naturales.',
     '- Si en el pedido viene el PERFIL DEL ESTUDIANTE, úsalo como alguien que lo conoce: recuerda lo que sabes de él (no vuelvas a preguntar su nombre si ya lo sabes) y pregúntale por sus intereses y su vida.',
     '- Si vienen el VOCABULARIO Y GRAMÁTICA EXTENDIDOS del nivel, reutilízalos de vez en cuando para que los practique.',
     '- Si vienen los ERRORES FRECUENTES del estudiante, de vez en cuando haz preguntas que lo lleven a usar esas formas (sin decirle que es por sus errores).',
@@ -993,6 +997,7 @@ function replyAnalysisSystem(levelId){
     'Analizas un mensaje que 지수 (coreana) le escribió a un estudiante hispanohablante de coreano, para una app de aprendizaje que muestra el significado de cada palabra al tocarla. Escribe las explicaciones en español.',
     `Nivel del estudiante: ${LV(levelId).name}.`, '',
     ...TOKEN_RULES,
+    '- jisu_learned: lo NUEVO que 지수 cuenta de sí misma en este mensaje (gustos, familia, mascotas, trabajo o estudios, dónde vive, rutina, experiencias, planes, opiniones). Frases cortas en español, en tercera persona («Le gustan mucho las verduras», «Tiene un gato que se llama 나비», «Trabaja en una cafetería»). Solo lo que ella afirma de sí misma (no lo que pregunta ni lo que dice del estudiante); no repitas lo que ya está en LO QUE 지수 YA CONTÓ; [] si no hay nada nuevo.',
     ...newGrammarRule(levelId)
   ].join('\n');
 }
@@ -1049,7 +1054,7 @@ async function aiTurn(userMsg){
   busy = true; renderTyping(true);
   const lv = CONV.level;
   const frequent = frequentErrors();
-  const user = profileText() + extText(CONV.level) + (frequent.length ? 'ERRORES FRECUENTES DEL ESTUDIANTE (para practicarlos con naturalidad):\n' + frequent.map(g => `- ${g.category} (${g.items.length} veces). Correcto: «${g.items[g.items.length - 1].right}»`).join('\n') + '\n\n' : '') +
+  const user = jisuText() + profileText() + extText(CONV.level) + (frequent.length ? 'ERRORES FRECUENTES DEL ESTUDIANTE (para practicarlos con naturalidad):\n' + frequent.map(g => `- ${g.category} (${g.items.length} veces). Correcto: «${g.items[g.items.length - 1].right}»`).join('\n') + '\n\n' : '') +
     (CONV.msgs.some(m => m.role === 'me' || m.role === 'ai') ? 'CONVERSACIÓN HASTA AHORA:\n' + transcript() + '\n\n' : '') +
     (userMsg ? 'Responde al último mensaje del estudiante.' : `Empieza tú la conversación. Tema: «${CONV.topic}». Escribe un solo saludo breve (una vez) y después una pregunta sencilla sobre el tema; nada más.`);
   try {
@@ -1312,8 +1317,9 @@ async function analyzeStudent(userMsg, lv){
 }
 async function analyzeReply(m, lv){
   try {
-    const out = await ask(S.chatModel, replyAnalysisSystem(lv), `MENSAJE DE 지수: «${m.ko}»`, REPLY_AN_SCHEMA, { effort: 'low', maxTokens: 6000, ms: 60000, fast: true });
+    const out = await ask(S.chatModel, replyAnalysisSystem(lv), jisuText() + `MENSAJE DE 지수: «${m.ko}»`, REPLY_AN_SCHEMA, { effort: 'low', maxTokens: 6000, ms: 60000, fast: true });
     m.tokens = out.tokens || [];
+    m.jisuLearned = learnJisu(out.jisu_learned);
     m.fresh = learnTokens(m.tokens, m.ko, 'conversación');
     noteExtWords(m.tokens); noteExtGrammar(out.new_grammar);
     saveExt(); saveDict();
@@ -1354,7 +1360,7 @@ async function fetchSuggestions(m){
   m.sugBusy = true; renderQuick();
   const msgs = CONV.msgs.filter(x => x.role === 'me' || x.role === 'ai');
   const hist = msgs.slice(-8).map(x => (x.role === 'me' ? 'Estudiante: ' : '지수: ') + x.ko).join('\n');
-  const user = profileText() + 'CONVERSACIÓN:\n' + hist + '\n\nEL ÚLTIMO MENSAJE DE 지수 (al que hay que responder): «' + m.ko + '»';
+  const user = jisuText() + profileText() + 'CONVERSACIÓN:\n' + hist + '\n\nEL ÚLTIMO MENSAJE DE 지수 (al que hay que responder): «' + m.ko + '»';
   try {
     const out = await ask(S.chatModel, sugSystem(CONV.level), user, SUG_SCHEMA, { effort: 'medium', maxTokens: 8000, ms: 60000, kind: 'chat' });
     const said = m.ko.split(/(?<=[.?!])\s+/).map(norm).filter(Boolean);
@@ -1418,6 +1424,19 @@ function learnFacts(list){
   }
   if (added.length) saveProfile();
   return added;
+}
+function learnJisu(list){
+  const added = [];
+  for (const t0 of list || []) {
+    const text = (t0 || '').trim(); if (!text || text.length > 140) continue;
+    if (JISU.facts.some(x => normFact(x.text) === normFact(text))) continue;
+    JISU.facts.push({ id: uid(), text, date: Date.now() }); added.push(text);
+  }
+  if (added.length) saveJisu();
+  return added;
+}
+function jisuText(){
+  return JISU.facts.length ? 'LO QUE 지수 YA CONTÓ DE SÍ MISMA:\n' + JISU.facts.map(f => '- ' + f.text).join('\n') + '\n\n' : '';
 }
 function profileText(){
   if (!PROFILE.facts.length) return '';
@@ -1619,6 +1638,7 @@ function renderMsg(m){
     const ex = b(m.expl ? 'Explicación' : '🎓 Explicar frase', () => { if (m.expl) { m.showExpl = !m.showExpl; saveConv(); renderAll(); } else explainSentence(m); }, 'El profesor (modelo caro) explica la frase completa');
     if (m.explBusy) { ex.disabled = true; ex.textContent = 'Explicando…'; }
     d.appendChild(tools); d.appendChild(es);
+    if (m.jisuLearned?.length) { const l = document.createElement('div'); l.className = 'small'; l.style.marginTop = '6px'; l.textContent = '📝 지수 recordará: ' + m.jisuLearned.join(' · '); d.appendChild(l); }
     if (m.learnedWords?.length) { const l = document.createElement('div'); l.className = 'small'; l.style.marginTop = '6px'; l.innerHTML = '✓ Respondiste sin mirarlas, quedan como «ya sé»: ' + m.learnedWords.map(w => `<span class="ko">${esc(w)}</span>`).join(' · '); d.appendChild(l); }
     if (m.explErr) { const f = document.createElement('div'); f.className = 'fix'; f.textContent = m.explErr; d.appendChild(f); }
     if (m.expl && m.showExpl !== false) d.appendChild(explBlock(m));
@@ -1906,6 +1926,9 @@ function openSettings(){
     <div id="pfacts">${factsHTML}</div>
     <div class="row" style="margin-top:6px;align-items:center"><select id="pfKind" class="search" style="width:auto"><option value="interés">interés</option><option value="dato">dato</option></select><input type="text" id="pfText" class="search" style="flex:1;min-width:160px" placeholder="Agregar (p. ej. «Le gusta el K-pop»)"><button class="btn sec" id="pfAdd">Agregar</button></div>
     <label class="check"><input type="checkbox" id="oLearn" ${S.learnProfile ? 'checked' : ''}><span>Aprender de la conversación (anotar lo que cuentas de ti)</span></label>
+    <div class="sec-t">Perfil de 지수</div>
+    <p class="small">Lo que 지수 ha contado de sí misma. Lo recuerda en todas las conversaciones para ser coherente; se anota solo cuando cuenta algo nuevo.</p>
+    <div>${JISU.facts.length ? JISU.facts.map(f => `<div class="ent" style="display:flex;align-items:center;gap:8px;padding:6px 10px"><span style="flex:1">${esc(f.text)}</span><button class="spk" data-jdel="${f.id}" title="Borrar">✕</button></div>`).join('') : '<p class="small">Todavía no ha contado nada de sí misma.</p>'}</div>
     <div class="sec-t">Modelos</div>
     <div class="field"><label>Para conversar (barato: se usa en cada mensaje)</label><select id="sChat">${opt(CHAT_MODELS, S.chatModel)}</select></div>
     <div class="field"><label>Para explicaciones (caro: solo cuando aprietas «Explicar frase» o «Explicar» en una palabra)</label><select id="sDef">${opt(DEF_MODELS, S.defModel)}</select></div>
@@ -1943,9 +1966,10 @@ function openSettings(){
     <div class="sec-t">Apariencia</div>
     <div class="field"><select id="oTheme"><option value="">Según el sistema</option><option value="light" ${S.theme === 'light' ? 'selected' : ''}>Claro</option><option value="dark" ${S.theme === 'dark' ? 'selected' : ''}>Oscuro</option></select></div>
     <div class="sec-t">Datos</div>
-    <div class="row"><button class="btn sec" id="xConv">Borrar la conversación</button><button class="btn sec" id="xDict">Borrar el diccionario</button><button class="btn sec" id="xErrs">Borrar mis errores</button><button class="btn sec" id="xProf">Borrar mi perfil</button><button class="btn sec" id="xExt">Borrar lo extendido de los niveles</button></div>
+    <div class="row"><button class="btn sec" id="xConv">Borrar la conversación</button><button class="btn sec" id="xDict">Borrar el diccionario</button><button class="btn sec" id="xErrs">Borrar mis errores</button><button class="btn sec" id="xProf">Borrar mi perfil</button><button class="btn sec" id="xJisu">Borrar el perfil de 지수</button><button class="btn sec" id="xExt">Borrar lo extendido de los niveles</button></div>
     <p class="small" style="margin-top:18px">Versión de la app: <b>${APP_VERSION}</b> · reconocimiento de voz: <b>${S.stt === 'openai' ? 'OpenAI · ' + (S.sttModel || STT_DEFAULT) : 'navegador'}</b></p>`;
   const on = (id, ev, fn) => $(id).addEventListener(ev, fn);
+  pb.querySelectorAll('[data-jdel]').forEach(b => b.onclick = () => { JISU.facts = JISU.facts.filter(f => f.id !== b.dataset.jdel); saveJisu(); const y = $('pbody').scrollTop; openSettings(); $('pbody').scrollTop = y; });
   pb.querySelectorAll('[data-del]').forEach(b => b.onclick = () => { PROFILE.facts = PROFILE.facts.filter(f => f.id !== b.dataset.del); saveProfile(); const y = $('pbody').scrollTop; openSettings(); $('pbody').scrollTop = y; });
   const addFact = () => { const t = $('pfText').value.trim(); if (!t) return; learnFacts([{ kind: $('pfKind').value, text: t }]); openSettings(); };
   on('pfAdd', 'click', addFact);
@@ -1970,6 +1994,7 @@ function openSettings(){
   on('oTheme', 'change', e => { S.theme = e.target.value; saveSet(); if (S.theme) document.documentElement.dataset.theme = S.theme; else delete document.documentElement.dataset.theme; });
   on('xConv', 'click', () => { if (confirm('¿Borrar la conversación?')) { CONV = null; saveConv(); closePanel(); renderAll(); maybeAutoStart(); } });
   on('xExt', 'click', () => { if (confirm('¿Borrar el vocabulario y la gramática extendidos de todos los niveles?')) { EXT = {}; saveExt(); } });
+  on('xJisu', 'click', () => { if (confirm('¿Borrar lo que 지수 recuerda de sí misma?')) { JISU.facts = []; saveJisu(); openSettings(); } });
   on('xProf', 'click', () => { if (confirm('¿Borrar todo tu perfil?')) { PROFILE.facts = []; saveProfile(); openSettings(); } });
   on('xErrs', 'click', () => { if (confirm('¿Borrar todos tus errores guardados?')) { ERRS = []; saveErrs(); renderAll(); } });
   on('xDict', 'click', () => { if (confirm('¿Borrar todo el diccionario? No se puede deshacer.')) { DICT = {}; saveDict(); renderAll(); } });
