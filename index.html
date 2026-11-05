@@ -397,7 +397,7 @@ function speak(text, rate = S.rate, queue = false){
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 /* el micrófono, como en WhatsApp: mantener presionado graba; al soltar, el texto queda en el cuadro para revisarlo
    y enviarlo (no se envía solo); deslizar fuera del botón antes de soltar cancela */
-let rec = null, recBase = '', recHeld = false, recCancel = false, recT0 = 0, recText = '';
+let rec = null, recBase = '', recBase0 = '', recHeld = false, recCancel = false, recT0 = 0, recText = '';
 function recBar(state){
   const bar = $('recbar'); bar.className = state || '';
   bar.hidden = !state;
@@ -416,12 +416,45 @@ function sendDictated(){
   if (busy) { recError('지수 todavía está respondiendo: tu mensaje quedó en el cuadro, envíalo con ➤ cuando termine.'); return; }
   send();
 }
+const IS_ANDROID = /Android/i.test(navigator.userAgent);
+// juntar un trozo reconocido con lo anterior: si el trozo repite o contiene lo anterior, lo reemplaza en vez de sumarse
+function joinHeard(prev, piece){
+  const sq = t => t.replace(/\s+/g, '');
+  piece = (piece || '').trim(); if (!piece) return prev;
+  if (!prev) return piece;
+  if (sq(piece).startsWith(sq(prev))) return piece;          // el trozo trae todo lo anterior y algo más
+  if (sq(prev).endsWith(sq(piece))) return prev;             // el trozo ya estaba
+  return prev + ' ' + piece;
+}
+// quitar repeticiones seguidas de una palabra o frase (p. ej. «감사합니다 감사합니다 감사합니다» → «감사합니다»);
+// repeticiones cortas y naturales («네 네») se respetan
+function collapseRepeats(text){
+  let w = (text || '').trim().split(/\s+/).filter(Boolean);
+  for (let n = 6; n >= 1; n--) {
+    const out = [];
+    for (let i = 0; i < w.length;) {
+      const g = w.slice(i, i + n); let k = 1;
+      while (g.length === n && w.slice(i + k * n, i + (k + 1) * n).join(' ') === g.join(' ')) k++;
+      const chars = g.join('').replace(/[.,!?~]/g, '').length;
+      if (k >= 2 && (chars >= 3 || k >= 3)) { out.push(...g); i += k * n; }
+      else { out.push(w[i]); i++; }
+    }
+    w = out;
+  }
+  return w.join(' ');
+}
 function startRec(){
-  rec = new SR(); rec.lang = S.micLang === 'es' ? 'es-ES' : 'ko-KR'; rec.interimResults = true; rec.continuous = true;
+  rec = new SR(); rec.lang = S.micLang === 'es' ? 'es-ES' : 'ko-KR'; rec.interimResults = true;
+  // en Android el modo continuo entrega de nuevo todo lo dicho tras cada pausa (y se repite): ahí se usa por tramos,
+  // y al cortarse por la pausa se vuelve a empezar (ver onend)
+  rec.continuous = !IS_ANDROID;
   rec.onresult = ev => {
     let txt = '';
-    for (const r of ev.results) txt += r[0].transcript;
-    recText = txt; if (!recCancel) { $('inp').value = recBase + txt; autosize(); }
+    for (const r of ev.results) txt = joinHeard(txt, r[0].transcript);
+    recText = txt;
+    // lo dictado en esta grabación (puede venir de varios tramos): se junta sin repetir lo que un tramo vuelve a traer
+    const before = recBase.slice(recBase0.length).trim();
+    if (!recCancel) { $('inp').value = recBase0 + collapseRepeats(joinHeard(before, txt)); autosize(); }
   };
   rec.onerror = ev => {
     if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') { recHeld = false; recCancel = true; rec.failMsg = 'No hay permiso para usar el micrófono. Permítelo en el navegador (el candado junto a la dirección).'; }
@@ -431,15 +464,16 @@ function startRec(){
   };
   rec.onend = () => {
     const failMsg = rec?.failMsg; rec = null;
-    if (recHeld && !recCancel) { recBase = $('inp').value ? $('inp').value + ' ' : ''; recText = ''; try { startRec(); return; } catch (e) {} }   // el navegador cortó por silencio: seguir
+    if (recHeld && !recCancel) { recBase = $('inp').value.trim() ? $('inp').value.trim() + ' ' : ''; recText = ''; try { startRec(); return; } catch (e) {} }   // el navegador cortó por silencio: seguir
     $('mic').classList.remove('rec');
-    if (recCancel) $('inp').value = recBase.trimEnd();
+    if (recCancel) $('inp').value = recBase0.trimEnd();
     autosize();
     if (recBar.hintTimer) return;
     recBar(null);
     if (failMsg) { recError(failMsg); return; }
     if (recCancel) return;
-    if (!recText.trim()) { recError('No se escuchó nada. Mantén presionado 🎤 mientras hablas.'); return; }
+    // (lo dicho puede venir de varios tramos: se compara con lo que había antes de grabar)
+    if ($('inp').value.trim() === recBase0.trim()) { recError('No se escuchó nada. Mantén presionado 🎤 mientras hablas.'); return; }
     sendDictated();
   };
   rec.start();
@@ -457,7 +491,7 @@ function micDown(e){
   recHeld = true; recCancel = false; recT0 = Date.now(); recText = '';
   clearTimeout(recBar.hintTimer); recBar.hintTimer = 0;
   speechSynthesis?.cancel(); hideTip();
-  recBase = $('inp').value.trim() ? $('inp').value.trim() + ' ' : '';
+  recBase = recBase0 = $('inp').value.trim() ? $('inp').value.trim() + ' ' : '';   // recBase0: lo que había antes de grabar
   $('mic').classList.add('rec'); recBar('rec');
   if (useOpenAI) { startRecording(); return; }
   try { startRec(); } catch (err) { recHeld = false; $('mic').classList.remove('rec'); recBar(null); }
@@ -466,7 +500,7 @@ function micMove(e){
   if (!recHeld) return;
   const r = $('mic').getBoundingClientRect(), m = 50;
   const away = e.clientX < r.left - m || e.clientX > r.right + m || e.clientY < r.top - m || e.clientY > r.bottom + m;
-  if (away !== recCancel) { recCancel = away; recBar(away ? 'cancel' : 'rec'); if (away) { $('inp').value = recBase.trimEnd(); autosize(); } else { $('inp').value = recBase + recText; autosize(); } }
+  if (away !== recCancel) { recCancel = away; recBar(away ? 'cancel' : 'rec'); if (away) { $('inp').value = recBase0.trimEnd(); autosize(); } else { $('inp').value = recBase + recText; autosize(); } }
 }
 function micUp(e, cancel){
   if (!recHeld) return;
@@ -522,7 +556,7 @@ async function transcribe(blob, secs){
     // (si el modelo no acepta el parámetro de idioma, se pide de nuevo sin él)
     if (res.status === 400 && /language/i.test(data.error?.message || '')) { res = await go(false); data = await res.json().catch(() => ({})); }
     if (!res.ok) throw sttError(res, data, model);
-    const text = (data.text || '').trim();
+    const text = collapseRepeats((data.text || '').trim());
     $('inp').value = base + text; autosize();
     // gasto: por minuto de audio
     const day = USAGE[today()] || (USAGE[today()] = {}); const k = day.chat || (day.chat = { n: 0, tin: 0, tout: 0, cost: 0, unpriced: 0 });
