@@ -38,8 +38,9 @@ header h1 small{color:var(--muted);font-weight:normal;font-size:13px;margin-left
 .msg.ai{align-self:flex-start;border-top-left-radius:4px}
 .msg.me{align-self:flex-end;background:var(--me);border-color:var(--me-line);border-top-right-radius:4px}
 .msg.note{align-self:center;background:var(--warn-soft);border-color:transparent;color:var(--warn);font-size:14px;box-shadow:none}
-.msg .text{font-size:21px;line-height:2.05;word-break:keep-all}
-.msg.me .text{font-size:19px}
+.msg .text{font-size:18px;line-height:1.75;word-break:keep-all}
+.msg .text:has(ruby){line-height:2.05}
+.msg.me .text{font-size:17px}
 .msg .text.hide{filter:blur(7px);cursor:pointer;user-select:none}
 .w{cursor:pointer;border-radius:5px;padding:0 1px;transition:background .15s}
 .w:hover{background:var(--accent-soft)}
@@ -73,12 +74,15 @@ rt{font-size:11px;color:var(--new);font-family:system-ui,sans-serif;letter-spaci
 .btn:disabled{opacity:.5;cursor:default}
 
 #quick{padding:6px 12px 0}
-#sugs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
+#sugs{display:flex;gap:6px;margin-bottom:6px;overflow-x:auto;scroll-snap-type:x proximity;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+#sugs::-webkit-scrollbar,#fixed::-webkit-scrollbar{display:none}
+#sugs{align-items:flex-start}
+#sugs .chip.sug{flex:none;scroll-snap-align:start}
 #sugs:empty{display:none}
 #fixed{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none}
 #quick .chip{white-space:nowrap;font-size:14px;padding:4px 11px}
-#quick .chip.sug{background:var(--new-soft);border-color:var(--new);display:flex;align-items:stretch;padding:0;border-radius:12px;overflow:hidden;max-width:100%}
-#quick .sug .pick{background:none;border:none;font-size:15px;display:flex;flex-direction:column;align-items:flex-start;line-height:1.25;padding:4px 6px 4px 12px;text-align:left;min-width:0;white-space:normal}
+#quick .chip.sug{background:var(--new-soft);border-color:var(--new);display:flex;align-items:stretch;padding:0;border-radius:12px;overflow:hidden}
+#quick .sug .pick{background:none;border:none;font-size:15px;display:flex;flex-direction:column;align-items:flex-start;line-height:1.25;padding:4px 6px 4px 12px;text-align:left;min-width:0;white-space:nowrap}
 #quick .sug .pick small{font-size:11px;color:var(--muted);font-family:system-ui,sans-serif}
 #quick .sug .tr{background:none;border:none;border-left:1px solid var(--new);padding:0 8px;font-size:15px;color:var(--muted)}
 #quick .sug .pick small[hidden]{display:none}
@@ -178,7 +182,7 @@ footer{display:flex;align-items:flex-end;gap:8px;padding:8px 12px calc(10px + en
    Todo vive en el navegador: las claves, la conversación y el diccionario.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-05 · 10';   // (subir en cada cambio: sirve para confirmar que el navegador tiene la última)
+const APP_VERSION = '2026-11-05 · 11';   // (subir en cada cambio: sirve para confirmar que el navegador tiene la última)
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const load = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } catch (e) { return d; } };
