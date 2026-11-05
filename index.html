@@ -178,7 +178,7 @@ footer{display:flex;align-items:flex-end;gap:8px;padding:8px 12px calc(10px + en
    Todo vive en el navegador: las claves, la conversación y el diccionario.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-05 · 6';   // (subir en cada cambio: sirve para confirmar que el navegador tiene la última)
+const APP_VERSION = '2026-11-05 · 7';   // (subir en cada cambio: sirve para confirmar que el navegador tiene la última)
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const load = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } catch (e) { return d; } };
@@ -653,10 +653,10 @@ async function transcribe(blob, secs){
     if (!text && !es_text) { recError('No se entendió lo que dijiste. Intenta de nuevo, hablando un poco más cerca del micrófono.'); return; }
     PENDING_RAW = { engine: 'OpenAI · ' + model, ko: text, es: lang === 'mix' ? es_text : undefined, tStt };
     if (lang === 'mix' && es_ok && /[A-Za-zÁÉÍÓÚáéíóúÑñ]{3,}/.test(es_text)) {
-      // se envía YA (지수 recibe las dos versiones y entiende ambas) y la fusión corre en paralelo con su respuesta;
-      // mientras tanto se muestra la versión que más se entiende: si casi nada de la coreana se reconoce, la española
-      const all = (text || '').split(/\s+/).filter(w => /[\uAC00-\uD7A3]/.test(w)).length, unk = unknownHangul(text || '').length;
-      const provisional = !text || (all && unk / all > 0.5) ? es_text : text;
+      // orden: 1) las dos transcripciones (listo); 2) se pone la coreana en el mensaje; 3) se envía y 지수 responde con las
+      // dos versiones (entiende ambas); 4) en paralelo se arregla el mensaje: la fusión (lo dicho en español) y después
+      // el análisis (los errores)
+      const provisional = text || es_text;
       const t1 = Date.now();
       PENDING_MERGE = text ? mergeMixed(text, es_text).then(r => ({ r, ms: Date.now() - t1 }), e => ({ r: null, ms: Date.now() - t1, err: e.message })) : null;
       $('inp').value = base + provisional; autosize(); sendDictated();
