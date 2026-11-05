@@ -434,7 +434,8 @@ function collapseRepeats(text){
     const out = [];
     for (let i = 0; i < w.length;) {
       const g = w.slice(i, i + n); let k = 1;
-      while (g.length === n && w.slice(i + k * n, i + (k + 1) * n).join(' ') === g.join(' ')) k++;
+      const key = a => a.join(' ').replace(/[.,!?~…]/g, '');
+      while (g.length === n && key(w.slice(i + k * n, i + (k + 1) * n)) === key(g)) k++;
       const chars = g.join('').replace(/[.,!?~]/g, '').length;
       if (k >= 2 && (chars >= 3 || k >= 3)) { out.push(...g); i += k * n; }
       else { out.push(w[i]); i++; }
@@ -518,8 +519,26 @@ function micUp(e, cancel){
 // dólares por minuto (estimación con los precios publicados de OpenAI)
 const STT_PRICES = { 'gpt-transcribe': 0.0045, 'gpt-4o-transcribe': 0.006, 'gpt-4o-mini-transcribe': 0.003, 'whisper-1': 0.006 };
 const STT_DEFAULT = 'gpt-transcribe';
-let mrec = null, mstream = null, mchunks = [], mT0 = 0, sttBusy = false;
-function stopTracks(){ mstream?.getTracks().forEach(t => t.stop()); mstream = null; }
+let mrec = null, mstream = null, mchunks = [], mT0 = 0, sttBusy = false, gate = null;
+function stopTracks(){ gate?.stop(); gate = null; mstream?.getTracks().forEach(t => t.stop()); mstream = null; }
+// mientras se graba: pausar cuando no se habla y seguir cuando se vuelve a hablar, para que a la transcripción no le lleguen
+// silencios largos (con ellos, los modelos a veces inventan repeticiones). El umbral se adapta al ruido del lugar.
+function silenceGate(stream, recorder){
+  let ac; try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return null; }
+  const an = ac.createAnalyser(); an.fftSize = 1024; ac.createMediaStreamSource(stream).connect(an);
+  const buf = new Float32Array(an.fftSize);
+  let floor = 0.02, lastVoice = Date.now(), speech = 0;
+  const iv = setInterval(() => {
+    an.getFloatTimeDomainData(buf);
+    let sum = 0; for (const x of buf) sum += x * x;
+    const rms = Math.sqrt(sum / buf.length);
+    floor = rms < floor ? rms : floor * 0.995 + rms * 0.005;          // el ruido de fondo (sube lento, baja rápido)
+    const loud = rms > Math.max(0.006, floor * 3);
+    if (loud) { lastVoice = Date.now(); speech += 50; if (recorder.state === 'paused') recorder.resume(); }
+    else if (recorder.state === 'recording' && Date.now() - lastVoice > 700) recorder.pause();
+  }, 50);
+  return { stop(){ clearInterval(iv); ac.close().catch(() => {}); }, get speech(){ return speech; } };
+}
 async function startRecording(){
   try { mstream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
   catch (e) { recHeld = false; recCancel = true; $('mic').classList.remove('rec'); recError(e.name === 'NotFoundError' ? 'No se encontró un micrófono.' : 'No hay permiso para usar el micrófono. Permítelo en el navegador (el candado junto a la dirección).'); return; }
@@ -529,13 +548,16 @@ async function startRecording(){
   mchunks = []; mT0 = Date.now();
   mrec.ondataavailable = e => { if (e.data && e.data.size) mchunks.push(e.data); };
   mrec.onstop = () => {
+    const heard = gate ? gate.speech : 1000;   // milisegundos con voz (si no se pudo medir, se asume que hubo)
     stopTracks(); const mime = mrec.mimeType || type || 'audio/webm'; mrec = null;
     $('mic').classList.remove('rec');
     const blob = new Blob(mchunks, { type: mime }), secs = (Date.now() - mT0) / 1000;
     if (recCancel || !blob.size) { if (!recBar.hintTimer) recBar(null); return; }
+    if (heard < 150) { recError('No se escuchó tu voz. Mantén presionado 🎤 mientras hablas (y revisa que el micrófono no esté silenciado).'); return; }
     transcribe(blob, secs);
   };
   mrec.start();
+  gate = silenceGate(mstream, mrec);
 }
 async function transcribe(blob, secs){
   sttBusy = true; recBar('stt');
