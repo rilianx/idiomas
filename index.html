@@ -178,7 +178,7 @@ footer{display:flex;align-items:flex-end;gap:8px;padding:8px 12px calc(10px + en
    Todo vive en el navegador: las claves, la conversación y el diccionario.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-05 · 4';   // (subir en cada cambio: sirve para confirmar que el navegador tiene la última)
+const APP_VERSION = '2026-11-05 · 5';   // (subir en cada cambio: sirve para confirmar que el navegador tiene la última)
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const load = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } catch (e) { return d; } };
@@ -282,6 +282,8 @@ for (const l of LEVELS) for (const [ko, pos, gloss] of l.vocab) if (!LEVEL_WORDS
 const DEFAULT_SET = { chatModel: 'claude-haiku-5-5', defModel: 'claude-opus-5-5', autoSpeak: true, suggest: true, learnProfile: true, memory: 16, inlineGloss: false, autoDefine: false, autoSend: true, rate: 0.9, voice: '', theme: '' };
 const S = Object.assign({}, DEFAULT_SET, load('hab-set', {}));
 const KEYS = Object.assign({ anthropic: '', openai: '', workspace: '' }, load('hab-keys', {}));
+// el reconocimiento de voz: si nunca se eligió y hay clave de OpenAI, OpenAI (entiende coreano, español y mezclado)
+if (!S.stt && KEYS.openai) S.stt = 'openai';
 let DICT = load('hab-dict', {});
 // los errores que el estudiante pidió explicar (solo esos se guardan): [{ id, msgId, wrong, right, note, category, level, date, done, expl }]
 let ERRS = load('hab-errs', []).filter(e => e.expl);
@@ -654,6 +656,11 @@ async function transcribe(blob, secs){
     recBar(null);
     if (!text) { recError('No se entendió lo que dijiste. Intenta de nuevo, hablando un poco más cerca del micrófono.'); return; }
     PENDING_RAW = { engine: 'OpenAI · ' + model, ko: text, es: lang === 'mix' ? es_text : undefined };
+    // si no hubo fusión pero sí transcripción en español, y casi nada de la coreana se reconoce, lo dicho era español
+    if (!merged && es_text && lang === 'mix') {
+      const all = text.split(/\s+/).filter(w => /[\uAC00-\uD7A3]/.test(w)).length, unk = unknownHangul(text).length;
+      if (all && unk / all > 0.5) merged = { text: es_text, changes: [] };
+    }
     if (merged) { $('inp').value = base + merged.text; autosize(); PENDING_FIXES = merged.changes; sendDictated(); }
     else { $('inp').value = base + text; autosize(); finishDictation(base); }   // (sin la transcripción en español: la revisión de respaldo)
   } catch (e) {
@@ -1925,7 +1932,7 @@ function openSettings(){
   on('sDef', 'change', e => { S.defModel = e.target.value; saveSet(); });
   on('kA', 'change', e => { KEYS.anthropic = e.target.value.trim(); saveKeys(); });
   on('kW', 'change', e => { KEYS.workspace = e.target.value.trim(); saveKeys(); });
-  on('kO', 'change', e => { KEYS.openai = e.target.value.trim(); saveKeys(); });
+  on('kO', 'change', e => { KEYS.openai = e.target.value.trim(); saveKeys(); if (KEYS.openai && !S.stt) { S.stt = 'openai'; saveSet(); micLangUI(); } });
   on('oGloss', 'change', e => { S.inlineGloss = e.target.checked; saveSet(); renderAll(); });
   on('oDef', 'change', e => { S.autoDefine = e.target.checked; saveSet(); });
   on('oSpeak', 'change', e => { S.autoSpeak = e.target.checked; saveSet(); });
