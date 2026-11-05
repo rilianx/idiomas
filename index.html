@@ -868,21 +868,29 @@ const paras = t => String(t || '').split(/\n\s*\n/).map(p => `<p style="margin:.
 
 /* ---------- respuestas sugeridas: un pedido aparte, al «ayudante del estudiante» ----------
    (pedirlas en la misma respuesta de 지수 confundía al modelo sobre quién habla) */
-const SUG_SCHEMA = obj({ options: { type: 'array', items: obj({ ko: STR, es: STR }) } });
+const SUG_SCHEMA = obj({ question: STR, options: { type: 'array', items: obj({ answers: STR, ko: STR, es: STR }) } });
 function sugSystem(levelId){
   const lv = LV(levelId), free = lv.vocab.length === 0;
   const vocab = LEVELS.filter(l => l.id <= levelId).flatMap(l => l.vocab.map(v => v[0])).join(', ');
   const grammar = LEVELS.filter(l => l.id <= levelId).flatMap(l => l.grammar.map(g => g[0])).join(' · ');
   return [
-    'Ayudas a un estudiante hispanohablante que aprende coreano. Está conversando por chat con 지수, una coreana amable, y no sabe bien qué responderle.',
-    'Tu tarea: proponer 3 o 4 cosas que EL ESTUDIANTE podría decirle ahora a 지수, como respuesta a su ÚLTIMO mensaje.',
+    'Ayudas a un estudiante hispanohablante que aprende coreano. Está conversando por chat con 지수, una coreana amable, y no sabe qué responderle.',
+    'Tu tarea: proponer 3 o 4 respuestas que EL ESTUDIANTE podría decirle ahora a 지수, como una persona real que contesta su ÚLTIMO mensaje.',
+    'Lo más importante es la COHERENCIA: cada opción tiene que ser una continuación natural de lo que 지수 acaba de decir. Una opción suelta o que cambia de tema sin motivo es mala aunque esté bien escrita.',
     'Reglas:',
-    '- Las dice el estudiante, en primera persona, hablándole a 지수. No son frases de 지수: no repitas ni reformules lo que ella dijo, y no hables como ella.',
-    '- Tienen que responder con sentido a lo que 지수 acaba de decir. Si ella hizo una pregunta, al menos dos opciones la responden directamente (con respuestas distintas entre sí). Las demás pueden reaccionar, contar algo relacionado, preguntarle algo a ella o llevar la conversación a otro tema cercano.',
-    '- Usa los datos reales del PERFIL DEL ESTUDIANTE cuando los haya (su nombre, su país, sus gustos). Si falta un dato, usa uno sencillo y plausible.',
-    '- Que encajen con todo lo que ya se habló: no vuelvas a dar datos que el estudiante ya dio ni a preguntar lo que 지수 ya contó.',
+    '- question: copia la pregunta concreta que 지수 le hace al estudiante en su último mensaje (la última, si hay varias), o "" si no pregunta nada.',
+    '- Si hay pregunta, al menos 3 opciones la responden directamente, cada una con una respuesta distinta (distintas cosas, sí/no, con algo de detalle). Como mucho una opción puede, en vez de eso, devolverle la pregunta a 지수 o comentar lo que ella contó.',
+    '- Si no hay pregunta, todas reaccionan a lo que dijo (acuerdo, sorpresa, contar algo relacionado, preguntarle algo sobre eso).',
+    '- answers: para cada opción, en pocas palabras, qué parte del último mensaje de 지수 responde. Si no responde a nada de ese mensaje, descártala y escribe otra.',
+    '- Las dice el estudiante, en primera persona, hablándole a 지수. No repitas ni reformules lo que ella dijo y no hables como ella.',
+    '- Del PERFIL DEL ESTUDIANTE usa solo lo que venga al caso (si 지수 pregunta por comida, sus gustos de comida sí; de qué país es, no). No metas datos personales que nadie preguntó.',
+    '- No repitas datos que el estudiante ya dio en la conversación ni preguntes lo que 지수 ya contó.',
     '- En coreano correcto y natural, en estilo cortés (-요), cortas (una o dos oraciones), de nivel ' + lv.name + (free ? '.' : ', usando sobre todo este vocabulario: ' + vocab + '; y esta gramática: ' + grammar + '.'),
-    '- es: la traducción al español (con el género del estudiante si lo sabes por su perfil; si no, neutra).'
+    '- es: la traducción al español (con el género del estudiante si lo sabes por su perfil; si no, neutra).',
+    '',
+    'EJEMPLO. 지수: «아, 채소 요리를 좋아해요? 저도 채소를 좋아해요. 어떤 채소 요리를 좋아해요?»',
+    'question: «어떤 채소 요리를 좋아해요?». Buenas: «저는 채소 샐러드를 좋아해요.» · «김치찌개를 좋아해요. 조금 매워요.» · «감자 요리를 제일 좋아해요.» · «지수 씨는 어떤 채소 요리를 좋아해요?».',
+    'Malas: «저는 칠레 사람이에요.» (nadie preguntó eso) · «한국 음식은 정말 맛있어요!» (no responde la pregunta) · «저도 채소를 좋아해요.» (repite lo que dijo 지수).'
   ].join('\n');
 }
 async function fetchSuggestions(m){
@@ -892,7 +900,7 @@ async function fetchSuggestions(m){
   const hist = msgs.slice(-8).map(x => (x.role === 'me' ? 'Estudiante: ' : '지수: ') + x.ko).join('\n');
   const user = profileText() + 'CONVERSACIÓN:\n' + hist + '\n\nEL ÚLTIMO MENSAJE DE 지수 (al que hay que responder): «' + m.ko + '»';
   try {
-    const out = await ask(S.chatModel, sugSystem(CONV.level), user, SUG_SCHEMA, { effort: 'low', maxTokens: 4000, ms: 45000, kind: 'chat' });
+    const out = await ask(S.chatModel, sugSystem(CONV.level), user, SUG_SCHEMA, { effort: 'medium', maxTokens: 8000, ms: 60000, kind: 'chat' });
     const said = m.ko.split(/(?<=[.?!])\s+/).map(norm).filter(Boolean);
     m.suggestions = (out.options || []).filter(x => x && x.ko && !said.includes(norm(x.ko)) && norm(x.ko) !== norm(m.ko)).slice(0, 4);
   } catch (e) { m.suggestions = []; console.warn('sugerencias:', e.message); }
