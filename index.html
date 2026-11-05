@@ -92,6 +92,8 @@ footer{display:flex;align-items:flex-end;gap:8px;padding:8px 12px calc(10px + en
 #recbar{padding:6px 12px 0;font-size:14px;text-align:center;color:var(--accent);font-weight:600}
 #recbar.cancel,#recbar.hint{color:var(--muted);font-weight:normal}
 #send.ready{animation:pulse 1.2s 2}
+#mlang{width:34px;height:46px;border:1px solid var(--line);border-radius:10px;background:var(--card);font-size:14px;flex:none;padding:0}
+#mlang.es{background:var(--warn-soft);color:var(--warn)}
 #mic.rec{background:var(--accent);color:#fff;animation:pulse 1.2s infinite}
 #send{background:var(--accent);color:#fff}
 @keyframes pulse{50%{box-shadow:0 0 0 7px var(--accent-soft)}}
@@ -157,7 +159,8 @@ footer{display:flex;align-items:flex-end;gap:8px;padding:8px 12px calc(10px + en
 <div id="quick"></div>
 <div id="recbar" hidden></div>
 <footer>
-  <button id="mic" title="Mantén presionado para hablar en coreano">🎤</button>
+  <button id="mic" title="Mantén presionado para hablar">🎤</button>
+  <button id="mlang" title="Idioma en que vas a hablar">한</button>
   <textarea id="inp" rows="1" class="ko" placeholder="Escribe o habla en coreano…"></textarea>
   <button id="send" title="Enviar">➤</button>
 </footer>
@@ -399,7 +402,7 @@ function recBar(state){
   bar.textContent = { rec: '● Grabando… suelta para terminar · desliza fuera del botón para cancelar', cancel: '✕ Suelta para cancelar', proc: 'Procesando…', hint: 'Mantén presionado 🎤 para hablar' }[state] || '';
 }
 function startRec(){
-  rec = new SR(); rec.lang = 'ko-KR'; rec.interimResults = true; rec.continuous = true;
+  rec = new SR(); rec.lang = S.micLang === 'es' ? 'es-ES' : 'ko-KR'; rec.interimResults = true; rec.continuous = true;
   rec.onresult = ev => {
     let txt = '';
     for (const r of ev.results) txt += r[0].transcript;
@@ -474,7 +477,8 @@ async function postStream(url, headers, body, ms, onEvent){
   let res;
   try { res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: ctl.signal }); }
   catch (e) { clearTimeout(timer); throw new Error(e.name === 'AbortError' ? 'la IA tardó demasiado' : 'sin conexión'); }
-  if (!res.ok || !res.body) { clearTimeout(timer); return { res, data: await res.json().catch(() => ({})) }; }
+  // (si el servidor contesta sin streaming, se lee como una respuesta normal)
+  if (!res.ok || !res.body || /application\/json/.test(res.headers.get('content-type') || '')) { clearTimeout(timer); return { res, data: await res.json().catch(() => ({})), plain: true }; }
   const reader = res.body.getReader(), dec = new TextDecoder(); let buf = '';
   try {
     for (;;) {
@@ -550,7 +554,7 @@ async function claudeAsk(model, system, user, schema, effort, maxTokens, ms, fas
 async function claudeStream(model, body, headers, ms, fast, fallback, onText, retryNoFallback, retryNoFast){
   body.stream = true;
   let text = '', stop = null, served = model, err = null; const u = {};
-  const { res, data } = await postStream('https://api.anthropic.com/v1/messages', headers, body, ms, ev => {
+  const { res, data, plain } = await postStream('https://api.anthropic.com/v1/messages', headers, body, ms, ev => {
     if (ev.type === 'message_start') { served = ev.message?.model || served; Object.assign(u, ev.message?.usage || {}); }
     else if (ev.type === 'content_block_delta' && ev.delta?.type === 'text_delta') { text += ev.delta.text; onText(text); }
     else if (ev.type === 'message_delta') { stop = ev.delta?.stop_reason || stop; if (ev.usage) Object.assign(u, ev.usage); }
@@ -561,6 +565,7 @@ async function claudeStream(model, body, headers, ms, fast, fallback, onText, re
     if (res.status === 400 && fast && /thinking/i.test(data.error?.message || '')) return retryNoFast();
     throw httpError(res, data);
   }
+  if (plain && data) { text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join(''); stop = data.stop_reason; served = data.model || served; Object.assign(u, data.usage || {}); if (text) onText(text); }
   if (err) throw new Error(err);
   if (stop === 'refusal') throw new Error('el modelo no quiso responder eso');
   if (stop === 'max_tokens') throw new Error('la respuesta quedó cortada');
@@ -639,7 +644,7 @@ const STR = { type: 'string' };
 const TOKENS = { type: 'array', items: obj({ t: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, form: STR }) };
 const REPLY_SCHEMA = obj({ ko: STR, es: STR });
 const NEWGRAM = { type: 'array', items: obj({ form: STR, label: STR, example: STR }) };
-const STUDENT_SCHEMA = obj({ tokens: TOKENS, correction: STR, note: STR, category: STR, learned: { type: 'array', items: obj({ kind: { type: 'string', enum: ['dato', 'interés'] }, text: STR }) }, new_grammar: NEWGRAM });
+const STUDENT_SCHEMA = obj({ tokens: TOKENS, korean: STR, es_words: { type: 'array', items: obj({ es: STR, ko: STR, lemma: STR, pos: { type: 'string', enum: POS } }) }, correction: STR, note: STR, category: STR, learned: { type: 'array', items: obj({ kind: { type: 'string', enum: ['dato', 'interés'] }, text: STR }) }, new_grammar: NEWGRAM });
 const REPLY_AN_SCHEMA = obj({ tokens: TOKENS, new_grammar: NEWGRAM });
 const ENTRY = obj({ query: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, meaning: STR, explanation: STR, hanja: STR, irregular: STR,
   conjugations: { type: 'array', items: obj({ form: STR, label: STR }) }, examples: { type: 'array', items: obj({ ko: STR, es: STR }) }, in_context: STR });
@@ -696,6 +701,8 @@ function studentSystem(levelId){
     'Eres profesor de coreano. Analizas el mensaje que un estudiante hispanohablante le escribió (o dijo) a 지수 en una conversación, para una app de aprendizaje. Escribe las explicaciones en español.',
     `Nivel del estudiante: ${LV(levelId).name}.`, '',
     ...TOKEN_RULES,
+    '- korean: si el mensaje está en español, entero o en parte (p. ej. «저는 manzana 좋아해요» o «me gusta el cine»), escribe aquí cómo se diría todo en coreano, natural, en estilo cortés (-요) y de su nivel, teniendo en cuenta a qué respondía; si está todo en coreano, "". Si escribes korean, deja correction en "".',
+    '- es_words: para cada palabra o expresión en español del mensaje, cómo se dice en coreano tal como la usaste en korean (ko), su forma de diccionario (lemma: verbos y adjetivos con -다, sustantivos sin partícula) y su categoría (pos); [] si no hay español.',
     '- correction: la versión corregida y natural en coreano si el mensaje tenía errores (teniendo en cuenta a qué respondía), o "" si estaba bien. note: en una o dos frases, el error principal, o "". category: el tipo de error en 2 a 5 palabras, siempre con el mismo nombre para el mismo tipo (p. ej. "Partícula 은/는 vs 이/가", "Partícula de objeto 을/를", "Conjugación del pasado", "Orden de las palabras", "Vocabulario", "Ortografía", "Cortesía (-요)"), o "" si no hubo error.',
     '- learned: lo NUEVO que el mensaje revela sobre el estudiante: datos personales (kind "dato": nombre, país, ciudad, edad, trabajo o estudios, familia, mascotas, planes) o gustos e intereses (kind "interés"). Frases cortas en tercera persona ("Se llama Ignacio", "Le gusta el cine coreano"). Solo lo que dijo de sí mismo; no repitas lo que ya está en su PERFIL; [] si no hay nada nuevo.',
     ...newGrammarRule(levelId)
@@ -807,7 +814,7 @@ function send(fromSug){
   if (prevAi?.sawEs) msgLemmas(prevAi).forEach(l => VIEWED.add(l));
   const q0 = detectQuestion(text);
   if (q0) { VIEWED.add(q0); const g = guessLemma(q0); if (g) VIEWED.add(g); }
-  const m = { id: uid(), role: 'me', ko: text, tokens: [], fromSug: isSug, viewed: [...VIEWED] };
+  const m = { id: uid(), role: 'me', ko: text, tokens: [], fromSug: isSug, viewed: [...VIEWED], esPending: /[A-Za-zÁÉÍÓÚáéíóúÑñÜü]{2,}/.test(text) };
   VIEWED.clear();
   CONV.msgs.push(m); saveConv(); renderAll(); scrollEnd();
   const q = detectQuestion(text);
@@ -981,7 +988,16 @@ async function analyzeStudent(userMsg, lv){
   try {
     const out = await ask(S.chatModel, studentSystem(lv), user, STUDENT_SCHEMA, { effort: 'low', maxTokens: 6000, ms: 60000, fast: true });
     userMsg.tokens = out.tokens || [];
-    userMsg.correction = (out.correction || '').trim();
+    userMsg.korean = (out.korean || '').trim(); userMsg.esPending = false;
+    userMsg.esWords = (out.es_words || []).filter(w => w && w.es && w.ko);
+    // las palabras que dijo en español quedan en el diccionario con su equivalente coreano
+    for (const w of userMsg.esWords) {
+      const lemma = (w.lemma || w.ko).trim(); if (!/[\uAC00-\uD7A3]/.test(lemma)) continue;
+      if (!DICT[lemma]) DICT[lemma] = { lemma, pos: w.pos || 'otro', gloss: w.es, status: 'nueva', seen: 0, forms: {}, added: Date.now(), source: 'en español', level: LEVEL_WORDS[lemma]?.level || null, detailed: false };
+      if (w.ko !== lemma) DICT[lemma].forms[w.ko] = DICT[lemma].forms[w.ko] || '';
+      if (!DICT[lemma].sentence && userMsg.korean) DICT[lemma].sentence = userMsg.korean;
+    }
+    userMsg.correction = userMsg.korean ? '' : (out.correction || '').trim();
     userMsg.note = (out.note || '').trim();
     if (userMsg.correction && norm(userMsg.correction) === norm(userMsg.ko)) userMsg.correction = '';
     userMsg.category = userMsg.correction ? (out.category || '').trim() : '';
@@ -996,7 +1012,7 @@ async function analyzeStudent(userMsg, lv){
       bump(t.lemma, 'used');
     }
     saveExt(); saveDict(); saveConv(); rerenderKeep();
-  } catch (e) { console.warn('análisis del estudiante:', e.message); }
+  } catch (e) { console.warn('análisis del estudiante:', e.message); if (userMsg.esPending) { userMsg.esPending = false; saveConv(); rerenderKeep(); } }
 }
 async function analyzeReply(m, lv){
   try {
@@ -1316,6 +1332,15 @@ function renderMsg(m){
       const l = document.createElement('div'); l.className = 'small'; l.style.marginTop = '6px';
       l.innerHTML = '👤 Anotado en tu perfil: ' + m.learned.map(esc).join(' · ');
       l.title = 'Puedes verlo y editarlo en ⚙ Ajustes'; d.appendChild(l);
+    }
+    if (m.esPending) { const w = document.createElement('div'); w.className = 'small'; w.style.marginTop = '6px'; w.textContent = 'Traduciendo al coreano…'; d.appendChild(w); }
+    if (m.korean) {
+      const f = document.createElement('div'); f.className = 'form';
+      f.innerHTML = `<b>En coreano:</b> <span class="ko" style="font-size:18px">${esc(m.korean)}</span> <button class="spk" title="Escuchar">🔊</button> <button class="chip" title="Ponerlo en el cuadro para decirlo">✏</button>` +
+        (m.esWords?.length ? `<div class="small" style="margin-top:4px">${m.esWords.map(w => `${esc(w.es)} → <span class="ko" style="color:var(--fg)">${esc(w.ko)}</span>`).join(' · ')}</div>` : '');
+      f.querySelector('.spk').onclick = () => speak(m.korean);
+      f.querySelector('.chip').onclick = () => { speak(m.korean); $('inp').value = m.korean; autosize(); $('inp').focus(); };
+      d.appendChild(f);
     }
     if (m.correction) {
       const f = document.createElement('div'); f.className = 'fix';
@@ -1662,6 +1687,9 @@ function autosize(){ const t = $('inp'); t.style.height = 'auto'; t.style.height
 $('inp').addEventListener('input', autosize);
 $('inp').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });
 $('send').onclick = send;
+function micLangUI(){ const b = $('mlang'); const es = S.micLang === 'es'; b.textContent = es ? 'ES' : '한'; b.classList.toggle('es', es); b.title = es ? 'Vas a hablar en español (toca para cambiar a coreano)' : 'Vas a hablar en coreano (toca para cambiar a español)'; }
+$('mlang').onclick = () => { S.micLang = S.micLang === 'es' ? 'ko' : 'es'; saveSet(); micLangUI(); };
+micLangUI();
 $('mic').addEventListener('pointerdown', micDown);
 $('mic').addEventListener('pointermove', micMove);
 $('mic').addEventListener('pointerup', e => micUp(e));
