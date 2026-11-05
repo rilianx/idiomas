@@ -553,11 +553,12 @@ const POS = ['sustantivo','verbo','adjetivo','adverbio','pronombre','número','p
 const obj = (props) => ({ type: 'object', additionalProperties: false, required: Object.keys(props), properties: props });
 const STR = { type: 'string' };
 const TOKENS = { type: 'array', items: obj({ t: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, form: STR }) };
-const CHAT_SCHEMA = obj({ reply: obj({ ko: STR, es: STR, tokens: TOKENS }), student: obj({ tokens: TOKENS, correction: STR, note: STR, category: STR, learned: { type: 'array', items: obj({ kind: { type: 'string', enum: ['dato', 'interés'] }, text: STR }) } }), new_grammar: { type: 'array', items: obj({ form: STR, label: STR, example: STR }) }, student_next_lines: { type: 'array', items: obj({ ko: STR, es: STR }) } });
+const CHAT_SCHEMA = obj({ reply: obj({ ko: STR, es: STR, tokens: TOKENS }), student: obj({ tokens: TOKENS, correction: STR, note: STR, category: STR, learned: { type: 'array', items: obj({ kind: { type: 'string', enum: ['dato', 'interés'] }, text: STR }) } }), new_grammar: { type: 'array', items: obj({ form: STR, label: STR, example: STR }) } });
 const ENTRY = obj({ query: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, meaning: STR, explanation: STR, hanja: STR, irregular: STR,
   conjugations: { type: 'array', items: obj({ form: STR, label: STR }) }, examples: { type: 'array', items: obj({ ko: STR, es: STR }) }, in_context: STR });
 const DEF_SCHEMA = obj({ entries: { type: 'array', items: ENTRY } });
 const SENT_SCHEMA = obj({ translation: STR, explanation: STR, context: STR, literal: STR,
+  new_grammar: { type: 'array', items: obj({ form: STR, label: STR, example: STR }) },
   answers: { type: 'array', items: obj({ ko: STR, es: STR }) },
   words: { type: 'array', items: obj({ t: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, meaning: STR, explanation: STR }) },
   grammar: { type: 'array', items: obj({ point: STR, explanation: STR }) }, tip: STR });
@@ -590,11 +591,6 @@ function chatSystem(levelId){
     free ? '- new_grammar: [] (en conversación libre no se registra).' :
       '- new_grammar: las formas gramaticales (terminaciones, conectores, construcciones o partículas poco básicas) que aparecen en reply.ko o en el último mensaje del estudiante y que NO están en la lista de GRAMÁTICA de abajo (ni equivalen a una de ella). form: el patrón (p. ej. "-네요", "-(으)ㄹ까요?", "-기 전에"); label: qué expresa, en español, en pocas palabras; example: el trozo de la frase donde aparece. [] si todo lo usado está en la lista. No incluyas la cortesía -요, el presente -아/어요 ni partículas básicas ya listadas.',
     '- Si en el pedido viene el VOCABULARIO Y GRAMÁTICA EXTENDIDOS del nivel (lo que ya apareció fuera de la lista), puedes reutilizarlos de vez en cuando para que el estudiante los practique.',
-    '- student_next_lines: 3 o 4 frases que EL ESTUDIANTE podría decirte a ti (지수) como respuesta a tu reply.ko. Las escribe el estudiante, en primera persona, hablándote a ti: NO son frases tuyas, no repiten ni reformulan lo que tú dijiste y no hablan como 지수.',
-    '  · Si en reply.ko le hiciste una pregunta, al menos una frase la responde. Ejemplo: si preguntaste «이름이 뭐예요?», una opción buena es «저는 [su nombre]예요.» y una mala es «이름이 뭐예요?» o «저는 지수예요.».',
-    '  · Usa los datos reales del PERFIL DEL ESTUDIANTE cuando los haya (su nombre, su país, sus gustos). Si no los sabes, inventa un dato plausible y sencillo (él puede editarlo).',
-    '  · Que lleven la conversación por caminos distintos y naturales: responder, contar algo propio, preguntarte algo a ti, mostrar interés o gusto, reaccionar (sorpresa, acuerdo, duda) o proponer otro tema relacionado con sus intereses. Sin un patrón fijo; varíalas de un mensaje a otro.',
-    '  · En coreano, cortas (una o dos oraciones) y de su nivel, en estilo cortés (-요); es es la traducción al español, con el género del estudiante si lo sabes por su perfil (si no, neutra).',
     '- student: analiza del mismo modo el ÚLTIMO mensaje del estudiante (student.tokens, solo las partes en coreano). En student.correction escribe la versión corregida y natural en coreano si tenía errores, o "" si estaba bien (o si no hay mensaje del estudiante). En student.note explica en español, en una o dos frases, el error principal, o "". En student.category da el tipo de error en 2 a 5 palabras en español, siempre con el mismo nombre para el mismo tipo (p. ej. "Partícula 은/는 vs 이/가", "Partícula de objeto 을/를", "Conjugación del pasado", "Orden de las palabras", "Vocabulario", "Ortografía", "Cortesía (-요)"), o "" si no hubo error.',
     '- student.learned: lo NUEVO que el último mensaje del estudiante revela sobre él: datos personales (kind "dato": nombre, país, ciudad, edad, trabajo o estudios, familia, mascotas, planes) o gustos e intereses (kind "interés"). En español, frases cortas en tercera persona ("Se llama Ignacio", "Vive en Valparaíso", "Le gusta el cine coreano"). Solo lo que el estudiante dijo de sí mismo; no repitas lo que ya está en su perfil; [] si no hay nada nuevo.',
     '- Si en el pedido viene el PERFIL DEL ESTUDIANTE, úsalo como alguien que lo conoce: recuerda lo que sabes de él (no vuelvas a preguntar su nombre si ya lo sabes), pregúntale por sus intereses y su vida, y propón en reply.suggestions temas relacionados con ellos.',
@@ -614,6 +610,7 @@ const SENT_SYSTEM = [
   '- answers: 2 o 3 respuestas posibles que el estudiante podría dar ahora, cortas y naturales para su nivel, con su traducción.',
   '- words: cada palabra de la frase en orden (sin signos de puntuación), para el diccionario: t es la palabra tal como aparece; lemma, su forma de diccionario (verbos y adjetivos con -다, sustantivos sin partícula); gloss, el significado en 1 a 4 palabras; meaning, una definición de diccionario breve (en una frase); explanation, en una frase, qué forma tiene aquí y qué aporta.',
   '- tip: un consejo práctico breve (o "").',
+  '- new_grammar: las formas verbales y gramaticales de la frase (conjugaciones, terminaciones, conectores, construcciones) que NO están en la lista de GRAMÁTICA YA VISTA que viene en el pedido. form: el patrón (p. ej. "-았/었어요", "-네요", "-(으)ㄹ까요?"); label: qué expresa, en pocas palabras; example: el trozo de la frase donde aparece. [] si no hay nada nuevo.',
   'Sé exacto y no inventes.'
 ].join('\n');
 const DEF_SYSTEM = [
@@ -673,16 +670,14 @@ async function aiTurn(userMsg){
       }
     }
     const r = out.reply || {};
-    // las frases sugeridas para el estudiante: se descartan las que solo repiten lo que dijo 지수
-    const said = (r.ko || '').split(/(?<=[.?!])\s+/).map(norm).filter(Boolean);
-    const suggestions = (out.student_next_lines || []).filter(x => x && x.ko && !said.includes(norm(x.ko)) && norm(x.ko) !== norm(r.ko)).slice(0, 4);
-    const m = { id: uid(), role: 'ai', ko: (r.ko || '').trim(), es: (r.es || '').trim(), tokens: r.tokens || [], suggestions };
+    const m = { id: uid(), role: 'ai', ko: (r.ko || '').trim(), es: (r.es || '').trim(), tokens: r.tokens || [], suggestions: [] };
     m.fresh = learnTokens(m.tokens, m.ko, 'conversación');
     noteExtWords(m.tokens); noteExtGrammar(out.new_grammar);
     saveExt();
     CONV.msgs.push(m); saveConv(); saveDict();
     busy = false; renderTyping(false); renderAll(); scrollEnd();
     if (S.autoSpeak && m.ko) speak(m.ko, S.rate, true);
+    if (S.suggest) fetchSuggestions(m);
     if (S.autoDefine && m.fresh.length) defineInBackground(m);
   } catch (e) {
     busy = false; renderTyping(false);
@@ -825,8 +820,9 @@ async function explainSentence(m){
   m.sawEs = true; msgLemmas(m).forEach(l => VIEWED.add(l));
   m.explBusy = true; m.explErr = ''; renderAll();
   try {
-    const x = await ask(S.defModel, SENT_SYSTEM, ctxBlock(m, 'FRASE A EXPLICAR (la dijo ' + (m.role === 'me' ? 'el estudiante' : '지수') + '): «' + m.ko + '»'), SENT_SCHEMA, { effort: 'low', maxTokens: 16000, ms: 150000, kind: 'explain' });
+    const x = await ask(S.defModel, SENT_SYSTEM, seenGrammarText() + ctxBlock(m, 'FRASE A EXPLICAR (la dijo ' + (m.role === 'me' ? 'el estudiante' : '지수') + '): «' + m.ko + '»'), SENT_SCHEMA, { effort: 'low', maxTokens: 16000, ms: 150000, kind: 'explain' });
     m.expl = x; m.showExpl = true;
+    const before = extGrammarCount(); noteExtGrammar(x.new_grammar); saveExt(); m.explGrammar = extGrammarCount() - before;
     // las palabras explicadas quedan en el diccionario (sin contar como vistas otra vez)
     // cada palabra queda en el diccionario: definición, la forma que tiene aquí y la frase como ejemplo
     let added = 0, updated = 0;
@@ -859,6 +855,7 @@ function explBlock(m){
     <details style="margin-top:8px"><summary class="sec-t" style="cursor:pointer;display:list-item">Palabra por palabra</summary><div class="conj">${(x.words || []).map(w => `<span class="ko" data-say="${esc(w.t)}" style="cursor:pointer;color:var(--fg)">${esc(w.t)}</span><span><b style="color:var(--fg)">${esc(w.gloss)}</b>${w.lemma && w.lemma !== w.t ? ` <span class="ko">(${esc(w.lemma)})</span>` : ''} · ${esc(w.explanation)}</span>`).join('')}</div></details>
     ${(x.grammar || []).length ? `<div class="sec-t">Gramática</div>${x.grammar.map(g => `<div class="gram"><b class="ko" style="color:var(--fg)">${esc(g.point)}</b><div>${esc(g.explanation)}</div></div>`).join('')}` : ''}
     ${x.tip ? `<div class="form">💡 ${esc(x.tip)}</div>` : ''}
+    ${m.explGrammar ? `<div class="small" style="margin-top:6px">🎓 ${m.explGrammar} forma${m.explGrammar > 1 ? 's' : ''} gramatical${m.explGrammar > 1 ? 'es' : ''} nueva${m.explGrammar > 1 ? 's' : ''} en la gramática extendida del nivel.</div>` : ''}
     ${m.explDict ? `<div class="small" style="margin-top:6px">📖 ${m.explDict.added ? `${m.explDict.added} palabra${m.explDict.added > 1 ? 's' : ''} nueva${m.explDict.added > 1 ? 's' : ''} en tu diccionario` : 'Ninguna palabra nueva'}${m.explDict.updated ? ` · ${m.explDict.updated} actualizada${m.explDict.updated > 1 ? 's' : ''}` : ''}.</div>` : ''}`;
   d.querySelectorAll('[data-say]').forEach(e => e.onclick = () => speak(e.dataset.say));
   // una respuesta sugerida: se oye y queda escrita, lista para enviar o cambiar
@@ -868,6 +865,39 @@ function explBlock(m){
 }
 // texto en párrafos (separados por una línea en blanco)
 const paras = t => String(t || '').split(/\n\s*\n/).map(p => `<p style="margin:.35em 0;color:var(--fg)">${esc(p.trim()).replace(/\n/g, '<br>')}</p>`).join('');
+
+/* ---------- respuestas sugeridas: un pedido aparte, al «ayudante del estudiante» ----------
+   (pedirlas en la misma respuesta de 지수 confundía al modelo sobre quién habla) */
+const SUG_SCHEMA = obj({ options: { type: 'array', items: obj({ ko: STR, es: STR }) } });
+function sugSystem(levelId){
+  const lv = LV(levelId), free = lv.vocab.length === 0;
+  const vocab = LEVELS.filter(l => l.id <= levelId).flatMap(l => l.vocab.map(v => v[0])).join(', ');
+  const grammar = LEVELS.filter(l => l.id <= levelId).flatMap(l => l.grammar.map(g => g[0])).join(' · ');
+  return [
+    'Ayudas a un estudiante hispanohablante que aprende coreano. Está conversando por chat con 지수, una coreana amable, y no sabe bien qué responderle.',
+    'Tu tarea: proponer 3 o 4 cosas que EL ESTUDIANTE podría decirle ahora a 지수, como respuesta a su ÚLTIMO mensaje.',
+    'Reglas:',
+    '- Las dice el estudiante, en primera persona, hablándole a 지수. No son frases de 지수: no repitas ni reformules lo que ella dijo, y no hables como ella.',
+    '- Tienen que responder con sentido a lo que 지수 acaba de decir. Si ella hizo una pregunta, al menos dos opciones la responden directamente (con respuestas distintas entre sí). Las demás pueden reaccionar, contar algo relacionado, preguntarle algo a ella o llevar la conversación a otro tema cercano.',
+    '- Usa los datos reales del PERFIL DEL ESTUDIANTE cuando los haya (su nombre, su país, sus gustos). Si falta un dato, usa uno sencillo y plausible.',
+    '- Que encajen con todo lo que ya se habló: no vuelvas a dar datos que el estudiante ya dio ni a preguntar lo que 지수 ya contó.',
+    '- En coreano correcto y natural, en estilo cortés (-요), cortas (una o dos oraciones), de nivel ' + lv.name + (free ? '.' : ', usando sobre todo este vocabulario: ' + vocab + '; y esta gramática: ' + grammar + '.'),
+    '- es: la traducción al español (con el género del estudiante si lo sabes por su perfil; si no, neutra).'
+  ].join('\n');
+}
+async function fetchSuggestions(m){
+  if (!CONV) return;
+  m.sugBusy = true; renderQuick();
+  const msgs = CONV.msgs.filter(x => x.role === 'me' || x.role === 'ai');
+  const hist = msgs.slice(-8).map(x => (x.role === 'me' ? 'Estudiante: ' : '지수: ') + x.ko).join('\n');
+  const user = profileText() + 'CONVERSACIÓN:\n' + hist + '\n\nEL ÚLTIMO MENSAJE DE 지수 (al que hay que responder): «' + m.ko + '»';
+  try {
+    const out = await ask(S.chatModel, sugSystem(CONV.level), user, SUG_SCHEMA, { effort: 'low', maxTokens: 4000, ms: 45000, kind: 'chat' });
+    const said = m.ko.split(/(?<=[.?!])\s+/).map(norm).filter(Boolean);
+    m.suggestions = (out.options || []).filter(x => x && x.ko && !said.includes(norm(x.ko)) && norm(x.ko) !== norm(m.ko)).slice(0, 4);
+  } catch (e) { m.suggestions = []; console.warn('sugerencias:', e.message); }
+  m.sugBusy = false; saveConv(); renderQuick();
+}
 
 /* ---------- vocabulario y gramática extendidos de cada nivel ---------- */
 const extOf = lvl => EXT[lvl] || (EXT[lvl] = { words: [], grammar: [] });
@@ -893,6 +923,14 @@ function noteExtGrammar(list){
     if (prev) { prev.count = (prev.count || 1) + 1; prev.last = Date.now(); continue; }
     extOf(lvl).grammar.push({ form: g.form.trim(), label: (g.label || '').trim(), example: (g.example || '').trim(), count: 1, date: Date.now() });
   }
+}
+function extGrammarCount(){ return Object.values(EXT).reduce((a, x) => a + (x.grammar || []).length, 0); }
+// la gramática que el estudiante ya tiene (la del nivel y los anteriores, más lo extendido), para que el profesor diga qué es nuevo
+function seenGrammarText(){
+  const lvl = CONV?.level || S.level || 1; if (!hasList(lvl)) return '';
+  const base = LEVELS.filter(l => l.id <= lvl).flatMap(l => l.grammar.map(g => g[0]));
+  const ext = LEVELS.filter(l => l.id <= lvl).flatMap(l => (EXT[l.id]?.grammar || []).map(g => g.form));
+  return 'GRAMÁTICA YA VISTA POR EL ESTUDIANTE: ' + [...base, ...ext].join(' · ') + '\n\n';
 }
 function extText(lvl){
   if (!hasList(lvl)) return '';
@@ -1429,7 +1467,7 @@ function openSettings(){
   on('oGloss', 'change', e => { S.inlineGloss = e.target.checked; saveSet(); renderAll(); });
   on('oDef', 'change', e => { S.autoDefine = e.target.checked; saveSet(); });
   on('oSpeak', 'change', e => { S.autoSpeak = e.target.checked; saveSet(); });
-  on('oSug', 'change', e => { S.suggest = e.target.checked; saveSet(); renderQuick(); });
+  on('oSug', 'change', e => { S.suggest = e.target.checked; saveSet(); const last = CONV?.msgs.filter(m => m.role === 'ai').slice(-1)[0]; if (S.suggest && last && !last.suggestions?.length && !last.sugBusy) fetchSuggestions(last); renderQuick(); });
   on('oRate', 'input', e => { S.rate = +e.target.value; $('rv').textContent = S.rate; saveSet(); });
   on('oVoice', 'change', e => { S.voice = e.target.value; saveSet(); });
   on('oTest', 'click', () => speak('안녕하세요, 만나서 반가워요'));
@@ -1452,6 +1490,7 @@ function renderQuick(){
   if (!CONV?.msgs.some(m => m.role === 'ai')) { q.innerHTML = ''; return; }
   const last = CONV?.msgs.filter(m => m.role === 'me' || m.role === 'ai').slice(-1)[0];
   const sugs = S.suggest && !busy && last?.role === 'ai' ? (last.suggestions || []) : [];
+  if (S.suggest && !busy && last?.role === 'ai' && last.sugBusy) { const w = document.createElement('span'); w.className = 'small'; w.style.padding = '4px 2px'; w.textContent = 'Pensando respuestas posibles…'; sq.appendChild(w); }
   for (const sg of sugs) {
     // tocarla la dice y la envía (para conversar sin hablar ni escribir); ✏ la deja escrita para cambiarla
     const b = document.createElement('div'); b.className = 'chip sug';
