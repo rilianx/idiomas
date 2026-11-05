@@ -560,6 +560,7 @@ function micUp(e, cancel){
 // dólares por minuto (estimación con los precios publicados de OpenAI)
 const STT_PRICES = { 'gpt-transcribe': 0.0045, 'gpt-4o-transcribe': 0.006, 'gpt-4o-mini-transcribe': 0.003, 'whisper-1': 0.006 };
 const STT_DEFAULT = 'gpt-transcribe';
+// (ya no se usa: en 한+ES se transcribe dos veces y se combinan)
 const MIX_PROMPT = 'Un estudiante de coreano habla en coreano y, cuando no sabe una palabra, la dice en español en medio de la frase. Escribe cada palabra en el idioma en que se dijo: el coreano en hangul y el español en letras latinas, sin traducir ni corregir nada. Ejemplo: 저는 manzana를 좋아해요. 어제 biblioteca에 갔어요.';
 let mrec = null, mstream = null, mchunks = [], mT0 = 0, sttBusy = false, gate = null;
 function stopTracks(){ gate?.stop(); gate = null; mstream?.getTracks().forEach(t => t.stop()); mstream = null; }
@@ -601,41 +602,66 @@ async function startRecording(){
   mrec.start();
   gate = silenceGate(mstream, mrec);
 }
+const KO_PROMPT = '한국어를 배우는 학생의 말입니다. 틀린 발음이나 문법도 고치지 말고 들리는 그대로 적어 주세요.';
+const ES_PROMPT = 'Transcribe exactamente lo que dice la persona, sin corregir nada.';
+// en modo 한+ES, la transcripción «esperando español»: lo coreano quedará como sílabas sin sentido, pero el español sale bien escrito
+const ES_MIX_PROMPT = 'Transcribe en español lo que dice la persona. Es un estudiante que habla coreano y mete palabras en español: escribe bien las palabras en español (por ejemplo «película», «biblioteca») y lo que no sea español escríbelo como suene.';
 async function transcribe(blob, secs){
   sttBusy = true; recBar('stt');
   const base = recBase, ext = /mp4/.test(blob.type) ? 'mp4' : /ogg/.test(blob.type) ? 'ogg' : 'webm';
-  const model = S.sttModel || STT_DEFAULT;
-  const form = withLang => {
-    const fd = new FormData();
-    fd.append('file', blob, 'voz.' + ext);
-    fd.append('model', model);
-    const lang = micLang();
-    // con mezcla de idiomas no se fuerza uno (forzarlo hace que el modelo «traduzca» o invente las palabras del otro)
-    if (withLang && lang !== 'mix') fd.append('language', lang);
-    fd.append('prompt', lang === 'mix' ? MIX_PROMPT : lang === 'es' ? 'Transcribe exactamente lo que dice la persona, sin corregir nada.' : '한국어를 배우는 학생의 말입니다. 틀린 발음이나 문법도 고치지 말고 들리는 그대로 적어 주세요.');
-    return fd;
-  };
+  const model = S.sttModel || STT_DEFAULT, lang = micLang();
   const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 60000);
-  try {
-    const go = withLang => fetch('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', headers: { authorization: 'Bearer ' + KEYS.openai }, body: form(withLang), signal: ctl.signal });
+  // una transcripción, con un idioma esperado y una indicación
+  const once = async (language, prompt) => {
+    const go = withLang => { const fd = new FormData(); fd.append('file', blob, 'voz.' + ext); fd.append('model', model); if (withLang && language) fd.append('language', language); fd.append('prompt', prompt);
+      return fetch('https://api.openai.com/v1/audio/transcriptions', { method: 'POST', headers: { authorization: 'Bearer ' + KEYS.openai }, body: fd, signal: ctl.signal }); };
     let res = await go(true), data = await res.json().catch(() => ({}));
     // (si el modelo no acepta el parámetro de idioma, se pide de nuevo sin él)
     if (res.status === 400 && /language/i.test(data.error?.message || '')) { res = await go(false); data = await res.json().catch(() => ({})); }
     if (!res.ok) throw sttError(res, data, model);
-    const text = collapseRepeats((data.text || '').trim());
-    $('inp').value = base + text; autosize();
+    return collapseRepeats((data.text || '').trim());
+  };
+  try {
+    let text, merged = null, minutes = secs / 60;
+    if (lang === 'mix') {
+      // 한+ES: el mismo audio dos veces a la vez, esperando coreano y esperando español; después se combinan
+      const [ko, es] = await Promise.allSettled([once('ko', KO_PROMPT), once('es', ES_MIX_PROMPT)]);
+      if (ko.status === 'rejected') throw ko.reason;
+      text = ko.value; minutes *= es.status === 'fulfilled' ? 2 : 1;
+      if (text && es.status === 'fulfilled' && /[A-Za-zÁÉÍÓÚáéíóúÑñ]{3,}/.test(es.value)) {
+        recBar('fix');
+        try { merged = await mergeMixed(text, es.value); } catch (e) { console.warn('combinar transcripciones:', e.message); }
+      }
+    } else text = await once(lang, lang === 'es' ? ES_PROMPT : KO_PROMPT);
     // gasto: por minuto de audio
     const day = USAGE[today()] || (USAGE[today()] = {}); const k = day.chat || (day.chat = { n: 0, tin: 0, tout: 0, cost: 0, unpriced: 0 });
-    k.n++; k.cost += (secs / 60) * (STT_PRICES[model] || 0.006); saveUsage();
+    k.n++; k.cost += minutes * (STT_PRICES[model] || 0.006); saveUsage();
     recBar(null);
-    if (!text) recError('No se entendió lo que dijiste. Intenta de nuevo, hablando un poco más cerca del micrófono.');
-    else finishDictation(base);
+    if (!text) { recError('No se entendió lo que dijiste. Intenta de nuevo, hablando un poco más cerca del micrófono.'); return; }
+    if (merged) { $('inp').value = base + merged.text; autosize(); PENDING_FIXES = merged.changes; sendDictated(); }
+    else { $('inp').value = base + text; autosize(); finishDictation(base); }   // (sin la transcripción en español: la revisión de respaldo)
   } catch (e) {
     recBar(null);
     const msg = e.name === 'AbortError' ? 'la transcripción tardó demasiado' : e.message === 'Failed to fetch' ? 'sin conexión con OpenAI' : e.message;
     recError('No se pudo transcribir tu voz con ' + model + ': ' + msg + '.', e.noRetry ? null : () => { recBase = base; transcribe(blob, secs); });
   }
   finally { clearTimeout(timer); sttBusy = false; }
+}
+// combinar las dos transcripciones del mismo audio (esperando coreano y esperando español)
+const MERGE_SYSTEM = [
+  'Recibes dos transcripciones automáticas del MISMO audio de un estudiante hispanohablante de coreano, que habla coreano y, cuando no sabe una palabra, la dice en español en medio de la frase.',
+  '- KO se hizo esperando coreano: el coreano está bien, pero las palabras en español quedaron escritas en hangul según cómo suenan (p. ej. «película» → «뻴리꿀라» o algo parecido).',
+  '- ES se hizo esperando español: las palabras en español están bien escritas, pero lo que era coreano quedó como sílabas sin sentido en letras latinas (o mal traducido).',
+  'Arma la frase que realmente dijo: el coreano tomado de KO y las palabras en español tomadas de ES, en el lugar donde se dijeron, manteniendo pegadas las partículas o terminaciones coreanas («película를»).',
+  '- Solo reemplaza en KO lo que no es coreano real (o no tiene sentido) y corresponde a una palabra en español de ES. No cambies el coreano real, aunque tenga errores, ni los préstamos que ya son coreanos (영화, 커피, 카페…). No corrijas ni traduzcas nada.',
+  '- Si el estudiante no dijo nada en español, devuelve KO tal cual y changes vacío. Si dijo todo en español, devuelve el texto de ES.',
+  '- text: la frase completa. changes: cada reemplazo, con from (lo que estaba en KO) y to (la palabra en español).'
+].join('\n');
+async function mergeMixed(ko, es){
+  const words = ko.split(/\s+/).filter(Boolean).map(w => /[가-힣]/.test(w) ? `${w} (${romanize(w.replace(/[^가-힣]/g, ''))})` : w).join(' · ');
+  const out = await ask(S.chatModel, MERGE_SYSTEM, `KO: «${ko}»\nPRONUNCIACIÓN DE KO: ${words}\nES: «${es}»`, mixFixSchema(), { effort: 'low', maxTokens: 2000, ms: 20000, fast: true });
+  const text = (out.text || '').trim();
+  return text ? { text, changes: (out.changes || []).filter(c => c && c.from && c.to && c.from !== c.to) } : null;
 }
 // los errores de la transcripción, explicados
 function sttError(res, data, model){
