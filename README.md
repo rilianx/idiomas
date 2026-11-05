@@ -6,7 +6,7 @@ Una app para aprender idiomas conversando con una IA, empezando por el coreano. 
 
 ## Qué hace
 
-- **Conversar con audio.** Conversas con 지수 (Jisu), una IA que habla a tu nivel. Puedes escribir o hablar: como en WhatsApp, **mantén presionado 🎤** mientras hablas; al soltar, lo que dijiste queda en el cuadro para revisarlo y enviarlo con ➤ (no se envía solo), y si deslizas el dedo fuera del botón antes de soltar, se cancela. Cada respuesta de 지수 se lee en voz alta 🔊 (también despacio 🐢).
+- **Conversar con audio.** Conversas con 지수 (Jisu), una IA que habla a tu nivel. Puedes escribir o hablar: como en WhatsApp, **mantén presionado 🎤** mientras hablas; al soltar, lo que dijiste queda en el cuadro para revisarlo y enviarlo con ➤ (no se envía solo), y si deslizas el dedo fuera del botón antes de soltar, se cancela. 지수 escribe en tiempo real (su respuesta aparece a medida que se genera) y la voz lee cada oración apenas se completa 🔊 (también se puede oír despacio 🐢).
 - **Leer y oír.** Cada mensaje se puede leer y escuchar. La traducción al español se muestra al tocar «Traducción». El modo escucha 👂 deja el coreano borroso hasta que lo tocas.
 - **Sin traducción por defecto.** Las frases de 지수 y las respuestas sugeridas aparecen solo en coreano.
   - **Pasar el mouse** sobre una palabra (o **tocarla** en el celular) muestra su significado arriba de ella.
