@@ -182,7 +182,7 @@ footer{display:flex;align-items:flex-end;gap:8px;padding:8px 12px calc(10px + en
    Todo vive en el navegador: las claves, la conversación y el diccionario.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-05 · 12';   // (subir en cada cambio: sirve para confirmar que el navegador tiene la última)
+const APP_VERSION = '2026-11-06 · 1';   // (subir en cada cambio: sirve para confirmar que el navegador tiene la última)
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const load = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } catch (e) { return d; } };
@@ -951,7 +951,7 @@ function chatSystem(levelId){
     '',
     'CÓMO CONVERSAS',
     `- Escribe ko SIEMPRE en coreano, en estilo cortés (-요)${levelId >= 6 ? ', y formal (-ㅂ니다) cuando la situación lo pida' : ''}; es es su traducción natural al español.`,
-    '- Mensajes cortos: de 1 a 3 oraciones simples. Casi siempre termina con una pregunta fácil para que la conversación siga.',
+    '- Mensajes cortos, del largo que habla el estudiante: si él responde con pocas palabras, tú también (una oración breve y una pregunta). Respeta el LARGO MÁXIMO que viene en cada pedido. Casi siempre termina con una pregunta fácil para que la conversación siga.',
     '- No repitas: en un mismo mensaje no digas dos frases que signifiquen lo mismo (p. ej. dos saludos, o «반가워요» y «만나서 반가워요»), y no repitas lo que ya dijiste en mensajes anteriores.',
     free ? '- Usa coreano natural pero sencillo, de nivel básico-intermedio.' :
       '- Usa sobre todo el vocabulario y la gramática de las listas de abajo. Como mucho introduce una o dos palabras nuevas por mensaje, solo si son útiles y fáciles.',
@@ -1049,6 +1049,16 @@ function newConversation(levelId, topic){
   saveConv(); closePanel(); renderAll();
   STARTING = true; aiTurn(null).finally(() => { STARTING = false; });
 }
+// el largo de 지수 sigue al del estudiante: el promedio de palabras de sus últimos 3 mensajes, con un tope por nivel
+function lengthHint(){
+  const mine = CONV.msgs.filter(m => m.role === 'me').slice(-3);
+  const words = t => (t || '').trim().split(/\s+/).filter(Boolean).length;
+  const avg = mine.length ? mine.reduce((a, m) => a + words(m.ko), 0) / mine.length : 3;
+  const cap = (CONV.level || 1) <= 2 ? 14 : 20;
+  const maxWords = Math.max(4, Math.min(cap, Math.round(avg * 1.5) + 2));
+  const maxSent = avg < 4 ? 1 : avg < 8 ? 2 : 3;
+  return `LARGO MÁXIMO de tu respuesta: unas ${maxWords} palabras coreanas y ${maxSent} ${maxSent === 1 ? 'oración' : 'oraciones'} (además de la pregunta final, si cabe en ese largo). El estudiante escribe mensajes de ${Math.round(avg) <= 1 ? 'una o dos palabras' : 'unas ' + Math.round(avg) + ' palabras'}.`;
+}
 async function aiTurn(userMsg){
   if (!CONV) return;
   busy = true; renderTyping(true);
@@ -1056,7 +1066,7 @@ async function aiTurn(userMsg){
   const frequent = frequentErrors();
   const user = jisuText() + profileText() + extText(CONV.level) + (frequent.length ? 'ERRORES FRECUENTES DEL ESTUDIANTE (para practicarlos con naturalidad):\n' + frequent.map(g => `- ${g.category} (${g.items.length} veces). Correcto: «${g.items[g.items.length - 1].right}»`).join('\n') + '\n\n' : '') +
     (CONV.msgs.some(m => m.role === 'me' || m.role === 'ai') ? 'CONVERSACIÓN HASTA AHORA:\n' + transcript() + '\n\n' : '') +
-    (userMsg ? 'Responde al último mensaje del estudiante.' : `Empieza tú la conversación. Tema: «${CONV.topic}». Escribe un solo saludo breve (una vez) y después una pregunta sencilla sobre el tema; nada más.`);
+    (userMsg ? 'Responde al último mensaje del estudiante. ' + lengthHint() : `Empieza tú la conversación. Tema: «${CONV.topic}». Escribe un solo saludo breve (una vez) y después una pregunta sencilla sobre el tema; nada más.`);
   try {
     // 1) lo que dice 지수: un pedido corto, sin razonar, que se va mostrando (y leyendo) a medida que llega
     const m = { id: uid(), role: 'ai', ko: '', es: '', tokens: [], suggestions: [], streaming: true };
