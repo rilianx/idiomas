@@ -103,7 +103,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-07 · 24';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-07 · 27';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -231,11 +231,11 @@ let DBP = null;
 function db(){
   if (!DBP) DBP = new Promise((ok, ko) => {
     // v2: expl guarda las explicaciones del modelo caro (palabra en su oración y trozos seleccionados)
-    const r = indexedDB.open('leamos', 2);
+    const r = indexedDB.open('leamos', 3);   // v3: audio (voz de OpenAI ya generada)
     r.onupgradeneeded = () => {
       const d = r.result, has = n => d.objectStoreNames.contains(n);
       if (!has('books')) d.createObjectStore('books', { keyPath: 'id' });
-      for (const s of ['text', 'simp', 'ana', 'expl']) if (!has(s)) d.createObjectStore(s, { keyPath: 'k' });
+      for (const s of ['text', 'simp', 'ana', 'expl', 'audio']) if (!has(s)) d.createObjectStore(s, { keyPath: 'k' });
     };
     r.onsuccess = () => {
       const d = r.result;
@@ -464,14 +464,14 @@ const errText = e => e instanceof NoKey ? 'falta la clave de la API (⚙ Ajustes
 
 
 /* ---------- gasto estimado ---------- */
-const KINDS = [['read', 'Lectura (traducir palabras)'], ['explain', 'Explicaciones'], ['simplify', 'Simplificar']];
+const KINDS = [['read', 'Lectura (traducir palabras)'], ['explain', 'Explicaciones'], ['simplify', 'Simplificar'], ['voice', 'Voz (OpenAI, estimado)']];
 function recordUsage(kind, model, served, u){ addUsage(USAGE, kind, model, served, u); save('lec-usage', USAGE); }
 AI.onUsage = recordUsage;
 function usageHTML(){
   const d = today(), month = d.slice(0, 7);
   const sum = f => { const t = {}; for (const [k] of KINDS) t[k] = { n: 0, cost: 0 }; for (const [day, v] of Object.entries(USAGE)) if (f(day)) for (const [k] of KINDS) if (v[k]) { t[k].n += v[k].n; t[k].cost += v[k].cost; } return t; };
   const rows = [['Hoy', sum(x => x === d)], ['Este mes', sum(x => x.startsWith(month))], ['Total', sum(() => true)]];
-  return `<div class="conj" style="grid-template-columns:auto repeat(3,1fr);gap:6px 12px"><span></span>${KINDS.map(k => `<b class="small">${k[1]}</b>`).join('')}
+  return `<div class="conj" style="grid-template-columns:auto repeat(${KINDS.length},1fr);gap:6px 10px;font-size:14px"><span></span>${KINDS.map(k => `<b class="small">${k[1]}</b>`).join('')}
     ${rows.map(([l, t]) => `<b>${l}</b>${KINDS.map(([k]) => `<span>${t[k].n} · ${money(t[k].cost)}</span>`).join('')}`).join('')}</div>
     <div class="small" style="margin-top:6px">Estimación con los tokens que informa la API y los precios publicados (el gasto de las conversaciones está en «Hablemos»).</div>`;
 }
@@ -522,12 +522,15 @@ function partialSentences(raw){
   }
   return out;
 }
+// los puntos gramaticales que aparecen en una palabra o un trozo (para la sección de gramática)
+const GPOINTS = { type: 'array', items: obj({ pattern: STR, title: STR, desc: STR, level: { type: 'string', enum: CEFR } }) };
+const GLESSON_SCHEMA = obj({ explanation: STR, formation: STR, examples: { type: 'array', items: obj({ text: STR, es: STR }) }, mistakes: STR });
 const ENTRY = obj({ query: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, meaning: STR, explanation: STR, hanja: STR, irregular: STR,
-  conjugations: { type: 'array', items: obj({ form: STR, label: STR }) }, examples: { type: 'array', items: obj({ text: STR, es: STR }) }, in_context: STR });
+  conjugations: { type: 'array', items: obj({ form: STR, label: STR }) }, examples: { type: 'array', items: obj({ text: STR, es: STR }) }, in_context: STR, points: GPOINTS });
 // explicar un trozo, en dos pedidos a la vez: la traducción (modelo barato, rápida) y la explicación (modelo caro);
 // el palabra por palabra sale del análisis del párrafo, que ya está
 const PHRASE_TR_SCHEMA = obj({ translation: STR, literal: STR });
-const PHRASE_EX_SCHEMA = obj({ explanation: STR, grammar: { type: 'array', items: obj({ point: STR, explanation: STR }) }, tip: STR });
+const PHRASE_EX_SCHEMA = obj({ explanation: STR, grammar: { type: 'array', items: obj({ point: STR, explanation: STR }) }, tip: STR, points: GPOINTS });
 const LEVEL_SCHEMA = obj({ cefr: { type: 'string', enum: CEFR }, range: STR, summary: STR, vocabulary: STR, grammar: STR, advice: STR });
 const SIMP_SCHEMA = obj({ paras: { type: 'array', items: STR } });
 // nombres y términos fijos para todo el libro (que no cambien de un trozo a otro)
@@ -561,6 +564,7 @@ function anaSystem(lang, withEs){
     'Sé exacto y no inventes.'
   ].join('\n');
 }
+const pointsRule = what => `- points: los puntos gramaticales que aparecen en ${what} y que vale la pena estudiar (terminaciones, conjugaciones, partículas, conectores, construcciones; no vocabulario). Para cada uno: pattern, el patrón corto y general (p. ej. "-았/었어요", "-(으)ㄹ 수 있다", "present perfect", "pretérito imperfecto"); title, su nombre en español en pocas palabras; desc, una o dos frases: qué expresa y cuándo se usa; level, su nivel MCER. Si coincide con una de las SECCIONES DE GRAMÁTICA YA CREADAS que vienen en el pedido, usa EXACTAMENTE el mismo pattern. [] si no hay ninguno.`;
 function defSystem(lang){
   const L = LANGS[lang];
   const extra = { ko: 'los caracteres chinos (hanja) si es una palabra sino-coreana', ja: 'la lectura en hiragana', zh: 'el pinyin con tonos', en: 'la pronunciación en AFI', fr: 'la pronunciación en AFI', de: 'la pronunciación en AFI', it: 'la pronunciación en AFI', pt: 'la pronunciación en AFI' }[lang];
@@ -577,6 +581,7 @@ function defSystem(lang){
     '- irregular: si es un verbo o adjetivo irregular, de qué tipo y cómo cambia, o "".',
     '- conjugations: para verbos y adjetivos, 6 a 8 formas comunes con su etiqueta en español; para otras categorías, [].',
     `- examples: 2 oraciones de ejemplo cortas y naturales en ${L.name} (text) con su traducción (es).`,
+    pointsRule('esa palabra tal como está en la oración (su forma)'),
     '- in_context: explica con detalle (2 a 4 frases) qué significa la palabra EN ESA oración del libro, qué forma tiene y qué aporta (conjugación, partícula, matiz, registro), usando las oraciones anteriores si vienen.',
     'Sé exacto: no inventes formas ni significados.'
   ].join('\n');
@@ -597,6 +602,7 @@ function phraseExSystem(lang){
     'Recibes las oraciones anteriores (contexto), la oración completa y el trozo seleccionado. Escribe en español:',
     '- explanation: la explicación principal, detallada y en prosa (2 a 4 párrafos cortos separados por una línea en blanco): qué quiere decir aquí, cómo se construye, las formas gramaticales importantes y por qué se usan, registro, matices, expresiones idiomáticas, lo que en español se diría distinto y cualquier dato cultural útil. Adáptate al nivel del lector.',
     '- grammar: los 1 a 3 puntos gramaticales clave, cada uno con cómo se forma y otro ejemplo distinto.',
+    pointsRule('el trozo'),
     '- tip: un consejo práctico breve (o "").',
     'Sé exacto y no inventes.'
   ].join('\n');
@@ -1007,12 +1013,65 @@ function creditSentence(p, s){
   if (changed) rerenderVisible(p);
 }
 
-/* ---------- leer en voz alta ---------- */
+/* ---------- leer en voz alta: la voz del navegador (gratis) o la de OpenAI (natural) ---------- */
 const utter = (text, lang, rate = S.rate) => makeUtterance(text, lang, rate, S.voices[lang]);
-function speakWord(text){
-  if (!('speechSynthesis' in window) || PLAY) return;
-  speechSynthesis.cancel(); speechSynthesis.speak(utter(text, LANG()));
+let CLOUD_OFF = false;   // (la clave de OpenAI falló: en esta sesión se usa la voz del navegador)
+const cloudOn = () => !CLOUD_OFF && ((S.ttsProv === 'openai' && !!KEYS.openai) || (S.ttsProv === 'edge' && !!S.proxy));
+const edgeVoice = (lang = LANG()) => (S.edgeVoices || {})[lang] || EDGE_VOICES[lang]?.[0]?.[0] || 'en-US-AriaNeural';
+const ttsModel = () => S.ttsModel || 'gpt-4o-mini-tts', ttsVoice = () => S.ttsVoice || 'marin';
+const AUDIO = new Audio(), WORD_AUDIO = new Audio();
+AUDIO.preservesPitch = WORD_AUDIO.preservesPitch = true;
+const AUDIO_URLS = new Map(), AUDIO_INFLIGHT = new Map(), AUDIO_WORDS = new Map();
+// las palabras que informa Edge ([ms, texto]) → [ms, posición en el texto]
+function wordChars(text, words){
+  const out = []; let from = 0;
+  for (const [ms, w] of words) { const i = w ? text.indexOf(w, from) : -1; if (i >= 0) { out.push([ms, i]); from = i + w.length; } }
+  return out;
 }
+function recordVoice(chars){
+  const pr = TTS_PRICE_PER_MCHAR[ttsModel()] || 16;
+  const day = USAGE[today()] || (USAGE[today()] = {});
+  const k = day.voice || (day.voice = { n: 0, tin: 0, tout: 0, cost: 0, unpriced: 0 });
+  k.n++; k.tin += chars; k.cost += chars * pr / 1e6; save('lec-usage', USAGE);
+}
+// el audio de un texto: de la memoria, de lo guardado o pedido a OpenAI (y se guarda para no volver a pagarlo)
+async function cloudAudio(text, lang = LANG()){
+  const edge = S.ttsProv === 'edge';
+  const key = edge ? `edge|${edgeVoice(lang)}|${textHash(text)}` : `${ttsModel()}|${ttsVoice()}|${textHash(text)}`;
+  if (AUDIO_URLS.has(key)) return AUDIO_URLS.get(key);
+  if (AUDIO_INFLIGHT.has(key)) return AUDIO_INFLIGHT.get(key);
+  const pr = (async () => {
+    let rec = await dbGet('audio', key).catch(() => null);
+    if (!rec || rec.text !== text) {
+      let blob = null, words = null;
+      for (let a = 0; a < 3 && !blob; a++) {
+        try {
+          if (edge) ({ blob, words } = await edgeSpeech(text, edgeVoice(lang), S.proxy));
+          else blob = await openaiSpeech(text, { model: ttsModel(), voice: ttsVoice(), instructions: S.ttsInstr ?? TTS_DEFAULT_INSTR });
+        }
+        catch (e) { if (a === 2 || e instanceof NoKey || !(netCut(e) || /demasiados|saturado|tardó/.test(e.message))) throw e; await waitVisible(); await new Promise(r => setTimeout(r, 1500 * (a + 1))); }
+      }
+      if (!edge) recordVoice(text.length);
+      rec = { k: key, text, blob, words: words ? wordChars(text, words) : null, date: Date.now() };
+      dbPut('audio', rec).catch(() => {});
+    }
+    const url = URL.createObjectURL(rec.blob);
+    if (rec.words) AUDIO_WORDS.set(url, rec.words);
+    AUDIO_URLS.set(key, url); return url;
+  })();
+  AUDIO_INFLIGHT.set(key, pr);
+  try { return await pr; } finally { AUDIO_INFLIGHT.delete(key); }
+}
+// decir algo suelto (una palabra tocada, un ejemplo de la ficha)
+async function sayText(text, lang = LANG(), rate = S.rate){
+  if (!text) return;
+  if (cloudOn()) {
+    try { const url = await cloudAudio(text, lang); WORD_AUDIO.src = url; WORD_AUDIO.playbackRate = rate; await WORD_AUDIO.play(); return; }
+    catch (e) { console.warn('voz OpenAI:', e.message); }
+  }
+  if ('speechSynthesis' in window) { speechSynthesis.cancel(); speechSynthesis.speak(utter(text, lang, rate)); }
+}
+function speakWord(text){ if (!PLAY) sayText(text); }
 let PLAY = false, UTT = null, WAKE = null;
 // la última palabra tocada (sin estar leyendo): ▶ parte desde ahí
 let FROM = null, START_OFF = 0;
@@ -1022,10 +1081,10 @@ function setFrom(p, si, off){
   if (FROM) findWord(p, si, off)?.classList.add('from');
 }
 async function play(){
-  if (!('speechSynthesis' in window)) { toast('Este navegador no puede leer en voz alta.'); return; }
+  if (!cloudOn() && !('speechSynthesis' in window)) { toast('Este navegador no puede leer en voz alta.'); return; }
   if (!CH || CH.missing) return;
   if (FROM) { const f = FROM; setCursor(f.p, f.si); START_OFF = f.off; }
-  if (!voicesFor(LANG()).length) toast(`No encontré una voz en ${LANGS[LANG()].name}; se usará la voz por defecto (puedes instalar una en el sistema).`);
+  if (!cloudOn() && !voicesFor(LANG()).length) toast(`No encontré una voz en ${LANGS[LANG()].name}; se usará la voz por defecto (o elige la voz de OpenAI en ⚙ Ajustes).`);
   PLAY = true; updatePlay();
   try { WAKE = await navigator.wakeLock?.request('screen'); } catch (e) {}
   speakCurrent();
@@ -1033,8 +1092,23 @@ async function play(){
 function stop(){
   PLAY = false; UTT = null; updatePlay();
   if ('speechSynthesis' in window) speechSynthesis.cancel();
+  AUDIO.pause();
   WAKE?.release?.().catch(() => {}); WAKE = null;
   document.querySelectorAll('#book .w.speaking').forEach(x => x.classList.remove('speaking'));
+}
+// resaltar la palabra que va en la posición charIndex de la oración
+function markSpoken(charIndex){
+  const el = sentEl(CUR.p, CUR.s); if (!el) return;
+  let best = null;
+  for (const w of el.querySelectorAll('.w')) { if (+w.dataset.o <= charIndex) best = w; else break; }
+  el.querySelectorAll('.w.speaking').forEach(x => x.classList.remove('speaking'));
+  best?.classList.add('speaking');
+}
+// la oración siguiente (para pedir su audio mientras se oye la actual)
+function nextSentText(){
+  if (CUR.s + 1 < (CH.sents[CUR.p] || []).length) return sentText(CUR.p, CUR.s + 1).trim();
+  for (let p = CUR.p + 1; p < CH.paras.length; p++) { const t = sentText(p, 0).trim(); if (/[\p{L}\p{N}]/u.test(t)) return t; }
+  return '';
 }
 function speakCurrent(){
   if (!PLAY) return;
@@ -1042,21 +1116,42 @@ function speakCurrent(){
   const off = START_OFF; START_OFF = 0;    // empezar a mitad de la oración (desde la palabra tocada)
   const text = sentText(CUR.p, CUR.s).trim().slice(off);
   if (!/[\p{L}\p{N}]/u.test(text)) { advanceAfter(null); return; }
+  if (cloudOn()) return speakCloud(text, off);
   const u = utter(text, LANG());
   u._t = Date.now();
   u.onstart = () => { u._s = Date.now(); };
   u.onend = () => advanceAfter(u);
   u.onerror = ev => { if (ev.error === 'interrupted' || ev.error === 'canceled') return; advanceAfter(u); };
-  u.onboundary = ev => {
-    if (UTT !== u) return;
-    const el = sentEl(CUR.p, CUR.s); if (!el) return;
-    let best = null;
-    for (const w of el.querySelectorAll('.w')) { if (+w.dataset.o <= ev.charIndex + off) best = w; else break; }
-    el.querySelectorAll('.w.speaking').forEach(x => x.classList.remove('speaking'));
-    best?.classList.add('speaking');
-  };
+  u.onboundary = ev => { if (UTT === u) markSpoken(ev.charIndex + off); };
   if (speechSynthesis.speaking || speechSynthesis.pending) speechSynthesis.cancel();
   UTT = u; speechSynthesis.speak(u);
+}
+// con la voz de OpenAI: el audio de la oración (ya guardado o pedido) y, mientras suena, se pide el de la siguiente
+async function speakCloud(text, off){
+  const u = { cloud: true, _t: Date.now() }; UTT = u;
+  let url;
+  try { url = await cloudAudio(text); }
+  catch (e) {
+    if (UTT !== u) return;
+    if (e instanceof NoKey || /clave|permiso|saldo|intermediario|actualiza/.test(e.message)) CLOUD_OFF = true;
+    toast((S.ttsProv === 'edge' ? 'Voz de Edge: ' : 'Voz de OpenAI: ') + errText(e) + '. Se usa la del navegador' + (CLOUD_OFF ? ' (hasta recargar la página o revisar la clave en ⚙ Ajustes).' : '.'));
+    const b = utter(text, LANG()); b.onend = () => advanceAfter(u); b.onerror = () => advanceAfter(u);
+    if ('speechSynthesis' in window) speechSynthesis.speak(b); else advanceAfter(u);
+    return;
+  }
+  if (UTT !== u || !PLAY) return;
+  const nt = nextSentText(); if (nt) cloudAudio(nt).catch(() => {});
+  AUDIO.src = url; AUDIO.playbackRate = S.rate;
+  AUDIO.onended = () => advanceAfter(u);
+  AUDIO.onerror = () => advanceAfter(u);
+  // OpenAI no dice dónde va cada palabra: se aproxima por el avance del audio
+  const marks = AUDIO_WORDS.get(url);
+  AUDIO.ontimeupdate = () => {
+    if (UTT !== u || !AUDIO.duration) return;
+    if (marks?.length) { const t = AUDIO.currentTime * 1000; let c = 0; for (const [ms, i] of marks) { if (ms <= t + 60) c = i; else break; } markSpoken(off + c); }
+    else markSpoken(off + Math.floor(text.length * AUDIO.currentTime / AUDIO.duration));
+  };
+  AUDIO.play().catch(e => { if (UTT === u) { toast('No se pudo reproducir el audio: ' + e.message); stop(); } });
 }
 async function advanceAfter(u){
   if (u && (UTT !== u || u._done)) return;
@@ -1067,9 +1162,9 @@ async function advanceAfter(u){
   if (!ok) { stop(); toast('Fin del libro 🎉'); return; }
   if (sameP) speakCurrent(); else setTimeout(speakCurrent, 350);   // una pausa breve entre párrafos
 }
-// algunos navegadores (Android) a veces no avisan cuando terminan de leer
+// algunos navegadores (Android) a veces no avisan cuando terminan de leer (solo la voz del navegador)
 setInterval(() => {
-  const u = UTT; if (!PLAY || !u || u._done || speechSynthesis.speaking || speechSynthesis.pending) return;
+  const u = UTT; if (!PLAY || !u || u.cloud || u._done || speechSynthesis.speaking || speechSynthesis.pending) return;
   if (u._s && Date.now() - u._s > 1000) advanceAfter(u);
   else if (!u._s && Date.now() - u._t > 5000) { if (u._retried) advanceAfter(u); else { u._retried = true; u._t = Date.now(); speechSynthesis.cancel(); speechSynthesis.speak(u); } }
 }, 1000);
@@ -1176,7 +1271,7 @@ async function openWord(w){
   if (S.autoSpeakWord) speakWord(tok.t);
   const sh = SHEET, saved = await dbGet('expl', wordKey(sh)).catch(() => null);
   if (SHEET !== sh) return;
-  if (saved) { sh.ctx = saved.ctx; sh.saved = saved.date; }
+  if (saved) { sh.ctx = saved.ctx; sh.points = saved.points; sh.saved = saved.date; }
   const e = DICT[lemmaOf(tok)];
   // la explicación detallada: se pide sola si la palabra no la tiene (ni hay una guardada para esta oración)
   if (!e?.detailed && !saved) explainWord(); else refreshSheet();
@@ -1188,15 +1283,16 @@ async function explainWord(){
   try {
     const lang = LANG(), sent = sentText(sh.p, sh.si).trim();
     const user = `LIBRO: «${BOOK.title}»\nNIVEL DEL LECTOR: ${myLevel(lang)}\n` + (prevSentences(sh.p, sh.si) ? `ORACIONES ANTERIORES: ${prevSentences(sh.p, sh.si)}\n` : '') +
-      `ORACIÓN: «${sent}»\nPALABRA: «${sh.tok.t}»` + (sh.tok.lemma ? ` (forma de diccionario probable: ${sh.tok.lemma})` : '');
+      gramKnown(lang) + `ORACIÓN: «${sent}»\nPALABRA: «${sh.tok.t}»` + (sh.tok.lemma ? ` (forma de diccionario probable: ${sh.tok.lemma})` : '');
     const x = await askRetry(S.defModel, defSystem(lang), user, ENTRY, { effort: 'low', maxTokens: 12000, ms: 150000, kind: 'explain' });
     const l = lemmaOf({ lemma: x.lemma || sh.tok.lemma, pos: x.pos }) || lemmaOf(sh.tok);
     const e = DICT[l] || ensureEntry({ ...sh.tok, lemma: l, pos: x.pos, gloss: x.gloss }, sent);
     Object.assign(e, { pos: x.pos || e.pos, gloss: e.gloss || x.gloss, meaning: x.meaning, explanation: x.explanation, hanja: x.hanja, irregular: x.irregular,
       conjugations: x.conjugations || [], examples: (x.examples || []).map(ex => ({ ko: ex.text, es: ex.es })), detailed: true });
     touch(l);
-    if (x.in_context) dbPut('expl', { k: wordKey(sh), ctx: x.in_context, lemma: l, date: Date.now() });
-    if (SHEET === sh) { sh.ctx = x.in_context || ''; sh.saved = 0; if (l !== lemmaOf(sh.tok)) sh.tok = { ...sh.tok, lemma: l, pos: x.pos || sh.tok.pos }; }
+    const pts = registerPoints(x.points, { key: wordKey(sh), kind: 'word', word: sh.tok.t, lemma: l, text: sent, ctx: x.in_context || '', ...refPlace(sh.p, sh.si) }, lang);
+    if (x.in_context) dbPut('expl', { k: wordKey(sh), ctx: x.in_context, lemma: l, points: pts, date: Date.now() });
+    if (SHEET === sh) { sh.ctx = x.in_context || ''; sh.points = pts; sh.saved = 0; if (l !== lemmaOf(sh.tok)) sh.tok = { ...sh.tok, lemma: l, pos: x.pos || sh.tok.pos }; }
   } catch (err) { if (SHEET === sh) sh.err = 'No se pudo explicar: ' + errText(err); }
   if (SHEET === sh) { sh.busy = false; refreshSheet(); }
 }
@@ -1222,8 +1318,10 @@ function refreshSheet(){
     if (pos || gloss) h += `<div class="gloss">${pos ? `<span class="pos">${esc(pos)}</span>` : ''}${esc(gloss || '')}${tok.cefr && tok.cefr !== '-' ? ` <span class="badge lv">${esc(tok.cefr)}</span>` : ''}</div>`;
     if (tok.form) h += `<div class="form">${esc(tok.form)}</div>`;
     h += srsHTML(e);
+    if (SHEET.ctx && SHEET.points?.length) SHEET._chips = pointChips(SHEET.points); else SHEET._chips = '';
     if (SHEET.ctx) h += `<div class="sec-t">En esta oración${SHEET.saved ? ' <span style="text-transform:none;letter-spacing:0">· guardada</span>' : ''}</div><div class="form">${esc(SHEET.ctx)}</div>`;
     if (e) h += entryHTML(e, { lang, extra: LANGS[lang]?.extra || 'Nota', sentence: true, maxForms: 12 });
+    if (SHEET._chips) h += SHEET._chips;
     if (SHEET.busy === 'ana') h += `<div class="busy" style="margin-top:8px">Analizando el párrafo…</div>`;
     if (SHEET.busy === 'def') h += `<div class="busy" style="margin-top:8px">El profesor (${esc(mname(S.defModel))}) está explicando…</div>`;
     if (SHEET.err) h += `<div class="fix">${esc(SHEET.err)}</div>`;
@@ -1231,6 +1329,7 @@ function refreshSheet(){
     if (SHEET.kind === 'word') h += `<button class="btn" id="sExplain" ${SHEET.busy ? 'disabled' : ''}>${SHEET.ctx ? 'Explicar de nuevo' : 'Explicar en esta oración'}</button>`;
     if (e) h += `<button class="btn sec" id="sKnown">${scoreOf(e) >= 70 ? 'Marcar como nueva' : 'Ya la sé ✓'}</button>`;
     if (SHEET.kind === 'word') h += `<button class="btn sec" id="sFrom">▶ Leer desde aquí</button>`;
+    if (SHEET.ref) h += `<button class="btn sec" id="sGoRef">📖 Ir a la oración</button>`;
     h += `<button class="btn sec" id="sClose">Cerrar</button></div>`;
   } else if (SHEET.kind === 'gutpick') {
     const b = SHEET.b;
@@ -1247,18 +1346,49 @@ function refreshSheet(){
     if (x.grammar?.length) h += `<div class="sec-t">Gramática</div>${x.grammar.map(g => `<div class="gram"><b lang="${lang}">${esc(g.point)}</b><div>${esc(g.explanation)}</div></div>`).join('')}`;
     if (x.tip) h += `<div class="form">💡 ${esc(x.tip)}</div>`;
     if (words.length) h += `<details style="margin-top:8px"><summary class="sec-t" style="cursor:pointer;display:list-item">Palabra por palabra</summary><div class="conj">${words.map(w => `<span lang="${lang}" data-say="${esc(w.t)}" style="cursor:pointer">${esc(w.t)}</span><span><b>${esc(w.gloss)}</b>${w.lemma && w.lemma.toLowerCase() !== w.t.toLowerCase() ? ` <span lang="${lang}">(${esc(w.lemma)})</span>` : ''}${w.form || w.explanation ? ' · ' + esc(w.form || w.explanation) : ''}</span>`).join('')}</div></details>`;
+    h += pointChips(x.points);
     if (SHEET.saved) h += `<div class="small" style="margin-top:8px">Explicación guardada (no se volvió a pedir).</div>`;
-    h += `<div class="row">${!SHEET.busyTr && !SHEET.busyEx ? '<button class="btn sec" id="sAgain">Explicar de nuevo</button>' : ''}<button class="btn sec" id="sClose">Cerrar</button></div>`;
+    h += `<div class="row">${!SHEET.busyTr && !SHEET.busyEx && SHEET.args ? '<button class="btn sec" id="sAgain">Explicar de nuevo</button>' : ''}${SHEET.ref ? '<button class="btn sec" id="sGoRef">📖 Ir a la oración</button>' : ''}<button class="btn sec" id="sClose">Cerrar</button></div>`;
   }
   sh.innerHTML = h;
-  sh.querySelectorAll('[data-say]').forEach(b => b.onclick = () => { if ('speechSynthesis' in window) { speechSynthesis.cancel(); speechSynthesis.speak(utter(b.dataset.say, lang, 0.85)); } });
+  sh.querySelectorAll('[data-say]').forEach(b => b.onclick = () => sayText(b.dataset.say, lang, Math.min(S.rate, 0.9)));
   $('sClose').onclick = closeSheet;
   if ($('sExplain')) $('sExplain').onclick = explainWord;
+  sh.querySelectorAll('[data-gram]').forEach(b => b.onclick = () => { const id = b.dataset.gram, l = lang; closeSheet(); openGram(l, id); });
+  if ($('sGoRef')) $('sGoRef').onclick = () => { const r = SHEET.ref; closeSheet(); goToRef(r); };
   if ($('sPick')) $('sPick').onclick = () => { PICK_FOR = SHEET.b; closeSheet(); $('file').click(); };
   if ($('sAgain')) $('sAgain').onclick = () => explainPhrase(SHEET.args, true);
   if ($('sKnown')) $('sKnown').onclick = () => { const e = DICT[lemmaOf(SHEET.tok, lang)]; setKnown(e, scoreOf(e) < 70); refreshSheet(); if (PANEL === 'words') drawWords(); };
   if ($('sFrom')) $('sFrom').onclick = () => { const { p, si, off } = SHEET; closeSheet(); stop(); setFrom(p, si, +off); play(); };
 }
+
+/* ---------- sección de gramática ----------
+   Se va armando sola: cada explicación de una palabra o un trozo nombra sus puntos gramaticales; si un punto no
+   existe, se crea solo con su nombre y una descripción (sin contenido). Cada punto guarda dónde apareció (las
+   explicaciones), y su explicación completa se pide solo si el lector la quiere. Por idioma, en localStorage. */
+const gramKey = lang => 'lec-gram-' + lang;
+const loadGram = lang => load(gramKey(lang), {});
+const gramId = p => String(p || '').toLowerCase().replace(/\s+/g, '').replace(/[‐-―]/g, '-').trim();
+function saveGramEntry(lang, e){ const g = loadGram(lang); g[e.id] = e; save(gramKey(lang), g); }
+// lo que se manda al modelo para que reutilice los nombres
+const gramKnown = lang => { const g = Object.values(loadGram(lang)); return g.length ? `SECCIONES DE GRAMÁTICA YA CREADAS: ${g.slice(-150).map(e => e.pattern).join(' · ')}\n` : ''; };
+function registerPoints(points, ref, lang = LANG()){
+  const out = [];
+  for (const p of points || []) {
+    const id = gramId(p.pattern); if (!id) continue;
+    const g = loadGram(lang);
+    const e = g[id] || { id, pattern: p.pattern.trim(), title: p.title || '', desc: p.desc || '', level: p.level || '', added: Date.now(), refs: [] };
+    if (!e.desc && p.desc) e.desc = p.desc;
+    if (!e.title && p.title) e.title = p.title;
+    if (ref && !e.refs.some(r => r.key === ref.key)) e.refs.unshift({ ...ref, date: Date.now() });
+    e.refs = e.refs.slice(0, 60); e.last = Date.now();
+    saveGramEntry(lang, e); out.push({ id, pattern: e.pattern, title: e.title });
+  }
+  return out;
+}
+// dónde está la oración (para volver a ella desde la gramática)
+const refPlace = (p, s) => ({ bookId: BOOK.id, bookTitle: BOOK.title, ver: CH.ver, ch: CH.ch, p, s });
+const pointChips = pts => (pts || []).length ? `<div class="sec-t">Gramática</div><div class="row" style="margin-top:2px">${pts.map(p => `<button class="chip" data-gram="${esc(p.id || gramId(p.pattern))}">📐 ${esc(p.pattern)}${p.title ? ' · ' + esc(p.title) : ''}</button>`).join('')}</div>` : '';
 
 /* ---------- seleccionar un trozo: explicación detallada ---------- */
 let selTimer = 0;
@@ -1298,7 +1428,7 @@ async function explainPhrase(sel, again = false){
   if (saved) { sh.x = saved.x; sh.saved = saved.date; refreshSheet(); return; }
   sh.busyTr = sh.busyEx = true; refreshSheet();
   const lang = LANG();
-  const user = `LIBRO: «${BOOK.title}»\nNIVEL DEL LECTOR: ${myLevel(lang)}\n` + (prevSentences(a[0], a[1]) ? `ORACIONES ANTERIORES: ${prevSentences(a[0], a[1])}\n` : '') + `ORACIÓN COMPLETA: «${whole.join(' ')}»\nTROZO SELECCIONADO: «${text}»`;
+  const user = `LIBRO: «${BOOK.title}»\nNIVEL DEL LECTOR: ${myLevel(lang)}\n` + (prevSentences(a[0], a[1]) ? `ORACIONES ANTERIORES: ${prevSentences(a[0], a[1])}\n` : '') + gramKnown(lang) + `ORACIÓN COMPLETA: «${whole.join(' ')}»\nTROZO SELECCIONADO: «${text}»`;
   let last = 0;
   const redraw = (force) => { if (SHEET !== sh) return; if (!force && Date.now() - last < 200) return; last = Date.now(); refreshSheet(); };
   const errs = [];
@@ -1312,8 +1442,9 @@ async function explainPhrase(sel, again = false){
       onText: raw => { sh.x.explanation = partialString(raw, 'explanation'); redraw(); } })
       .then(o => Object.assign(sh.x, o), e => errs.push('explicación: ' + errText(e))).finally(() => { sh.busyEx = false; redraw(true); })
   ]);
+  if (!errs.some(e => e.startsWith('explicación'))) sh.x.points = registerPoints(sh.x.points, { key: sh.key, kind: 'phrase', text, es: sh.x.translation || '', ...refPlace(a[0], a[1]) }, lang);
   if (errs.length) sh.err = 'No se pudo: ' + errs.join(' · ');
-  else dbPut('expl', { k: sh.key, x: { translation: sh.x.translation, literal: sh.x.literal, explanation: sh.x.explanation, grammar: sh.x.grammar || [], tip: sh.x.tip || '' }, date: Date.now() });
+  else dbPut('expl', { k: sh.key, x: { translation: sh.x.translation, literal: sh.x.literal, explanation: sh.x.explanation, grammar: sh.x.grammar || [], tip: sh.x.tip || '', points: sh.x.points || [] }, date: Date.now() });
   redraw(true);
 }
 // las palabras del trozo, con lo que ya dice el análisis de cada párrafo
@@ -1480,6 +1611,7 @@ function renderHeader(){
     h.innerHTML = `<h1>📚 Leamos <small>lector para aprender idiomas</small></h1>
       <a class="ib" href="index.html" title="Hablemos: conversar con 지수">💬<span class="lbl">Hablemos</span></a>
       <button class="ib" id="hWords" title="Mis palabras">📖<span class="lbl">Palabras</span></button>
+      <button class="ib" id="hGram" title="Gramática">📐<span class="lbl">Gramática</span></button>
       <button class="ib" id="hSet" title="Ajustes">⚙</button>`;
   } else {
     const vers = Object.keys(BOOK.versions || {}).sort((a, b) => verName(BOOK, a).localeCompare(verName(BOOK, b)));
@@ -1489,6 +1621,7 @@ function renderHeader(){
       <span style="flex:1"></span>
       <button class="ib" id="hInfo" title="Nivel y versiones del libro">ℹ</button>
       <button class="ib" id="hWords" title="Mis palabras">📖</button>
+      <button class="ib" id="hGram" title="Gramática">📐</button>
       <button class="ib" id="hSet" title="Ajustes">⚙</button>`;
     $('hBack').onclick = closeBook;
     $('hCh').onchange = e => { stop(); openChapter(CH.ver, +e.target.value); };
@@ -1496,6 +1629,7 @@ function renderHeader(){
     $('hInfo').onclick = () => openBookPanel(BOOK.id);
   }
   $('hWords').onclick = () => openWords();
+  $('hGram').onclick = () => openGram();
   $('hSet').onclick = openSettings;
 }
 function updateInfo(){
@@ -1600,7 +1734,8 @@ async function exportBooks(ids, name){
     }
     const dicts = {};
     for (const l of new Set(books.flatMap(b => [b.meta.lang, ...Object.keys(b.meta.versions || {}).map(v => verLang(b.meta, v))]))) dicts[l] = load(dictKey(l), {});
-    let blob = new Blob([JSON.stringify({ app: 'leamos', format: 1, version: APP_VERSION, date: Date.now(), books, dicts })], { type: 'application/json' });
+    const grams = {}; for (const l of Object.keys(dicts)) grams[l] = loadGram(l);
+    let blob = new Blob([JSON.stringify({ app: 'leamos', format: 1, version: APP_VERSION, date: Date.now(), books, dicts, grams })], { type: 'application/json' });
     if ('CompressionStream' in window) blob = await new Response(blob.stream().pipeThrough(new CompressionStream('gzip'))).blob();
     downloadBlob(blob, safeName(name) + '.leamos');
     toast(`Listo: ${books.length} libro${books.length === 1 ? '' : 's'} (${(blob.size / 1e6).toFixed(1).replace('.', ',')} MB). Ábrelo en el otro aparato con «📥 Importar .leamos».`);
@@ -1649,6 +1784,17 @@ async function importBackup(f){
     }
     let words = 0;
     for (const [lang, d] of Object.entries(data.dicts || {})) words += mergeDict(lang, d);
+    // la gramática se junta punto por punto (apariciones de los dos lados; la explicación completa, si falta)
+    for (const [lang, gi] of Object.entries(data.grams || {})) {
+      const g = loadGram(lang);
+      for (const [id, e] of Object.entries(gi || {})) {
+        if (!g[id]) { g[id] = e; continue; }
+        const keys = new Set(g[id].refs.map(r => r.key));
+        g[id].refs = [...g[id].refs, ...(e.refs || []).filter(r => !keys.has(r.key))].slice(0, 60);
+        if (!g[id].lesson && e.lesson) g[id].lesson = e.lesson;
+      }
+      save(gramKey(lang), g);
+    }
     toast(`Importado: ${n} libro${n === 1 ? '' : 's'}${words ? ` y ${words} palabra${words === 1 ? '' : 's'} del diccionario` : ''}.`);
     if (!BOOK) drawLibrary();
   } catch (e) { console.error(e); toast('No se pudo importar: ' + e.message); }
@@ -1910,6 +2056,87 @@ function drawWords(){
   $('pbody').querySelectorAll('[data-f]').forEach(b => b.onclick = () => { WFILTER = b.dataset.f; drawWords(); });
 }
 
+// gramática: los puntos que fueron apareciendo en las explicaciones
+let GLANG = null, GSEL = null, GQ = '';
+function openGram(lang, id = null){ GLANG = lang || LANG(); GSEL = id; openPanel('Gramática', 'gram'); drawGram(); }
+function drawGram(){
+  if (PANEL !== 'gram') return;
+  const lang = GLANG, g = loadGram(lang), pb = $('pbody');
+  if (GSEL && g[GSEL]) return drawGramPoint(g[GSEL]);
+  let list = Object.values(g);
+  if (GQ) { const q = GQ.toLowerCase(); list = list.filter(e => (e.pattern + ' ' + e.title + ' ' + e.desc).toLowerCase().includes(q)); }
+  list.sort((a, b) => (lvIdx(a.level) - lvIdx(b.level)) || a.pattern.localeCompare(b.pattern));
+  const byLevel = {}; for (const e of list) (byLevel[e.level || '—'] ||= []).push(e);
+  pb.innerHTML = `<div class="field"><label>Idioma</label><select id="gLangSel">${Object.entries(LANGS).map(([k, L]) => `<option value="${k}" ${k === lang ? 'selected' : ''}>${L.native} · ${L.name} (${Object.keys(loadGram(k)).length})</option>`).join('')}</select></div>
+    <p class="small">Los puntos gramaticales se agregan solos cuando pides la explicación de una palabra (doble toque) o de una frase (seleccionar o 🎓 Explicar). Cada uno lleva a las explicaciones donde apareció; su explicación completa se pide solo si la quieres.</p>
+    <input class="search" id="gramQ" placeholder="Buscar…" value="${esc(GQ)}">
+    ${list.length ? Object.entries(byLevel).map(([lv, es]) => `<div class="sec-t">${esc(lvLabel(lang, lv === '—' ? '' : lv) || 'Sin nivel')}</div>` + es.map(e => `<div class="ent" data-g="${esc(e.id)}"><div class="top"><span class="lem" lang="${lang}">${esc(e.pattern)}</span><span class="g">${esc(e.title)}</span><span class="small">${e.refs.length}${e.lesson ? ' · 🎓' : ''}</span></div><div class="small" style="margin-top:3px">${esc(e.desc)}</div></div>`).join('')).join('')
+      : '<p class="small" style="text-align:center;margin-top:20px">Todavía no hay puntos. Pide el detalle de una palabra o una frase mientras lees.</p>'}`;
+  $('gLangSel').onchange = e => { GLANG = e.target.value; GSEL = null; drawGram(); };
+  $('gramQ').oninput = e => { GQ = e.target.value; const pos = e.target.selectionStart; drawGram(); $('gramQ').focus(); $('gramQ').setSelectionRange(pos, pos); };
+  pb.querySelectorAll('[data-g]').forEach(el => el.onclick = () => { GSEL = el.dataset.g; drawGram(); $('pbody').scrollTop = 0; });
+}
+function drawGramPoint(e){
+  const lang = GLANG, pb = $('pbody');
+  $('ptitle').textContent = e.pattern;
+  const L = e.lesson;
+  pb.innerHTML = `<div class="row" style="margin-top:0"><button class="btn sec" id="gBack">← Toda la gramática</button></div>
+    <div class="box"><div class="big" style="font-size:24px;font-weight:600" lang="${lang}">${esc(e.pattern)}</div>
+      <div class="gloss">${esc(e.title)} ${e.level ? `<span class="badge lv">${esc(lvLabel(lang, e.level))}</span>` : ''}</div><div>${esc(e.desc)}</div></div>
+    <div class="box"><h3>Explicación completa</h3>
+      ${L ? `${paras(L.explanation)}${L.formation ? `<div class="sec-t">Cómo se forma</div>${paras(L.formation)}` : ''}
+        ${(L.examples || []).length ? `<div class="sec-t">Ejemplos</div>${L.examples.map(x => `<div class="ex"><span lang="${lang}" data-say="${esc(x.text)}" style="cursor:pointer">🔊 ${esc(x.text)}</span><br><span class="small">${esc(x.es)}</span></div>`).join('')}` : ''}
+        ${L.mistakes ? `<div class="form">⚠ ${esc(L.mistakes)}</div>` : ''}<div class="row"><button class="btn sec" id="gLesson">Explicar de nuevo</button></div>`
+        : GBUSY === e.id ? `<div class="busy">El profesor (${esc(mname(S.defModel))}) está explicando…</div>` : `<p class="small">Todavía sin contenido. Se pide solo si la quieres (modelo de explicaciones).</p><button class="btn" id="gLesson">🎓 Explicar este punto en detalle</button>`}</div>
+    <div class="box"><h3>Dónde apareció (${e.refs.length})</h3>
+      ${e.refs.map((r, i) => `<div class="ent" data-r="${i}"><div class="small">${r.kind === 'word' ? `🔤 palabra <b lang="${lang}">${esc(r.word)}</b>` : '💬 frase'} · ${esc(r.bookTitle || '')}</div>
+        <div lang="${lang}" style="margin:3px 0">${esc(r.text)}</div>${r.es ? `<div class="small">${esc(r.es)}</div>` : ''}
+        <div class="row" style="margin-top:6px"><button class="chip" data-open="${i}">Ver la explicación</button><button class="chip" data-go="${i}">📖 Ir a la oración</button></div></div>`).join('') || '<p class="small">—</p>'}</div>`;
+  $('gBack').onclick = () => { GSEL = null; $('ptitle').textContent = 'Gramática'; drawGram(); };
+  pb.querySelectorAll('[data-say]').forEach(b => b.onclick = () => sayText(b.dataset.say, lang));
+  if ($('gLesson')) $('gLesson').onclick = () => gramLesson(e.id);
+  pb.querySelectorAll('[data-open]').forEach(b => b.onclick = ev => { ev.stopPropagation(); openRef(e.refs[+b.dataset.open], lang); });
+  pb.querySelectorAll('[data-go]').forEach(b => b.onclick = ev => { ev.stopPropagation(); closePanel(); goToRef(e.refs[+b.dataset.go]); });
+}
+// la explicación completa de un punto (solo cuando se pide; queda guardada)
+let GBUSY = null;
+async function gramLesson(id){
+  const lang = GLANG, e = loadGram(lang)[id]; if (!e) return;
+  GBUSY = id; drawGram();
+  try {
+    const L = LANGS[lang];
+    const x = await askRetry(S.defModel, [
+      `Eres un profesor experto y cercano de ${L.name} para hispanohablantes. Explica un punto gramatical para un estudiante de nivel ${lvLabel(lang, myLevel(lang))}, en español:`,
+      '- explanation: qué expresa, cuándo y para qué se usa, matices y registro, comparado con el español (2 a 4 párrafos cortos separados por una línea en blanco).',
+      '- formation: cómo se forma (reglas, variantes y excepciones), con ejemplos cortos.',
+      `- examples: 4 a 6 oraciones de ejemplo en ${L.name}, naturales y de dificultad creciente, con su traducción (text, es).`,
+      '- mistakes: los errores frecuentes de los hispanohablantes con este punto (o "").'
+    ].join('\n'), `PUNTO: ${e.pattern} (${e.title})\nDESCRIPCIÓN: ${e.desc}\n` + (e.refs.length ? `APARECIÓ EN: ${e.refs.slice(0, 4).map(r => '«' + r.text + '»').join(' · ')}` : ''),
+      GLESSON_SCHEMA, { effort: 'low', maxTokens: 10000, ms: 150000, kind: 'explain' });
+    const cur = loadGram(lang)[id]; if (cur) { cur.lesson = { ...x, date: Date.now(), model: S.defModel }; saveGramEntry(lang, cur); }
+  } catch (err) { toast('No se pudo explicar: ' + errText(err)); }
+  GBUSY = null; drawGram();
+}
+// abrir la explicación guardada de una aparición
+async function openRef(r, lang){
+  const rec = await dbGet('expl', r.key).catch(() => null);
+  if (r.kind === 'phrase') {
+    SHEET = { kind: 'phrase', text: r.text, x: rec?.x || { translation: r.es || '' }, saved: rec?.date || 0, range: [], ref: r, args: null };
+    if (!rec) SHEET.err = 'Esta explicación ya no está guardada (¿se borró el libro?).';
+  } else {
+    useDict(lang);
+    SHEET = { kind: 'dict', tok: { t: r.word, lemma: r.lemma, pos: '', gloss: '', form: '' }, ctx: rec?.ctx || r.ctx || '', points: rec?.points, ref: r };
+  }
+  showSheet(); refreshSheet();
+}
+// ir a la oración del libro donde apareció
+async function goToRef(r){
+  if (!r || !(await dbGet('books', r.bookId))) { toast('Ese libro ya no está en la biblioteca.'); return; }
+  if (PANEL) closePanel();
+  await openBook(r.bookId, r.ver);
+  if (CH?.ver !== r.ver || CH?.ch !== r.ch) await openChapter(r.ver, r.ch, r.p, r.s); else setCursor(r.p, r.s);
+}
+
 // ajustes
 function openSettings(){
   openPanel('Ajustes', 'settings');
@@ -1929,8 +2156,17 @@ function openSettings(){
       <label class="check"><input type="checkbox" id="cTrAlways" ${S.showTr ? 'checked' : ''}><span>Mostrar siempre la traducción de la oración marcada (si no, 文 la muestra solo para la oración que elijas). Con la traducción a la vista, las palabras de esa oración no suben.</span></label>
       <label class="check"><input type="checkbox" id="cSilent" ${S.silentRead !== false ? 'checked' : ''}><span>Contar la lectura sin voz: al bajar la página, el párrafo que pasaste (y que estuvo a la vista el tiempo para leerlo) cuenta como leído, y la marca te sigue.</span></label></div>
     <div class="box"><h3>Mi nivel</h3><div class="conj" style="align-items:center">${Object.entries(LANGS).map(([k, L]) => `<span>${L.native}</span>${sel('lv_' + k, CEFR.map(c => [c, lvLabel(k, c)]), myLevel(k))}`).join('')}</div></div>
-    <div class="box"><h3>Voz (${esc(LANGS[lang].name)})</h3>
-      <div class="field"><label>Voz</label>${vs.length ? sel('vVoice', [['', 'La primera disponible'], ...vs.map(v => [v.name, v.name + ' · ' + v.lang])], S.voices[lang] || '') : '<div class="small">No hay voces de este idioma en el sistema; se usará la voz por defecto.</div>'}</div>
+    <div class="box"><h3>Voz</h3>
+      <div class="field"><label>Leer con</label>${sel('vProv', [['', 'La voz del navegador · gratis'], ['edge', 'Microsoft Edge · voz natural gratis (con tu intermediario)'], ['openai', 'OpenAI · voz natural (con tu clave de OpenAI)']], S.ttsProv || '')}
+        ${S.ttsProv === 'openai' && !KEYS.openai ? '<div class="fix">Falta la clave de OpenAI (arriba).</div>' : ''}
+        ${S.ttsProv === 'edge' && !S.proxy ? '<div class="fix">Hace falta tu intermediario de Cloudflare (más abajo, en «Gutenberg: tu intermediario»): es el mismo, y su código ya incluye la voz.</div>' : ''}</div>
+      ${S.ttsProv === 'edge' ? `<div class="field"><label>Voz de Edge para ${esc(LANGS[lang].name)}</label>${sel('vEdge', EDGE_VOICES[lang] || [], edgeVoice(lang))}
+        <div class="small">Las mismas voces neuronales de «Leer en voz alta» de Microsoft Edge (como edge-tts). Gratis. Cada oración se genera una vez y queda guardada; la palabra que se dice se resalta exacta. Si ya tenías el intermediario, vuelve a pegar el código nuevo de <a href="gutenberg-proxy.js" target="_blank">gutenberg-proxy.js</a> en tu worker.</div></div>` : ''}
+      ${S.ttsProv === 'openai' ? `<div class="field"><label>Modelo</label>${sel('vModel', TTS_MODELS, ttsModel())}</div>
+      <div class="field"><label>Voz de OpenAI (sirve para todos los idiomas)</label>${sel('vOai', TTS_VOICES.map(v => [v, v]), ttsVoice())}</div>
+      ${ttsModel().startsWith('gpt-') ? `<div class="field"><label>Cómo debe leer</label><input type="text" id="vInstr" value="${esc(S.ttsInstr ?? TTS_DEFAULT_INSTR)}"></div>` : ''}
+      <div class="small">Cada oración se genera una vez y queda guardada en este navegador (releer no cuesta). La velocidad se ajusta al reproducir. Del orden de 1,5 centavos de dólar por minuto de audio. Mientras suena una oración se pide la siguiente.</div>` : ''}
+      <div class="field"><label>Voz del navegador (${esc(LANGS[lang].name)})</label>${vs.length ? sel('vVoice', [['', 'La primera disponible'], ...[...vs].sort((a, b) => /natural|online|neural/i.test(b.name) - /natural|online|neural/i.test(a.name)).map(v => [v.name, (/natural|online|neural/i.test(v.name) ? '★ ' : '') + v.name + ' · ' + v.lang])], S.voices[lang] || '') + (vs.some(v => /natural|online/i.test(v.name)) ? '<div class="small">★ = voz natural (en Microsoft Edge, las «Online (Natural)» son las mismas de edge-tts, gratis).</div>' : '<div class="small">En <b>Microsoft Edge</b> el navegador trae voces naturales gratis («Online (Natural)»): abre Leamos en Edge y elígelas aquí.</div>') : '<div class="small">No hay voces de este idioma en el sistema; se usará la voz por defecto.</div>'}</div>
       <div class="field"><label>Velocidad: <b id="rateV">${S.rate}</b></label><input type="range" id="rRate" min="0.5" max="1.4" step="0.05" value="${S.rate}" style="width:100%"></div>
       <label class="check"><input type="checkbox" id="cSay" ${S.autoSpeakWord ? 'checked' : ''}><span>Decir la palabra al tocarla (si no está leyendo)</span></label>
       <button class="btn sec" id="vTest">🔊 Probar</button></div>
@@ -1938,7 +2174,7 @@ function openSettings(){
       <div class="field"><label>Pedidos simultáneos a la API</label><select id="sPar">${[5, 10, 20, 50, 100].map(n => `<option value="${n}" ${n === SIMP_PAR() ? 'selected' : ''}>${n}${n === 50 ? ' (por defecto)' : ''}</option>`).join('')}</select>
       <label class="check"><input type="checkbox" id="cCheck" ${S.simpCheck !== false ? 'checked' : ''}><span>Revisar el nivel: después de cada parte, el modelo barato busca palabras o gramática sobre el nivel y esos párrafos se reescriben (más fiel al nivel; cuesta ~35 % más).</span></label>
       <div class="small">Más pedidos a la vez = el libro se simplifica antes. Si tu cuenta tiene un límite bajo de pedidos por minuto, la API rechaza algunos y la app los reintenta (más lento); si ves fallas, baja este número.</div></div></div>
-    <div class="box"><h3>Gutenberg: tu intermediario (opcional)</h3>
+    <div class="box"><h3>Gutenberg y voz de Edge: tu intermediario (opcional)</h3>
       <p class="small">El navegador no deja que una página descargue libros de otro sitio si ese sitio no lo autoriza, y los intermediarios gratuitos a veces fallan. Con uno propio funciona siempre: es gratis y toma unos 5 minutos.</p>
       <ol class="small" style="padding-left:18px;margin:6px 0">
         <li>Crea una cuenta gratis en <a href="https://dash.cloudflare.com/sign-up" target="_blank" rel="noopener">Cloudflare</a>.</li>
@@ -1947,7 +2183,7 @@ function openSettings(){
         <li>Copia la dirección del worker (algo como https://leamos.tu-nombre.workers.dev) y pégala aquí.</li>
       </ol>
       <div class="field"><label>Dirección del intermediario</label><input type="text" id="gProxy" value="${esc(S.proxy || '')}" placeholder="https://….workers.dev"></div>
-      <div class="small">Solo deja pasar gutenberg.org y gutendex.com. Por él pasan las direcciones de los libros, nunca tu clave.</div></div>
+      <div class="small">Solo deja pasar gutenberg.org y gutendex.com, y también da la voz gratuita de Microsoft Edge (⚙ Voz → Microsoft Edge). Por él pasan las direcciones de los libros y los textos a leer, nunca tu clave.</div></div>
     <div class="box"><h3>Lectura</h3>
       <div class="field"><label>Tamaño de la letra: <b id="fsV">${S.fs}</b> px</label><input type="range" id="rFs" min="15" max="30" step="1" value="${S.fs}" style="width:100%"></div>
       <div class="field"><label>Tema</label>${sel('sTheme', [['', 'Automático'], ['light', 'Claro'], ['dark', 'Oscuro']], S.theme)}</div></div>
@@ -1956,7 +2192,7 @@ function openSettings(){
     <p class="small" style="text-align:center">Leamos · versión ${APP_VERSION}</p>`;
   const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
   on('kA', 'change', e => { KEYS.anthropic = e.target.value.trim(); saveKeys(); });
-  on('kO', 'change', e => { KEYS.openai = e.target.value.trim(); saveKeys(); });
+  on('kO', 'change', e => { KEYS.openai = e.target.value.trim(); saveKeys(); CLOUD_OFF = false; });
   on('kW', 'change', e => { KEYS.workspace = e.target.value.trim(); saveKeys(); });
   on('mRead', 'change', e => { S.chatModel = e.target.value; saveSet(); });
   on('mDef', 'change', e => { S.defModel = e.target.value; saveSet(); });
@@ -1969,12 +2205,17 @@ function openSettings(){
   on('cCheck', 'change', e => { S.simpCheck = e.target.checked; saveSet(); });
   for (const k of Object.keys(LANGS)) on('lv_' + k, 'change', e => { S.myLevel[k] = e.target.value; saveSet(); });
   on('vVoice', 'change', e => { S.voices[lang] = e.target.value; saveSet(); });
+  on('vProv', 'change', e => { S.ttsProv = e.target.value; saveSet(); stop(); openSettings(); });
+  on('vModel', 'change', e => { S.ttsModel = e.target.value; saveSet(); openSettings(); });
+  on('vOai', 'change', e => { S.ttsVoice = e.target.value; saveSet(); });
+  on('vEdge', 'change', e => { S.edgeVoices = { ...(S.edgeVoices || {}), [lang]: e.target.value }; saveSet(); AUDIO_URLS.clear(); });
+  on('vInstr', 'change', e => { S.ttsInstr = e.target.value.trim(); saveSet(); });
   on('rRate', 'input', e => { S.rate = +e.target.value; $('rateV').textContent = S.rate; saveSet(); });
   on('cSay', 'change', e => { S.autoSpeakWord = e.target.checked; saveSet(); });
-  on('vTest', 'click', () => { speechSynthesis.cancel(); speechSynthesis.speak(utter(lang === 'ko' ? '안녕하세요. 오늘은 무슨 책을 읽을까요?' : lang === 'en' ? 'Hello! What shall we read today?' : LANGS[lang].native, lang)); });
+  on('vTest', 'click', () => sayText(lang === 'ko' ? '안녕하세요. 오늘은 무슨 책을 읽을까요?' : lang === 'en' ? 'Hello! What shall we read today?' : LANGS[lang].native, lang));
   on('rFs', 'input', e => { S.fs = +e.target.value; $('fsV').textContent = S.fs; applyLook(); saveSet(); });
   on('sTheme', 'change', e => { S.theme = e.target.value; applyLook(); saveSet(); });
-  on('gProxy', 'change', e => { let v = e.target.value.trim(); if (v && !/^https?:\/\//.test(v)) v = 'https://' + v; S.proxy = v; e.target.value = v; saveSet(); });
+  on('gProxy', 'change', e => { let v = e.target.value.trim(); if (v && !/^https?:\/\//.test(v)) v = 'https://' + v; S.proxy = v; e.target.value = v; saveSet(); CLOUD_OFF = false; });
 }
 
 /* ---------- botones y teclado ---------- */
@@ -1982,7 +2223,7 @@ $('pPlay').onclick = () => PLAY ? stop() : play();
 $('pNext').onclick = () => { const was = PLAY; stop(); next(true).then(() => { if (was) play(); }); };
 $('pPrev').onclick = () => { const was = PLAY; stop(); prev(); if (was) play(); };
 const RATES = [0.6, 0.75, 0.9, 1, 1.15];
-$('pRate').onclick = () => { const i = RATES.findIndex(r => r >= S.rate - 0.001); S.rate = RATES[(i + 1) % RATES.length]; saveSet(); updateInfo(); if (PLAY) { stop(); play(); } };
+$('pRate').onclick = () => { const i = RATES.findIndex(r => r >= S.rate - 0.001); S.rate = RATES[(i + 1) % RATES.length]; saveSet(); updateInfo(); if (PLAY) { if (UTT?.cloud) AUDIO.playbackRate = S.rate; else { stop(); play(); } } };
 $('pTr').onclick = () => {
   if (S.showTr) { S.showTr = false; saveSet(); TR_ONCE = null; showTr(); return; }   // (apaga el modo «siempre»)
   const on = TR_ONCE && TR_ONCE.p === CUR.p && TR_ONCE.s === CUR.s && TR_ONCE.ch === CH?.ch;

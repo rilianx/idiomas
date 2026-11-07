@@ -262,3 +262,53 @@ function entryHTML(e, { lang = 'ko', extra = 'Hanja', sentence = false, maxForms
   if (sentence && e.sentence) h += `<div class="sec-t">Donde la viste</div><div class="small" lang="${lang}">${esc(e.sentence)}</div>`;
   return h;
 }
+
+/* ---------- voz natural con OpenAI (texto a voz) ----------
+   POST /v1/audio/speech con la clave de OpenAI; devuelve el audio (mp3). gpt-4o-mini-tts acepta además
+   indicaciones de cómo leer. El costo se estima por caracteres (OpenAI no informa uso en esta respuesta). */
+const TTS_MODELS = [['gpt-4o-mini-tts', 'GPT-4o mini TTS · natural, sigue indicaciones (recomendado)'], ['tts-1-hd', 'TTS-1 HD · buena calidad'], ['tts-1', 'TTS-1 · el más rápido']];
+const TTS_VOICES = ['marin', 'cedar', 'coral', 'nova', 'shimmer', 'sage', 'alloy', 'ash', 'ballad', 'echo', 'fable', 'onyx', 'verse'];
+const TTS_PRICE_PER_MCHAR = { 'gpt-4o-mini-tts': 16, 'tts-1': 15, 'tts-1-hd': 30 };   // dólares por millón de caracteres (aprox.)
+const TTS_DEFAULT_INSTR = 'Lee con voz clara y natural, a un ritmo tranquilo, como un narrador de audiolibros para estudiantes de idiomas. Pronuncia bien cada palabra.';
+async function openaiSpeech(text, { model = 'gpt-4o-mini-tts', voice = 'marin', instructions = '' } = {}){
+  if (!KEYS.openai) throw new NoKey('openai');
+  const body = { model, voice, input: text, response_format: 'mp3' };
+  if (instructions && model.startsWith('gpt-')) body.instructions = instructions;
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 60000);
+  let res;
+  try { res = await fetch('https://api.openai.com/v1/audio/speech', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + KEYS.openai }, body: JSON.stringify(body), signal: ctl.signal }); }
+  catch (e) { throw new Error(e.name === 'AbortError' ? 'la voz tardó demasiado' : 'sin conexión'); }
+  finally { clearTimeout(timer); }
+  if (!res.ok) { const data = await res.json().catch(() => ({})); throw httpError(res, data); }
+  return res.blob();
+}
+// un número corto para identificar un texto (caché del audio)
+function textHash(s){ let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return (h >>> 0).toString(36) + s.length.toString(36); }
+
+/* ---------- voz neuronal gratuita de Microsoft Edge (vía tu intermediario de Cloudflare) ----------
+   El servicio de Edge no acepta conexiones directas desde una página web: el worker (gutenberg-proxy.js) se
+   conecta por nosotros y devuelve el mp3 y la posición de cada palabra. */
+const EDGE_VOICES = {
+  ko: [['ko-KR-SunHiNeural', 'SunHi · mujer'], ['ko-KR-InJoonNeural', 'InJoon · hombre'], ['ko-KR-HyunsuMultilingualNeural', 'Hyunsu · hombre (multilingüe)']],
+  en: [['en-US-AriaNeural', 'Aria · EE. UU., mujer'], ['en-US-JennyNeural', 'Jenny · EE. UU., mujer'], ['en-US-GuyNeural', 'Guy · EE. UU., hombre'], ['en-US-AndrewNeural', 'Andrew · EE. UU., hombre'], ['en-GB-SoniaNeural', 'Sonia · Reino Unido, mujer'], ['en-GB-RyanNeural', 'Ryan · Reino Unido, hombre']],
+  ja: [['ja-JP-NanamiNeural', 'Nanami · mujer'], ['ja-JP-KeitaNeural', 'Keita · hombre']],
+  zh: [['zh-CN-XiaoxiaoNeural', 'Xiaoxiao · mujer'], ['zh-CN-YunxiNeural', 'Yunxi · hombre']],
+  fr: [['fr-FR-DeniseNeural', 'Denise · mujer'], ['fr-FR-HenriNeural', 'Henri · hombre']],
+  de: [['de-DE-KatjaNeural', 'Katja · mujer'], ['de-DE-ConradNeural', 'Conrad · hombre']],
+  it: [['it-IT-ElsaNeural', 'Elsa · mujer'], ['it-IT-DiegoNeural', 'Diego · hombre']],
+  pt: [['pt-BR-FranciscaNeural', 'Francisca · Brasil, mujer'], ['pt-BR-AntonioNeural', 'Antonio · Brasil, hombre']],
+  es: [['es-MX-DaliaNeural', 'Dalia · México, mujer'], ['es-MX-JorgeNeural', 'Jorge · México, hombre'], ['es-CL-CatalinaNeural', 'Catalina · Chile, mujer'], ['es-ES-ElviraNeural', 'Elvira · España, mujer']]
+};
+async function edgeSpeech(text, voice, proxy){
+  if (!proxy) throw new Error('falta tu intermediario (⚙ Ajustes → Gutenberg)');
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 45000);
+  let res;
+  try { res = await fetch(proxy.replace(/\/+$/, '') + '/tts', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text, voice }), signal: ctl.signal }); }
+  catch (e) { throw new Error(e.name === 'AbortError' ? 'la voz tardó demasiado' : 'sin conexión con tu intermediario'); }
+  finally { clearTimeout(timer); }
+  const data = await res.json().catch(() => null);
+  if (!res.ok || !data?.audio) throw new Error(data?.error || (res.status === 404 ? 'tu intermediario no tiene la voz: actualiza su código (gutenberg-proxy.js)' : 'error ' + res.status));
+  const bin = atob(data.audio), bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return { blob: new Blob([bytes], { type: 'audio/mpeg' }), words: data.words || [] };
+}
