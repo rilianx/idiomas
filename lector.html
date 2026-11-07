@@ -103,7 +103,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-07 · 25';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-07 · 26';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -1010,11 +1010,18 @@ function creditSentence(p, s){
 /* ---------- leer en voz alta: la voz del navegador (gratis) o la de OpenAI (natural) ---------- */
 const utter = (text, lang, rate = S.rate) => makeUtterance(text, lang, rate, S.voices[lang]);
 let CLOUD_OFF = false;   // (la clave de OpenAI falló: en esta sesión se usa la voz del navegador)
-const cloudOn = () => S.ttsProv === 'openai' && !!KEYS.openai && !CLOUD_OFF;
+const cloudOn = () => !CLOUD_OFF && ((S.ttsProv === 'openai' && !!KEYS.openai) || (S.ttsProv === 'edge' && !!S.proxy));
+const edgeVoice = (lang = LANG()) => (S.edgeVoices || {})[lang] || EDGE_VOICES[lang]?.[0]?.[0] || 'en-US-AriaNeural';
 const ttsModel = () => S.ttsModel || 'gpt-4o-mini-tts', ttsVoice = () => S.ttsVoice || 'marin';
 const AUDIO = new Audio(), WORD_AUDIO = new Audio();
 AUDIO.preservesPitch = WORD_AUDIO.preservesPitch = true;
-const AUDIO_URLS = new Map(), AUDIO_INFLIGHT = new Map();
+const AUDIO_URLS = new Map(), AUDIO_INFLIGHT = new Map(), AUDIO_WORDS = new Map();
+// las palabras que informa Edge ([ms, texto]) → [ms, posición en el texto]
+function wordChars(text, words){
+  const out = []; let from = 0;
+  for (const [ms, w] of words) { const i = w ? text.indexOf(w, from) : -1; if (i >= 0) { out.push([ms, i]); from = i + w.length; } }
+  return out;
+}
 function recordVoice(chars){
   const pr = TTS_PRICE_PER_MCHAR[ttsModel()] || 16;
   const day = USAGE[today()] || (USAGE[today()] = {});
@@ -1022,23 +1029,28 @@ function recordVoice(chars){
   k.n++; k.tin += chars; k.cost += chars * pr / 1e6; save('lec-usage', USAGE);
 }
 // el audio de un texto: de la memoria, de lo guardado o pedido a OpenAI (y se guarda para no volver a pagarlo)
-async function cloudAudio(text){
-  const key = `${ttsModel()}|${ttsVoice()}|${textHash(text)}`;
+async function cloudAudio(text, lang = LANG()){
+  const edge = S.ttsProv === 'edge';
+  const key = edge ? `edge|${edgeVoice(lang)}|${textHash(text)}` : `${ttsModel()}|${ttsVoice()}|${textHash(text)}`;
   if (AUDIO_URLS.has(key)) return AUDIO_URLS.get(key);
   if (AUDIO_INFLIGHT.has(key)) return AUDIO_INFLIGHT.get(key);
   const pr = (async () => {
     let rec = await dbGet('audio', key).catch(() => null);
     if (!rec || rec.text !== text) {
-      let blob = null;
+      let blob = null, words = null;
       for (let a = 0; a < 3 && !blob; a++) {
-        try { blob = await openaiSpeech(text, { model: ttsModel(), voice: ttsVoice(), instructions: S.ttsInstr ?? TTS_DEFAULT_INSTR }); }
-        catch (e) { if (a === 2 || e instanceof NoKey || !(netCut(e) || /demasiados|saturado/.test(e.message))) throw e; await waitVisible(); await new Promise(r => setTimeout(r, 1500 * (a + 1))); }
+        try {
+          if (edge) ({ blob, words } = await edgeSpeech(text, edgeVoice(lang), S.proxy));
+          else blob = await openaiSpeech(text, { model: ttsModel(), voice: ttsVoice(), instructions: S.ttsInstr ?? TTS_DEFAULT_INSTR });
+        }
+        catch (e) { if (a === 2 || e instanceof NoKey || !(netCut(e) || /demasiados|saturado|tardó/.test(e.message))) throw e; await waitVisible(); await new Promise(r => setTimeout(r, 1500 * (a + 1))); }
       }
-      recordVoice(text.length);
-      rec = { k: key, text, blob, date: Date.now() };
+      if (!edge) recordVoice(text.length);
+      rec = { k: key, text, blob, words: words ? wordChars(text, words) : null, date: Date.now() };
       dbPut('audio', rec).catch(() => {});
     }
     const url = URL.createObjectURL(rec.blob);
+    if (rec.words) AUDIO_WORDS.set(url, rec.words);
     AUDIO_URLS.set(key, url); return url;
   })();
   AUDIO_INFLIGHT.set(key, pr);
@@ -1048,7 +1060,7 @@ async function cloudAudio(text){
 async function sayText(text, lang = LANG(), rate = S.rate){
   if (!text) return;
   if (cloudOn()) {
-    try { const url = await cloudAudio(text); WORD_AUDIO.src = url; WORD_AUDIO.playbackRate = rate; await WORD_AUDIO.play(); return; }
+    try { const url = await cloudAudio(text, lang); WORD_AUDIO.src = url; WORD_AUDIO.playbackRate = rate; await WORD_AUDIO.play(); return; }
     catch (e) { console.warn('voz OpenAI:', e.message); }
   }
   if ('speechSynthesis' in window) { speechSynthesis.cancel(); speechSynthesis.speak(utter(text, lang, rate)); }
@@ -1115,8 +1127,8 @@ async function speakCloud(text, off){
   try { url = await cloudAudio(text); }
   catch (e) {
     if (UTT !== u) return;
-    if (e instanceof NoKey || /clave|permiso|saldo/.test(e.message)) CLOUD_OFF = true;
-    toast('Voz de OpenAI: ' + errText(e) + '. Se usa la del navegador' + (CLOUD_OFF ? ' (hasta recargar la página o revisar la clave en ⚙ Ajustes).' : '.'));
+    if (e instanceof NoKey || /clave|permiso|saldo|intermediario|actualiza/.test(e.message)) CLOUD_OFF = true;
+    toast((S.ttsProv === 'edge' ? 'Voz de Edge: ' : 'Voz de OpenAI: ') + errText(e) + '. Se usa la del navegador' + (CLOUD_OFF ? ' (hasta recargar la página o revisar la clave en ⚙ Ajustes).' : '.'));
     const b = utter(text, LANG()); b.onend = () => advanceAfter(u); b.onerror = () => advanceAfter(u);
     if ('speechSynthesis' in window) speechSynthesis.speak(b); else advanceAfter(u);
     return;
@@ -1127,7 +1139,12 @@ async function speakCloud(text, off){
   AUDIO.onended = () => advanceAfter(u);
   AUDIO.onerror = () => advanceAfter(u);
   // OpenAI no dice dónde va cada palabra: se aproxima por el avance del audio
-  AUDIO.ontimeupdate = () => { if (UTT === u && AUDIO.duration) markSpoken(off + Math.floor(text.length * AUDIO.currentTime / AUDIO.duration)); };
+  const marks = AUDIO_WORDS.get(url);
+  AUDIO.ontimeupdate = () => {
+    if (UTT !== u || !AUDIO.duration) return;
+    if (marks?.length) { const t = AUDIO.currentTime * 1000; let c = 0; for (const [ms, i] of marks) { if (ms <= t + 60) c = i; else break; } markSpoken(off + c); }
+    else markSpoken(off + Math.floor(text.length * AUDIO.currentTime / AUDIO.duration));
+  };
   AUDIO.play().catch(e => { if (UTT === u) { toast('No se pudo reproducir el audio: ' + e.message); stop(); } });
 }
 async function advanceAfter(u){
@@ -2002,13 +2019,16 @@ function openSettings(){
       <label class="check"><input type="checkbox" id="cSilent" ${S.silentRead !== false ? 'checked' : ''}><span>Contar la lectura sin voz: al bajar la página, el párrafo que pasaste (y que estuvo a la vista el tiempo para leerlo) cuenta como leído, y la marca te sigue.</span></label></div>
     <div class="box"><h3>Mi nivel</h3><div class="conj" style="align-items:center">${Object.entries(LANGS).map(([k, L]) => `<span>${L.native}</span>${sel('lv_' + k, CEFR.map(c => [c, lvLabel(k, c)]), myLevel(k))}`).join('')}</div></div>
     <div class="box"><h3>Voz</h3>
-      <div class="field"><label>Leer con</label>${sel('vProv', [['', 'La voz del navegador · gratis'], ['openai', 'OpenAI · voz natural (con tu clave de OpenAI)']], S.ttsProv || '')}
-        ${S.ttsProv === 'openai' && !KEYS.openai ? '<div class="fix">Falta la clave de OpenAI (arriba).</div>' : ''}</div>
+      <div class="field"><label>Leer con</label>${sel('vProv', [['', 'La voz del navegador · gratis'], ['edge', 'Microsoft Edge · voz natural gratis (con tu intermediario)'], ['openai', 'OpenAI · voz natural (con tu clave de OpenAI)']], S.ttsProv || '')}
+        ${S.ttsProv === 'openai' && !KEYS.openai ? '<div class="fix">Falta la clave de OpenAI (arriba).</div>' : ''}
+        ${S.ttsProv === 'edge' && !S.proxy ? '<div class="fix">Hace falta tu intermediario de Cloudflare (más abajo, en «Gutenberg: tu intermediario»): es el mismo, y su código ya incluye la voz.</div>' : ''}</div>
+      ${S.ttsProv === 'edge' ? `<div class="field"><label>Voz de Edge para ${esc(LANGS[lang].name)}</label>${sel('vEdge', EDGE_VOICES[lang] || [], edgeVoice(lang))}
+        <div class="small">Las mismas voces neuronales de «Leer en voz alta» de Microsoft Edge (como edge-tts). Gratis. Cada oración se genera una vez y queda guardada; la palabra que se dice se resalta exacta. Si ya tenías el intermediario, vuelve a pegar el código nuevo de <a href="gutenberg-proxy.js" target="_blank">gutenberg-proxy.js</a> en tu worker.</div></div>` : ''}
       ${S.ttsProv === 'openai' ? `<div class="field"><label>Modelo</label>${sel('vModel', TTS_MODELS, ttsModel())}</div>
       <div class="field"><label>Voz de OpenAI (sirve para todos los idiomas)</label>${sel('vOai', TTS_VOICES.map(v => [v, v]), ttsVoice())}</div>
       ${ttsModel().startsWith('gpt-') ? `<div class="field"><label>Cómo debe leer</label><input type="text" id="vInstr" value="${esc(S.ttsInstr ?? TTS_DEFAULT_INSTR)}"></div>` : ''}
       <div class="small">Cada oración se genera una vez y queda guardada en este navegador (releer no cuesta). La velocidad se ajusta al reproducir. Del orden de 1,5 centavos de dólar por minuto de audio. Mientras suena una oración se pide la siguiente.</div>` : ''}
-      <div class="field"><label>Voz del navegador (${esc(LANGS[lang].name)})</label>${vs.length ? sel('vVoice', [['', 'La primera disponible'], ...vs.map(v => [v.name, v.name + ' · ' + v.lang])], S.voices[lang] || '') : '<div class="small">No hay voces de este idioma en el sistema; se usará la voz por defecto.</div>'}</div>
+      <div class="field"><label>Voz del navegador (${esc(LANGS[lang].name)})</label>${vs.length ? sel('vVoice', [['', 'La primera disponible'], ...[...vs].sort((a, b) => /natural|online|neural/i.test(b.name) - /natural|online|neural/i.test(a.name)).map(v => [v.name, (/natural|online|neural/i.test(v.name) ? '★ ' : '') + v.name + ' · ' + v.lang])], S.voices[lang] || '') + (vs.some(v => /natural|online/i.test(v.name)) ? '<div class="small">★ = voz natural (en Microsoft Edge, las «Online (Natural)» son las mismas de edge-tts, gratis).</div>' : '<div class="small">En <b>Microsoft Edge</b> el navegador trae voces naturales gratis («Online (Natural)»): abre Leamos en Edge y elígelas aquí.</div>') : '<div class="small">No hay voces de este idioma en el sistema; se usará la voz por defecto.</div>'}</div>
       <div class="field"><label>Velocidad: <b id="rateV">${S.rate}</b></label><input type="range" id="rRate" min="0.5" max="1.4" step="0.05" value="${S.rate}" style="width:100%"></div>
       <label class="check"><input type="checkbox" id="cSay" ${S.autoSpeakWord ? 'checked' : ''}><span>Decir la palabra al tocarla (si no está leyendo)</span></label>
       <button class="btn sec" id="vTest">🔊 Probar</button></div>
@@ -2016,7 +2036,7 @@ function openSettings(){
       <div class="field"><label>Pedidos simultáneos a la API</label><select id="sPar">${[5, 10, 20, 50, 100].map(n => `<option value="${n}" ${n === SIMP_PAR() ? 'selected' : ''}>${n}${n === 50 ? ' (por defecto)' : ''}</option>`).join('')}</select>
       <label class="check"><input type="checkbox" id="cCheck" ${S.simpCheck !== false ? 'checked' : ''}><span>Revisar el nivel: después de cada parte, el modelo barato busca palabras o gramática sobre el nivel y esos párrafos se reescriben (más fiel al nivel; cuesta ~35 % más).</span></label>
       <div class="small">Más pedidos a la vez = el libro se simplifica antes. Si tu cuenta tiene un límite bajo de pedidos por minuto, la API rechaza algunos y la app los reintenta (más lento); si ves fallas, baja este número.</div></div></div>
-    <div class="box"><h3>Gutenberg: tu intermediario (opcional)</h3>
+    <div class="box"><h3>Gutenberg y voz de Edge: tu intermediario (opcional)</h3>
       <p class="small">El navegador no deja que una página descargue libros de otro sitio si ese sitio no lo autoriza, y los intermediarios gratuitos a veces fallan. Con uno propio funciona siempre: es gratis y toma unos 5 minutos.</p>
       <ol class="small" style="padding-left:18px;margin:6px 0">
         <li>Crea una cuenta gratis en <a href="https://dash.cloudflare.com/sign-up" target="_blank" rel="noopener">Cloudflare</a>.</li>
@@ -2025,7 +2045,7 @@ function openSettings(){
         <li>Copia la dirección del worker (algo como https://leamos.tu-nombre.workers.dev) y pégala aquí.</li>
       </ol>
       <div class="field"><label>Dirección del intermediario</label><input type="text" id="gProxy" value="${esc(S.proxy || '')}" placeholder="https://….workers.dev"></div>
-      <div class="small">Solo deja pasar gutenberg.org y gutendex.com. Por él pasan las direcciones de los libros, nunca tu clave.</div></div>
+      <div class="small">Solo deja pasar gutenberg.org y gutendex.com, y también da la voz gratuita de Microsoft Edge (⚙ Voz → Microsoft Edge). Por él pasan las direcciones de los libros y los textos a leer, nunca tu clave.</div></div>
     <div class="box"><h3>Lectura</h3>
       <div class="field"><label>Tamaño de la letra: <b id="fsV">${S.fs}</b> px</label><input type="range" id="rFs" min="15" max="30" step="1" value="${S.fs}" style="width:100%"></div>
       <div class="field"><label>Tema</label>${sel('sTheme', [['', 'Automático'], ['light', 'Claro'], ['dark', 'Oscuro']], S.theme)}</div></div>
@@ -2050,13 +2070,14 @@ function openSettings(){
   on('vProv', 'change', e => { S.ttsProv = e.target.value; saveSet(); stop(); openSettings(); });
   on('vModel', 'change', e => { S.ttsModel = e.target.value; saveSet(); openSettings(); });
   on('vOai', 'change', e => { S.ttsVoice = e.target.value; saveSet(); });
+  on('vEdge', 'change', e => { S.edgeVoices = { ...(S.edgeVoices || {}), [lang]: e.target.value }; saveSet(); AUDIO_URLS.clear(); });
   on('vInstr', 'change', e => { S.ttsInstr = e.target.value.trim(); saveSet(); });
   on('rRate', 'input', e => { S.rate = +e.target.value; $('rateV').textContent = S.rate; saveSet(); });
   on('cSay', 'change', e => { S.autoSpeakWord = e.target.checked; saveSet(); });
   on('vTest', 'click', () => sayText(lang === 'ko' ? '안녕하세요. 오늘은 무슨 책을 읽을까요?' : lang === 'en' ? 'Hello! What shall we read today?' : LANGS[lang].native, lang));
   on('rFs', 'input', e => { S.fs = +e.target.value; $('fsV').textContent = S.fs; applyLook(); saveSet(); });
   on('sTheme', 'change', e => { S.theme = e.target.value; applyLook(); saveSet(); });
-  on('gProxy', 'change', e => { let v = e.target.value.trim(); if (v && !/^https?:\/\//.test(v)) v = 'https://' + v; S.proxy = v; e.target.value = v; saveSet(); });
+  on('gProxy', 'change', e => { let v = e.target.value.trim(); if (v && !/^https?:\/\//.test(v)) v = 'https://' + v; S.proxy = v; e.target.value = v; saveSet(); CLOUD_OFF = false; });
 }
 
 /* ---------- botones y teclado ---------- */
