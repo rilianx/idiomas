@@ -102,7 +102,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-07 · 13';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-07 · 14';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -639,21 +639,41 @@ function startJob(job){
 }
 function pump(){ while (running < 3 && QUEUE.length) startJob(QUEUE.shift()); }
 const buildSents = (job, list) => job.sents.map((text, i) => ({ text, es: list[i]?.es, tokens: (list[i]?.t || []).map(parseTok).filter(Boolean) }));
+// si la API dice «demasiados pedidos» o «saturado» (pasa al pedir varios a la vez), se reintenta en vez de fallar
+async function askRetry(...args){
+  for (let a = 0; ; a++) {
+    try { return await ask(...args); }
+    catch (e) { if (a >= 3 || e instanceof NoKey || !/demasiados|saturado|429|529/.test(e.message)) throw e; await new Promise(r => setTimeout(r, 1500 * (a + 1) ** 2)); }
+  }
+}
+// el párrafo se pide en grupos de 2 o 3 oraciones, todos a la vez: una palabra del final de un párrafo largo
+// no espera a que se escriba todo lo anterior
+function sentGroups(sents){
+  const groups = []; let cur = [], len = 0;
+  sents.forEach((x, i) => { if (cur.length && (len + x.length > 280 || cur.length >= 3)) { groups.push(cur); cur = []; len = 0; } cur.push(i); len += x.length; });
+  if (cur.length) groups.push(cur);
+  return groups;
+}
 async function analyze(job){
   const stored = await dbGet('ana', job.k);
   if (stored) { ANA.set(job.k, stored); return stored; }
-  const lang = job.book.lang, withEs = !!S.showTr;
-  const user = `LIBRO: «${job.book.title}»${job.book.author ? ' de ' + job.book.author : ''}\nNIVEL DEL LECTOR: ${myLevel(lang)}\n` +
-    (job.prev ? `PÁRRAFO ANTERIOR (solo contexto): ${job.prev.slice(-500)}\n` : '') + `\nORACIONES:\n` + job.sents.map((s, i) => `${i + 1}. ${s}`).join('\n');
-  // se lee mientras se escribe: las palabras de las primeras oraciones se pueden tocar antes de que termine
+  const lang = job.book.lang, withEs = !!S.showTr, parts = [];
   let last = 0;
-  const onText = raw => {
+  const update = () => {   // lo que ya llegó de todos los grupos se dibuja (como mucho cada 250 ms)
     if (Date.now() - last < 250) return; last = Date.now();
-    PARTIAL.set(job.k, { k: job.k, sents: buildSents(job, partialSentences(raw)), partial: true });
+    PARTIAL.set(job.k, { k: job.k, sents: buildSents(job, parts), partial: true });
     onPartial(job);
   };
-  const out = await ask(S.chatModel, anaSystem(lang, withEs), user, anaSchema(withEs), { effort: 'low', maxTokens: 12000, ms: 90000, kind: 'read', fast: true, onText });
-  const rec = { k: job.k, sents: buildSents(job, out.sentences || []), done: [], seenEs: [] };
+  await Promise.all(sentGroups(job.sents).map(async idx => {
+    const before = (job.prev.slice(-300) + ' ' + job.sents.slice(0, idx[0]).join(' ')).trim().slice(-500);
+    const user = `LIBRO: «${job.book.title}»${job.book.author ? ' de ' + job.book.author : ''}\nNIVEL DEL LECTOR: ${myLevel(lang)}\n` +
+      (before ? `TEXTO ANTERIOR (solo contexto): ${before}\n` : '') + `\nORACIONES:\n` + idx.map((i, k) => `${k + 1}. ${job.sents[i]}`).join('\n');
+    const onText = raw => { partialSentences(raw).forEach((x, k) => { if (k < idx.length) parts[idx[k]] = x; }); update(); };
+    const out = await askRetry(S.chatModel, anaSystem(lang, withEs), user, anaSchema(withEs), { effort: 'low', maxTokens: 6000, ms: 90000, kind: 'read', fast: true, onText });
+    idx.forEach((i, k) => { parts[i] = out.sentences?.[k] || { t: [] }; });
+    last = 0; update();
+  }));
+  const rec = { k: job.k, sents: buildSents(job, parts), done: [], seenEs: [] };
   await dbPut('ana', rec); ANA.set(job.k, rec);
   return rec;
 }
