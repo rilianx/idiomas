@@ -101,7 +101,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-07 · 3';
+const APP_VERSION = '2026-11-07 · 4';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -1128,7 +1128,8 @@ async function drawLibrary(){
       <div class="row"><button class="btn" id="lOpen">📂 Abrir EPUB o .txt</button><button class="btn sec" id="lPaste">📋 Pegar texto</button><button class="btn sec" id="lGut">🔎 Buscar en Gutenberg</button>
       <button class="btn sec" id="lSampleKo">Probar en coreano</button><button class="btn sec" id="lSampleEn">Probar en inglés</button></div>
     </div>
-    <div id="lBooks">${books.length ? '' : '<p class="small" style="text-align:center">Todavía no hay libros.</p>'}</div></div>`;
+    <div id="lBooks">${books.length ? '' : '<p class="small" style="text-align:center">Todavía no hay libros.</p>'}</div>
+    <p class="small" style="text-align:center;margin-top:24px">Leamos · versión ${APP_VERSION}</p></div>`;
   const list = $('lBooks');
   for (const b of books) {
     const total = bookChars(b); let before = 0; for (let i = 0; i < (b.pos?.ch || 0); i++) before += b.chapters[i]?.chars || 0;
