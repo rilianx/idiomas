@@ -1,8 +1,10 @@
 # Hablemos coreano
 
-Una app para aprender idiomas conversando con una IA, empezando por el coreano. Es un solo archivo, [`index.html`](index.html): se abre en el navegador, en el computador o en el celular, sin instalar nada.
+Una app para aprender idiomas conversando con una IA, empezando por el coreano. Es [`index.html`](index.html) más dos archivos que comparte con el lector ([`comun.js`](comun.js) y [`comun.css`](comun.css)): se abre en el navegador, en el computador o en el celular, sin instalar nada.
 
 **Abrirla en línea:** https://rilianx.github.io/idiomas/ (con GitHub Pages activado; así el micrófono funciona en cualquier dispositivo).
+
+> **App hermana: 📚 Leamos** ([`lector.html`](lector.html), en línea en https://rilianx.github.io/idiomas/lector.html): un lector de libros para aprender leyendo. Ver [más abajo](#leamos-lector-de-libros).
 
 ## Qué hace
 
@@ -62,11 +64,27 @@ La voz de 지수 usa la síntesis de voz del navegador, con una voz coreana (en 
 
 ## Cómo está hecho
 
-- **Un solo archivo**, sin bibliotecas ni compilación. La conversación, el diccionario y los ajustes se guardan en `localStorage`.
+- **Sin bibliotecas ni compilación.** La conversación, el diccionario y los ajustes se guardan en `localStorage`.
+- **Código común con el lector.** [`comun.js`](comun.js) tiene lo que usan las dos apps: la clave, la conexión con Claude y OpenAI (con streaming, salida estructurada, respaldo y registro del gasto), los precios, el hangul y su romanización, los esquemas, la voz del navegador, el significado sobre la palabra y la ficha del diccionario. [`comun.css`](comun.css) tiene los colores (claro y oscuro), los botones, la ficha y los paneles. Son scripts y hojas de estilo comunes (no módulos ES), así que todo sigue funcionando al abrir el archivo directamente.
 - **Dos pedidos por mensaje, para que 지수 responda rápido.** Primero, uno corto que trae solo lo que dice 지수 (coreano y traducción), sin razonamiento previo: aparece y se oye de inmediato. Después, en segundo plano, otro analiza cada palabra (forma de diccionario, significado, forma gramatical), corrige el mensaje del estudiante, anota su perfil y la gramática nueva; y un tercero propone las respuestas sugeridas. Todos usan salida estructurada (JSON fijo).
 - **Caché.** Las instrucciones fijas de cada nivel van primero, para que el proveedor las guarde en caché.
 - **Esfuerzo y respaldo.** La conversación usa esfuerzo bajo, para que sea rápida y barata; las definiciones, esfuerzo medio. En Opus, Sonnet y Fable, si el modelo declina una respuesta, el servidor la reintenta en otro modelo.
 - **Sin IA para lo básico.** El reconocimiento de verbos sin IA descompone el hangul en jamos, quita terminaciones y deshace contracciones e irregulares, y valida cada candidato contra el diccionario y el vocabulario de los niveles.
+
+## Leamos: lector de libros
+
+[`lector.html`](lector.html), sin bibliotecas ni compilación, con el mismo [`comun.js`](comun.js) y [`comun.css`](comun.css) que «Hablemos». Usa **la misma clave** de la API que «Hablemos» y, en coreano, **el mismo diccionario**: lo que aprendes leyendo se ve en la conversación y al revés. Se llega con 📚 desde «Hablemos» y con 💬 desde el lector.
+
+- **Abrir libros.** EPUB (se descomprime en el navegador), archivos `.txt` o texto pegado. Detecta el idioma (coreano, inglés, japonés, chino, francés, alemán, italiano, portugués; se puede cambiar), los capítulos y el índice. Trae dos cuentos de ejemplo, en coreano y en inglés. Los libros se guardan en IndexedDB.
+- **Leer en voz alta marcando la oración actual.** ▶ lee con la voz del sistema en el idioma del libro, oración por oración, resaltando la oración (y, si el navegador lo informa, la palabra que se está diciendo) y bajando la página sola. Sin voz, ⏭ y ⏮ (o las flechas del teclado) mueven la marca a mano. Velocidad ajustable; la pantalla no se apaga mientras lee.
+- **Tocar una palabra: su significado ahí.** Como en el chat: aparece arriba de la palabra, con la forma de diccionario y qué forma es («pasado de go», «-았다: pasado»). El modelo barato traduce por adelantado los párrafos que vienen (cada palabra con su significado en contexto, su forma y su nivel MCER, y la traducción de cada oración), y lo guarda.
+- **Tocar dos veces: la explicación detallada.** El modelo caro explica la palabra en esa oración (con las anteriores como contexto): significado, matices, conjugación, ejemplos, pronunciación o hanja. Desde la ficha, «▶ Leer desde aquí».
+- **Seleccionar un trozo: explicación detallada** de la frase: traducción, literal, explicación en prosa, gramática y palabra por palabra.
+- **文 Traducción** muestra la traducción de la oración actual.
+- **Las palabras suben y bajan, como en Anki.** Las palabras de tu nivel o superior que todavía no conoces aparecen **subrayadas**; las que estás aprendiendo, con línea punteada. Al pasar a la siguiente oración, las palabras de la que dejaste que **no** miraste cuentan como «bien»: si les tocaba repaso, su intervalo crece (1 día, luego ×2,5 …). **Pedir la traducción** de una palabra es «otra vez»: el intervalo vuelve a cero y la facilidad baja. El dominio (0–100 %) sale del intervalo (1 día ≈ 17 %, una semana ≈ 50 %, dos meses = 100 %); bajo 30 % la palabra se subraya, hasta 70 % con línea punteada. Con la traducción de la oración visible o tras pedir la explicación de un trozo, esa oración no suma. En 📖 Mis palabras se ven todas, con su dominio, y «Ya la sé» las saca del subrayado.
+- **Estimar el nivel del libro.** Al abrir un libro, el modelo caro lee tres fragmentos y estima su nivel MCER (y TOPIK en coreano), con cómo son el vocabulario y la gramática y si conviene simplificarlo para tu nivel.
+- **Simplificar a tu nivel.** Reescribe cada párrafo con vocabulario y gramática del nivel elegido (A1 a C2), sin cambiar la historia, prefiriendo las palabras que ya conoces. Los párrafos quedan alineados con el original (¶ muestra el original del párrafo actual). Se puede simplificar todo el libro de una vez (se muestra el costo estimado con cada modelo; con Haiku, unos centavos por libro) o «mientras leo»: se simplifican solos el capítulo actual y el siguiente. En la cabecera se cambia entre el original y las versiones simplificadas.
+- **Gasto.** En ⚙ Ajustes, separado en lectura, explicaciones y simplificación.
 
 ## Ideas para seguir
 
