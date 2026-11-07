@@ -103,7 +103,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-07 · 23';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-07 · 24';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -1088,7 +1088,8 @@ async function showTr(){
     const rec = ANA.get(anaKey(CUR.p));
     if (rec) { rec.seenEs[CUR.s] = true; dbPut('ana', rec); }   // pediste la traducción: esa oración no suma
     const es = trGet(CUR.p, CUR.s);
-    h += `<div class="lab">Traducción de la oración</div><p>${es !== undefined ? esc(es || '—') : '<span class="busy">traduciendo…</span>'}</p>`;
+    h += `<div class="lab">Traducción de la oración</div><p>${es !== undefined ? esc(es || '—') : '<span class="busy">traduciendo…</span>'}</p>
+      <div class="row" style="margin:2px 0 6px"><button class="chip" id="trExplain">🎓 Explicar esta oración en detalle</button></div>`;
     if (es === undefined) ensureTr(CUR.p, CUR.s);
   }
   if (SHOW_ORIG && CH.ver !== 'o') {
@@ -1096,6 +1097,9 @@ async function showTr(){
     h += `<div class="lab">Párrafo original</div><p lang="${BOOK.lang}">${esc(o?.paras?.[CUR.p] || '—')}</p>`;
   }
   box.innerHTML = h; box.hidden = !h; updateInfo();
+  // la explicación detallada de la oración (la misma que al seleccionar un trozo; queda guardada)
+  const ex = $('trExplain');
+  if (ex) ex.onclick = () => { const p = CUR.p, si = CUR.s; explainPhrase({ text: sentText(p, si).trim(), p, si, p2: p, si2: si }); };
 }
 
 /* ---------- tocar una palabra: significado; dos veces: explicación detallada ---------- */
