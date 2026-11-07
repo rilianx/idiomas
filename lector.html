@@ -81,7 +81,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
   <button class="big" id="pPlay" title="Leer en voz alta (espacio)">▶</button>
   <button class="ib" id="pNext" title="Siguiente oración (→)">⏭</button>
   <button class="ib" id="pRate" title="Velocidad de la voz">1×</button>
-  <button class="ib" id="pTr" title="Traducción de la oración actual (T)">文<span class="lbl">Traducción</span></button>
+  <button class="ib" id="pTr" title="Traducir la oración marcada (T)">文<span class="lbl">Oración</span></button>
   <button class="ib" id="pOrig" title="Ver el párrafo original" hidden>¶<span class="lbl">Original</span></button>
   <span class="grow" id="pInfo"></span>
 </footer>
@@ -103,7 +103,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-07 · 22';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-07 · 23';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -799,19 +799,23 @@ function onAnalyzed(job){
   if (job.p === CUR.p) showTr();
 }
 // la traducción de las oraciones de un párrafo, cuando se activa 文 y el párrafo se analizó sin ella
-const TR_INFLIGHT = new Set();
-async function ensureTr(p){
-  const k = anaKey(p), rec = ANA.get(k);
-  if (!rec || TR_INFLIGHT.has(k)) return;
+// traducción de una oración, pedida aparte cuando hace falta (un pedido corto, con el párrafo como contexto)
+const TR_INFLIGHT = new Set(), TR_MEM = new Map();
+const trGet = (p, s) => { const r = ANA.get(anaKey(p)); return r?.sents?.[s]?.es ?? TR_MEM.get(`${anaKey(p)}#${s}`); };
+async function ensureTr(p, s = CUR.s){
+  const k = `${anaKey(p)}#${s}`;
+  if (trGet(p, s) !== undefined || TR_INFLIGHT.has(k)) return;
   TR_INFLIGHT.add(k);
+  let es = '';
   try {
-    const out = await askRetry(S.chatModel, `Traduce al español, de forma natural, cada oración numerada de un libro en ${LANGS[LANG()].name}, en el contexto del párrafo. Devuelve en es una traducción por oración, en el mismo orden y la misma cantidad.`,
-      rec.sents.map((x, i) => `${i + 1}. ${x.text}`).join('\n'), TR_SCHEMA, { effort: 'low', maxTokens: 4000, ms: 60000, kind: 'read', fast: true });
-    rec.sents.forEach((x, i) => { x.es = out.es?.[i] || ''; });
-    await dbPut('ana', rec);
-  } catch (e) { rec.sents.forEach(x => { if (x.es === undefined) x.es = ''; }); toast('No se pudo traducir la oración: ' + errText(e)); }
+    const out = await askRetry(S.chatModel, `Traduce al español, de forma natural, una oración de un libro en ${LANGS[LANG()].name}, en el contexto de su párrafo. Devuelve en es una sola traducción: la de la ORACIÓN.`,
+      `PÁRRAFO (contexto): ${CH.paras[p]}\n\nORACIÓN: ${sentText(p, s).trim()}`, TR_SCHEMA, { effort: 'low', maxTokens: 1500, ms: 60000, kind: 'read', fast: true });
+    es = out.es?.[0] || '';
+  } catch (e) { toast('No se pudo traducir la oración: ' + errText(e)); }
+  TR_MEM.set(k, es);
+  const rec = ANA.get(anaKey(p)); if (rec?.sents?.[s]) { rec.sents[s].es = es; dbPut('ana', rec); }
   TR_INFLIGHT.delete(k);
-  if (p === CUR.p) showTr();
+  if (p === CUR.p && s === CUR.s) showTr();
 }
 function prefetch(){
   if (!S.autoAnalyze || !CH || CH.missing) return;
@@ -1073,22 +1077,25 @@ function updatePlay(){ $('pPlay').textContent = PLAY ? '⏸' : '▶'; }
 
 /* ---------- traducción y párrafo original de la oración actual ---------- */
 let SHOW_ORIG = false;
+// la oración cuya traducción se pidió con 文 (se oculta al pasar a otra oración, salvo «siempre» en Ajustes)
+let TR_ONCE = null;
 async function showTr(){
   const box = $('trbox');
-  if (!CH || CH.missing || (!S.showTr && !SHOW_ORIG)) { box.hidden = true; return; }
+  const once = TR_ONCE && TR_ONCE.p === CUR.p && TR_ONCE.s === CUR.s && TR_ONCE.ch === CH?.ch;
+  if (!CH || CH.missing || (!S.showTr && !once && !SHOW_ORIG)) { box.hidden = true; updateInfo(); return; }
   let h = '';
-  if (S.showTr) {
+  if (S.showTr || once) {
     const rec = ANA.get(anaKey(CUR.p));
-    if (rec) { rec.seenEs[CUR.s] = true; dbPut('ana', rec); }
-    const es = rec?.sents[CUR.s]?.es;
-    h += `<div class="lab">Traducción</div><p>${rec && es !== undefined ? esc(es || '—') : '<span class="busy">traduciendo…</span>'}</p>`;
-    if (!rec) ensureAna(CUR.p, true); else if (es === undefined) ensureTr(CUR.p);
+    if (rec) { rec.seenEs[CUR.s] = true; dbPut('ana', rec); }   // pediste la traducción: esa oración no suma
+    const es = trGet(CUR.p, CUR.s);
+    h += `<div class="lab">Traducción de la oración</div><p>${es !== undefined ? esc(es || '—') : '<span class="busy">traduciendo…</span>'}</p>`;
+    if (es === undefined) ensureTr(CUR.p, CUR.s);
   }
   if (SHOW_ORIG && CH.ver !== 'o') {
     const o = await dbGet('text', `${BOOK.id}|${CH.ch}`);
     h += `<div class="lab">Párrafo original</div><p lang="${BOOK.lang}">${esc(o?.paras?.[CUR.p] || '—')}</p>`;
   }
-  box.innerHTML = h; box.hidden = !h;
+  box.innerHTML = h; box.hidden = !h; updateInfo();
 }
 
 /* ---------- tocar una palabra: significado; dos veces: explicación detallada ---------- */
@@ -1114,7 +1121,8 @@ function showTip(w){
   const { tok, p, si } = info;
   let tip = $('tip'); if (!tip) { tip = document.createElement('div'); tip.id = 'tip'; document.body.appendChild(tip); }
   TIP_EL = w;
-  if (!PLAY) setFrom(p, si, +w.dataset.o);
+  // (sin estar leyendo) la oración de la palabra pasa a ser la marcada; ▶ parte desde la palabra
+  if (!PLAY) { if (CUR.p !== p || CUR.s !== si) setCursor(p, si, { scroll: '' }); setFrom(p, si, +w.dataset.o); }
   TIP_WAIT = null;
   if (!tok.lemma) {
     if (ANA.has(anaKey(p))) tip.innerHTML = 'sin traducción';
@@ -1493,7 +1501,7 @@ function updateInfo(){
   const inCh = CH.paras.slice(0, CUR.p).reduce((a, t) => a + t.length, 0) * (BOOK.chapters[CH.ch]?.chars || 1) / Math.max(1, CH.paras.reduce((a, t) => a + t.length, 0));
   $('pInfo').textContent = `${Math.round(100 * (before + inCh) / Math.max(1, total))} % · cap. ${CH.ch + 1}/${BOOK.chapters.length}`;
   $('pOrig').hidden = CH.ver === 'o';
-  $('pTr').classList.toggle('on', !!S.showTr); $('pOrig').classList.toggle('on', SHOW_ORIG);
+  $('pTr').classList.toggle('on', !!S.showTr || !!(TR_ONCE && TR_ONCE.p === CUR.p && TR_ONCE.s === CUR.s)); $('pOrig').classList.toggle('on', SHOW_ORIG);
   $('pRate').textContent = (Math.round(S.rate * 100) / 100).toString().replace('.', ',') + '×';
 }
 function closeBook(){ stop(); savePosNow(); flushDict(); BOOK = null; CH = null; ANA.clear(); $('player').hidden = true; $('trbox').hidden = true; drawLibrary(); }
@@ -1914,6 +1922,7 @@ function openSettings(){
       <div class="field"><label>Simplificar y traducir libros</label>${sel('mSimp', SIMP_MODELS, S.simpModel)}<div class="small">También se elige en la ficha de cada libro (ℹ). Se usa también para la lista de nombres y para reescribir lo que quedó sobre el nivel.</div></div>
       <div class="field"><label>Revisar el nivel de la simplificación</label>${sel('mCheck', [...CHAT_MODELS, ...DEF_MODELS.filter(([m]) => !CHAT_MODELS.some(c => c[0] === m))], CHECK_MODEL())}<div class="small">Busca palabras y gramática sobre el nivel en cada parte. Uno barato suele bastar; uno mejor detecta más.</div></div>
       <label class="check"><input type="checkbox" id="cAuto" ${S.autoAnalyze ? 'checked' : ''}><span>Traducir por adelantado los párrafos que vas a leer (la palabra que toques ya estará lista). Si no, se traduce el párrafo al tocar una palabra.</span></label>
+      <label class="check"><input type="checkbox" id="cTrAlways" ${S.showTr ? 'checked' : ''}><span>Mostrar siempre la traducción de la oración marcada (si no, 文 la muestra solo para la oración que elijas). Con la traducción a la vista, las palabras de esa oración no suben.</span></label>
       <label class="check"><input type="checkbox" id="cSilent" ${S.silentRead !== false ? 'checked' : ''}><span>Contar la lectura sin voz: al bajar la página, el párrafo que pasaste (y que estuvo a la vista el tiempo para leerlo) cuenta como leído, y la marca te sigue.</span></label></div>
     <div class="box"><h3>Mi nivel</h3><div class="conj" style="align-items:center">${Object.entries(LANGS).map(([k, L]) => `<span>${L.native}</span>${sel('lv_' + k, CEFR.map(c => [c, lvLabel(k, c)]), myLevel(k))}`).join('')}</div></div>
     <div class="box"><h3>Voz (${esc(LANGS[lang].name)})</h3>
@@ -1951,6 +1960,7 @@ function openSettings(){
   on('mCheck', 'change', e => { S.checkModel = e.target.value; saveSet(); });
   on('cAuto', 'change', e => { S.autoAnalyze = e.target.checked; saveSet(); });
   on('cSilent', 'change', e => { S.silentRead = e.target.checked; saveSet(); });
+  on('cTrAlways', 'change', e => { S.showTr = e.target.checked; saveSet(); });
   on('sPar', 'change', e => { S.simpPar = +e.target.value; saveSet(); });
   on('cCheck', 'change', e => { S.simpCheck = e.target.checked; saveSet(); });
   for (const k of Object.keys(LANGS)) on('lv_' + k, 'change', e => { S.myLevel[k] = e.target.value; saveSet(); });
@@ -1969,7 +1979,12 @@ $('pNext').onclick = () => { const was = PLAY; stop(); next(true).then(() => { i
 $('pPrev').onclick = () => { const was = PLAY; stop(); prev(); if (was) play(); };
 const RATES = [0.6, 0.75, 0.9, 1, 1.15];
 $('pRate').onclick = () => { const i = RATES.findIndex(r => r >= S.rate - 0.001); S.rate = RATES[(i + 1) % RATES.length]; saveSet(); updateInfo(); if (PLAY) { stop(); play(); } };
-$('pTr').onclick = () => { S.showTr = !S.showTr; saveSet(); updateInfo(); showTr(); };
+$('pTr').onclick = () => {
+  if (S.showTr) { S.showTr = false; saveSet(); TR_ONCE = null; showTr(); return; }   // (apaga el modo «siempre»)
+  const on = TR_ONCE && TR_ONCE.p === CUR.p && TR_ONCE.s === CUR.s && TR_ONCE.ch === CH?.ch;
+  TR_ONCE = on ? null : { p: CUR.p, s: CUR.s, ch: CH?.ch };
+  showTr();
+};
 $('pOrig').onclick = () => { SHOW_ORIG = !SHOW_ORIG; updateInfo(); showTr(); };
 document.addEventListener('keydown', e => {
   if (!BOOK || PANEL || SHEET || /input|textarea|select/i.test(e.target.tagName)) { if (e.key === 'Escape') { if (SHEET) closeSheet(); else if (PANEL) closePanel(); } return; }
