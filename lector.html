@@ -103,7 +103,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-07 · 18';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-07 · 19';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -229,12 +229,25 @@ function db(){
       if (!has('books')) d.createObjectStore('books', { keyPath: 'id' });
       for (const s of ['text', 'simp', 'ana', 'expl']) if (!has(s)) d.createObjectStore(s, { keyPath: 'k' });
     };
-    r.onsuccess = () => ok(r.result); r.onerror = () => ko(r.error);
+    r.onsuccess = () => {
+      const d = r.result;
+      // al volver de segundo plano (sobre todo en el celular) el sistema puede cerrar la conexión: se olvida y se reabre
+      d.onclose = () => { if (DBP) DBP = null; };
+      d.onversionchange = () => { d.close(); DBP = null; };
+      ok(d);
+    };
+    r.onerror = () => { DBP = null; ko(r.error); };
   });
   return DBP;
 }
+const dbLost = e => /InvalidState|UnknownError|TransactionInactive|connection|closing|closed|lost/i.test((e?.name || '') + ' ' + (e?.message || ''));
 const req = r => new Promise((ok, ko) => { r.onsuccess = () => ok(r.result); r.onerror = () => ko(r.error); });
-async function idb(store, mode, fn){ const d = await db(); return req(fn(d.transaction(store, mode).objectStore(store))); }
+async function idb(store, mode, fn){
+  for (let a = 0; ; a++) {
+    try { const d = await db(); return await req(fn(d.transaction(store, mode).objectStore(store))); }
+    catch (e) { if (a >= 2 || !dbLost(e)) throw e; DBP = null; await new Promise(r => setTimeout(r, 200)); }   // conexión perdida: se reabre
+  }
+}
 const dbGet = (s, k) => idb(s, 'readonly', o => o.get(k));
 const dbPut = (s, v) => idb(s, 'readwrite', o => o.put(v));
 const dbAll = s => idb(s, 'readonly', o => o.getAll());
@@ -244,8 +257,12 @@ const dbDel = (s, k) => idb(s, 'readwrite', o => o.delete(k));
 // muchos registros en una sola transacción (importar un libro)
 async function dbPutMany(store, list){
   if (!list?.length) return;
-  const d = await db();
-  return new Promise((ok, ko) => { const tx = d.transaction(store, 'readwrite'), o = tx.objectStore(store); for (const r of list) o.put(r); tx.oncomplete = () => ok(); tx.onerror = () => ko(tx.error); });
+  for (let a = 0; ; a++) {
+    try {
+      const d = await db();
+      return await new Promise((ok, ko) => { const tx = d.transaction(store, 'readwrite'), o = tx.objectStore(store); for (const r of list) o.put(r); tx.oncomplete = () => ok(); tx.onerror = () => ko(tx.error); tx.onabort = () => ko(tx.error || new Error('transacción abortada')); });
+    } catch (e) { if (a >= 2 || !dbLost(e)) throw e; DBP = null; }
+  }
 }
 
 /* ---------- abrir un EPUB (es un zip: se descomprime con lo que trae el navegador) ---------- */
@@ -649,18 +666,23 @@ function ensureAna(p, urgent = false){
 }
 function startJob(job){
   job.started = true; running++;
-  analyze(job).then(rec => job.resolve(rec), e => { console.warn('análisis:', e.message); job.resolve(null); if (e instanceof NoKey || /clave|saldo|permiso/.test(e.message)) toast('No se pudo traducir: ' + errText(e)); })
+  analyze(job).then(rec => job.resolve(rec), e => { console.warn('análisis:', e.message); job.resolve(null); if (!netCut(e) && (e instanceof NoKey || /clave|saldo|permiso/.test(e.message))) toast('No se pudo traducir: ' + errText(e)); })
     .finally(() => { running--; INFLIGHT.delete(job.k); PARTIAL.delete(job.k); onAnalyzed(job); pump(); });
 }
 function pump(){ while (running < 3 && QUEUE.length) startJob(QUEUE.shift()); }
 const buildSents = (job, list) => job.sents.map((text, i) => ({ text, es: list[i]?.es, tokens: (list[i]?.t || []).map(parseTok).filter(Boolean) }));
 // si la API dice «demasiados pedidos» o «saturado» (pasa al pedir varios a la vez), se reintenta en vez de fallar
+// la conexión se cortó (p. ej. la página pasó a segundo plano en el celular)
+const netCut = e => /sin conexión|se cortó|tardó demasiado|network|load failed|failed to fetch|aborted|cancel/i.test(e?.message || '');
+const waitVisible = () => document.hidden ? new Promise(r => { const f = () => { if (!document.hidden) { document.removeEventListener('visibilitychange', f); r(); } }; document.addEventListener('visibilitychange', f); }) : null;
 async function askRetry(...args){
   const tries = args[4]?.retries ?? 3;
   for (let a = 0; ; a++) {
     try { return await ask(...args); }
     catch (e) {
-      if (a >= tries || e instanceof NoKey || !/demasiados|saturado|429|529/.test(e.message)) throw e;
+      if (a >= tries || e instanceof NoKey) throw e;
+      if (netCut(e)) { await waitVisible(); await new Promise(r => setTimeout(r, 800 + Math.random() * 800)); continue; }   // se reintenta al volver
+      if (!/demasiados|saturado|429|529/.test(e.message)) throw e;
       await new Promise(r => setTimeout(r, Math.min(30000, 1500 * (a + 1) ** 2) + Math.random() * 1500));
     }
   }
@@ -722,7 +744,7 @@ async function ensureTr(p){
   if (!rec || TR_INFLIGHT.has(k)) return;
   TR_INFLIGHT.add(k);
   try {
-    const out = await ask(S.chatModel, `Traduce al español, de forma natural, cada oración numerada de un libro en ${LANGS[BOOK.lang].name}, en el contexto del párrafo. Devuelve en es una traducción por oración, en el mismo orden y la misma cantidad.`,
+    const out = await askRetry(S.chatModel, `Traduce al español, de forma natural, cada oración numerada de un libro en ${LANGS[BOOK.lang].name}, en el contexto del párrafo. Devuelve en es una traducción por oración, en el mismo orden y la misma cantidad.`,
       rec.sents.map((x, i) => `${i + 1}. ${x.text}`).join('\n'), TR_SCHEMA, { effort: 'low', maxTokens: 4000, ms: 60000, kind: 'read', fast: true });
     rec.sents.forEach((x, i) => { x.es = out.es?.[i] || ''; });
     await dbPut('ana', rec);
@@ -1081,7 +1103,7 @@ async function explainWord(){
     const lang = BOOK.lang, sent = sentText(sh.p, sh.si).trim();
     const user = `LIBRO: «${BOOK.title}»\nNIVEL DEL LECTOR: ${myLevel(lang)}\n` + (prevSentences(sh.p, sh.si) ? `ORACIONES ANTERIORES: ${prevSentences(sh.p, sh.si)}\n` : '') +
       `ORACIÓN: «${sent}»\nPALABRA: «${sh.tok.t}»` + (sh.tok.lemma ? ` (forma de diccionario probable: ${sh.tok.lemma})` : '');
-    const x = await ask(S.defModel, defSystem(lang), user, ENTRY, { effort: 'low', maxTokens: 12000, ms: 150000, kind: 'explain' });
+    const x = await askRetry(S.defModel, defSystem(lang), user, ENTRY, { effort: 'low', maxTokens: 12000, ms: 150000, kind: 'explain' });
     const l = lemmaOf({ lemma: x.lemma || sh.tok.lemma, pos: x.pos }) || lemmaOf(sh.tok);
     const e = DICT[l] || ensureEntry({ ...sh.tok, lemma: l, pos: x.pos, gloss: x.gloss }, sent);
     Object.assign(e, { pos: x.pos || e.pos, gloss: e.gloss || x.gloss, meaning: x.meaning, explanation: x.explanation, hanja: x.hanja, irregular: x.irregular,
@@ -1225,7 +1247,7 @@ async function sampleText(b, chars = 1500){
 async function estimateLevel(b){
   const parts = await sampleText(b);
   const user = `LIBRO: «${b.title}»${b.author ? ' de ' + b.author : ''}\n\n` + parts.map((t, i) => `FRAGMENTO ${i + 1}:\n${t}`).join('\n\n');
-  const x = await ask(S.defModel, levelSystem(b.lang), user, LEVEL_SCHEMA, { effort: 'low', maxTokens: 6000, ms: 120000, kind: 'explain' });
+  const x = await askRetry(S.defModel, levelSystem(b.lang), user, LEVEL_SCHEMA, { effort: 'low', maxTokens: 6000, ms: 120000, kind: 'explain' });
   b.level = { ...x, model: S.defModel, date: Date.now() };
   await dbPut('books', b);
   return b.level;
@@ -1800,7 +1822,16 @@ document.addEventListener('keydown', e => {
   else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp' || e.key === 'k') { e.preventDefault(); $('pPrev').click(); }
   else if (e.key === 't') $('pTr').click();
 });
-document.addEventListener('visibilitychange', () => { if (document.hidden) { savePosNow(); flushDict(); } else if (PLAY) navigator.wakeLock?.request('screen').then(w => WAKE = w).catch(() => {}); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) { savePosNow(); flushDict(); return; }
+  // al volver: se retoman las traducciones pendientes y, si estaba leyendo, la voz
+  if (BOOK && CH && !CH.missing) { prefetch(); prefetchVisible(); }
+  if (PLAY) { navigator.wakeLock?.request('screen').then(w => WAKE = w).catch(() => {}); try { speechSynthesis.resume(); } catch (e) {} }
+});
+// un error inesperado se muestra (para poder contarlo) en vez de dejar la página a medias
+const benign = m => /AbortError|ResizeObserver|aborted|cancel|interrupted/i.test(m || '');
+addEventListener('error', e => { if (!benign(e.message)) toast('Error: ' + e.message + ' (versión ' + APP_VERSION + ')'); });
+addEventListener('unhandledrejection', e => { const m = e.reason?.message || String(e.reason || ''); if (!benign(m) && !netCut(e.reason)) toast('Error: ' + m + ' (versión ' + APP_VERSION + ')'); });
 
 drawLibrary();
 </script>
