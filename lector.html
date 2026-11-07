@@ -103,7 +103,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-07 · 20';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-07 · 21';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -478,7 +478,8 @@ function usageHTML(){
 function simpCost(chars, lang, model){
   const pr = PRICES[model]; if (!pr) return null;
   const tin = chars / (lang === 'ko' || CJK(lang) ? 1.4 : 3.8), chunks = Math.ceil(chars / 2500);
-  return ((tin + chunks * 900) * pr[0] + tin * 1.0 * pr[1]) / 1e6;
+  const check = S.simpCheck === false ? 1 : 1.35;   // la revisión del nivel y las reescrituras
+  return ((tin + chunks * 1200) * pr[0] + tin * 1.0 * pr[1]) * check / 1e6;
 }
 
 /* ---------- esquemas ---------- */
@@ -528,6 +529,10 @@ const PHRASE_TR_SCHEMA = obj({ translation: STR, literal: STR });
 const PHRASE_EX_SCHEMA = obj({ explanation: STR, grammar: { type: 'array', items: obj({ point: STR, explanation: STR }) }, tip: STR });
 const LEVEL_SCHEMA = obj({ cefr: { type: 'string', enum: CEFR }, range: STR, summary: STR, vocabulary: STR, grammar: STR, advice: STR });
 const SIMP_SCHEMA = obj({ paras: { type: 'array', items: STR } });
+// nombres y términos fijos para todo el libro (que no cambien de un trozo a otro)
+const GLOSS_SCHEMA = obj({ terms: { type: 'array', items: obj({ src: STR, dst: STR, note: STR }) } });
+// revisión del nivel: qué oraciones tienen palabras o formas sobre el nivel
+const CHECK_SCHEMA = obj({ problems: { type: 'array', items: obj({ para: { type: 'integer' }, words: { type: 'array', items: STR }, grammar: { type: 'array', items: STR } }) } });
 
 /* ---------- instrucciones ---------- */
 function lemmaRule(lang){
@@ -607,20 +612,55 @@ function levelSystem(lang){
     '- advice: un consejo para leerlo según el nivel (p. ej. si conviene simplificarlo y a qué nivel).'
   ].join('\n');
 }
+// lo que se permite en cada nivel (lecturas graduadas)
+function levelRules(lang, lvl){
+  const i = lvIdx(lvl), ko = lang === 'ko';
+  const words = ['las ~800 palabras más frecuentes y cotidianas (familia, casa, comida, tiempo, lugares, acciones básicas)', 'unas 1 500–2 000 palabras frecuentes', 'unas 3 000–4 000 palabras frecuentes', 'vocabulario general amplio; evita solo lo raro, literario o arcaico', 'casi todo el vocabulario; evita solo lo muy raro o arcaico', 'cualquier vocabulario, más claro que el original'][i];
+  const len = ['5 a 8 palabras', '6 a 12 palabras', 'hasta unas 15 palabras', 'hasta unas 20 palabras', '', ''][i];
+  const out = [`- Vocabulario permitido: ${words}.`];
+  if (len) out.push(`- Oraciones cortas: ${len} cada una; una idea por oración. Divide las oraciones largas y evita encadenar subordinadas.`);
+  if (i <= 1) out.push('- PUEDES QUITAR descripciones largas, detalles secundarios, comentarios del narrador y comparaciones: conserva los hechos principales, quién hace qué y los diálogos importantes (simplificados). Un párrafo que es solo descripción puede quedar en una sola oración corta. Es preferible quitar un detalle que usar una palabra o una estructura difícil.');
+  else if (i === 2) out.push('- Puedes acortar descripciones muy largas, pero conserva los hechos y los diálogos.');
+  else out.push('- Conserva casi todo; simplifica solo lo más difícil.');
+  if (ko) {
+    const g = [
+      'Gramática solo de TOPIK 1: -아요/어요, -았/었어요, -(으)ㄹ 거예요, -고, -지만, -아서/어서 (causa), -(으)러 가다, -고 싶다, -(으)세요, 안/못, -(으)ㄹ 수 있다/없다, -지 마세요, y las partículas básicas (이/가, 은/는, 을/를, 에, 에서, 도, 하고, 의, 와/과, (으)로). Modificadores de sustantivo (-는/-(으)ㄴ) solo muy cortos y como mucho uno por oración.',
+      'Gramática hasta TOPIK 2: lo de TOPIK 1 más -는/-(으)ㄴ/-(으)ㄹ como modificador simple, -(으)면, -기 때문에, -(으)니까, -는데/-(으)ㄴ데, -(으)ㄴ 후에, -기 전에, -(으)ㄹ 때, -아야/어야 하다, -게 되다, -는 것, -(으)ㄴ 적이 있다, -고 있다.',
+      'Gramática hasta TOPIK 3: puedes usar conectores y terminaciones intermedias frecuentes (-도록, -(으)ㄴ/는 것 같다, -다가, -(으)려고, -는 동안, -(으)ㄹ까 봐…) con moderación.',
+      '', '', ''][i];
+    if (g) out.push('- ' + g);
+    if (i <= 2) out.push('- EVITA: -았어야 했다, -(으)ㄹ 수 있었을 것이다, -임에 틀림없다, -(으)ㄹ지도 모르다, -곤 하다, -(으)ㄹ 뻔하다, -듯이, -는 만큼, -더라도, discurso indirecto (-다고 하다/-냐고 묻다: usa cita directa con comillas) y cadenas de modificadores.');
+    out.push(i <= 1 ? '- Estilo FIJO en todo el libro: narración y descripción en cortés -아요/어요 (p. ej. «마릴라는 부엌에 있었어요»). En los diálogos, cada personaje mantiene siempre el mismo registro (los adultos entre sí en -아요/어요).'
+                    : '- Estilo FIJO en todo el libro: narración en -았다/었다 y diálogos con un registro coherente para cada personaje.');
+  } else {
+    const g = ['Gramática solo básica: presente y pasado simple, futuro simple, imperativo; sin subjuntivo, condicionales, pasiva ni oraciones de relativo complejas.',
+      'Gramática básica-intermedia: presente, pasados frecuentes, futuro, condicional simple, relativos simples; evita subjuntivo complejo, pasiva y estilo indirecto largo.', '', '', '', ''][i];
+    if (g) out.push('- ' + g);
+    out.push('- Mantén el tiempo verbal de la narración fijo en todo el libro.');
+  }
+  return out;
+}
 function simpSystem(src, lang, lvl){
   const L = LANGS[lang], S2 = LANGS[src], tr = src !== lang;
   return [
     tr ? `Eres traductor y editor de lecturas graduadas (libros adaptados para estudiantes). Traduces un fragmento de un libro escrito en ${S2.name} al ${L.name}, adaptado para un lector de nivel ${lvLabel(lang, lvl)} del MCER que aprende ${L.name}.`
        : `Eres editor de lecturas graduadas en ${L.name} (libros adaptados para estudiantes). Reescribes un fragmento de un libro para un lector de nivel ${lvLabel(lang, lvl)} del MCER.`,
-    `Devuelve en paras exactamente un párrafo ${tr ? 'traducido' : 'reescrito'} por cada párrafo recibido, en el mismo orden y la misma cantidad, escrito en ${L.name}.`,
-    '- Conserva la historia, los hechos, los diálogos (quién dice qué), los nombres y el tono. No resumas de más ni agregues cosas: cada párrafo dice lo mismo que el original' + (tr ? ', en ' + L.name + ' natural.' : ', solo que más fácil.'),
-    `- Vocabulario: usa palabras frecuentes de nivel ${lvl} o inferior. Reemplaza las palabras raras, literarias o arcaicas por otras comunes, o explícalas con palabras simples. Puedes conservar alguna palabra clave del libro si se repite y es importante.`,
-    `- Gramática: oraciones más cortas y estructuras propias del nivel ${lvl}; divide las oraciones largas; evita las construcciones literarias complejas.`,
-    lang === 'ko' ? '- Usa de forma coherente un estilo de narración (por ejemplo, -았다/었다 en la narración) y un registro adecuado para cada personaje en los diálogos.' : '- Mantén el tiempo de la narración de forma coherente.',
-    tr ? '- Los nombres propios se dejan como en el original (en coreano, japonés o chino, transcritos de la forma habitual).' : '',
-    '- Si un párrafo es un título, déjalo como título corto. ' + (tr ? '' : 'Si un párrafo ya es fácil para ese nivel, déjalo casi igual.'),
-    '- Si vienen PALABRAS QUE EL LECTOR YA CONOCE, prefiérelas cuando sirvan.'
-  ].filter(Boolean).join('\n');
+    `Devuelve en paras exactamente un párrafo ${tr ? 'traducido' : 'reescrito'} por cada párrafo recibido, en el mismo orden y la misma cantidad, escrito en ${L.name}. Nunca juntes ni dividas párrafos.`,
+    '- Conserva la historia: los hechos, quién hace y dice qué, y el tono. No agregues cosas que no están.',
+    ...levelRules(lang, lvl),
+    '- Usa EXACTAMENTE la forma de los NOMBRES Y TÉRMINOS que vienen en el pedido (siempre igual en todo el libro). Puedes usar esos términos clave aunque estén sobre el nivel.',
+    '- Si un párrafo es un título, déjalo como título corto.',
+    '- Si vienen PALABRAS QUE EL LECTOR YA CONOCE, prefiérelas cuando sirvan.',
+    '- Usa comillas en todos los diálogos.'
+  ].join('\n');
+}
+function checkSystem(lang, lvl){
+  return [
+    `Eres evaluador de lecturas graduadas en ${LANGS[lang].name}. Revisas si unos párrafos numerados están de verdad en el nivel ${lvLabel(lang, lvl)} del MCER.`,
+    'Para cada párrafo que tenga algo claramente SOBRE ese nivel, devuelve un elemento en problems: para (su número), words (las palabras demasiado difíciles para ese nivel, tal como aparecen) y grammar (las formas gramaticales demasiado difíciles, tal como aparecen). Si un párrafo está bien, no lo incluyas.',
+    'No marques: nombres propios, los TÉRMINOS PERMITIDOS que vienen en el pedido, ni palabras del nivel o inferiores. Sé estricto con el nivel, pero no inventes problemas.',
+    ...levelRules(lang, lvl).filter(r => /Vocabulario|Gramática|EVITA/.test(r))
+  ].join('\n');
 }
 
 /* ---------- versiones: «A2» (simplificada, mismo idioma) o «ko:A2» (traducida y adaptada a otro idioma) ---------- */
@@ -1299,15 +1339,53 @@ function knownWordsHint(lang){
   const d = lang === DLANG ? DICT : load(dictKey(lang), {});
   return Object.values(d).filter(e => scoreOf(e) >= 50 && !SKIP_POS.has(e.pos)).sort((a, b) => (b.last || 0) - (a.last || 0)).slice(0, 250).map(e => e.lemma).join(', ');
 }
-async function simplifyChunk(b, ver, model, chunk, known){
-  const lang = verLang(b, ver), lvl = verLvl(ver);
-  const user = `LIBRO: «${b.title}»${b.author ? ' de ' + b.author : ''}\nIDIOMA DE LA VERSIÓN: ${LANGS[lang].name}\nNIVEL: ${lvLabel(lang, lvl)}\n` + (known ? `PALABRAS QUE EL LECTOR YA CONOCE: ${known}\n` : '') +
-    `\nPÁRRAFOS (${chunk.length}):\n` + chunk.map((t, i) => `[${i + 1}] ${t}`).join('\n\n');
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const out = await askRetry(model, simpSystem(b.lang, lang, lvl), user, SIMP_SCHEMA, { effort: 'low', maxTokens: 20000, ms: 180000, kind: 'simplify', retries: 6 });
-    const ps = (out.paras || []).map(s => String(s).trim());
-    if (ps.length === chunk.length || attempt === 1) return chunk.map((orig, i) => ps[i] || orig);
+const glossText = terms => (terms || []).map(t => `${t.src} → ${t.dst}${t.note ? ' (' + t.note + ')' : ''}`).join('; ');
+async function simplifyChunk(b, ver, model, chunk, known, terms, stats){
+  const lang = verLang(b, ver), lvl = verLvl(ver), sys = simpSystem(b.lang, lang, lvl);
+  const head = `LIBRO: «${b.title}»${b.author ? ' de ' + b.author : ''}\nIDIOMA DE LA VERSIÓN: ${LANGS[lang].name}\nNIVEL: ${lvLabel(lang, lvl)}\n` +
+    (terms?.length ? `NOMBRES Y TÉRMINOS (usa exactamente esta forma): ${glossText(terms)}\n` : '') + (known ? `PALABRAS QUE EL LECTOR YA CONOCE: ${known}\n` : '');
+  const user = head + `\nPÁRRAFOS (${chunk.length}):\n` + chunk.map((t, i) => `[${i + 1}] ${t}`).join('\n\n');
+  let ps = null;
+  for (let attempt = 0; attempt < 2 && !ps; attempt++) {
+    const out = await askRetry(model, sys, user, SIMP_SCHEMA, { effort: 'low', maxTokens: 20000, ms: 180000, kind: 'simplify', retries: 6 });
+    const got = (out.paras || []).map(x => String(x).trim());
+    if (got.length === chunk.length || attempt === 1) ps = chunk.map((orig, i) => got[i] ?? orig);
   }
+  // revisión del nivel (modelo barato) y, si hay algo difícil, se reescriben solo esos párrafos (hasta 2 vueltas)
+  if (S.simpCheck === false || lvIdx(lvl) >= 4) return ps;
+  for (let round = 0; round < 2; round++) {
+    const chk = await askRetry(S.chatModel, checkSystem(lang, lvl), (terms?.length ? `TÉRMINOS PERMITIDOS: ${terms.map(t => t.dst).join(', ')}\n\n` : '') + 'PÁRRAFOS:\n' + ps.map((t, i) => `[${i + 1}] ${t}`).join('\n\n'),
+      CHECK_SCHEMA, { effort: 'low', maxTokens: 4000, ms: 90000, kind: 'simplify', fast: true, retries: 6 }).catch(() => null);
+    const probs = (chk?.problems || []).filter(p => p.para >= 1 && p.para <= ps.length && (p.words?.length || p.grammar?.length));
+    if (!probs.length) break;
+    stats.checked = (stats.checked || 0) + probs.length;
+    const fixUser = head + `\nEstos párrafos ya simplificados todavía tienen palabras o formas sobre el nivel ${lvLabel(lang, lvl)}. Reescríbelos para que TODO quede en el nivel: reemplaza lo marcado por palabras y estructuras más simples (o quita ese detalle si no es importante), sin cambiar los hechos.\n\nPÁRRAFOS (${probs.length}):\n` +
+      probs.map((p, k) => `[${k + 1}] ${ps[p.para - 1]}\n   (difícil: ${[...(p.words || []), ...(p.grammar || [])].join(', ')})`).join('\n\n');
+    const fixed = await askRetry(model, sys, fixUser, SIMP_SCHEMA, { effort: 'low', maxTokens: 12000, ms: 180000, kind: 'simplify', retries: 6 }).catch(() => null);
+    const fp = (fixed?.paras || []).map(x => String(x).trim());
+    if (fp.length !== probs.length) break;
+    probs.forEach((p, k) => { if (fp[k]) ps[p.para - 1] = fp[k]; });
+    stats.fixed = (stats.fixed || 0) + probs.length;
+  }
+  return ps;
+}
+// antes de empezar: los nombres propios y términos clave del libro, con una sola forma para toda la versión
+async function bookGlossary(b, ver, model){
+  const lang = verLang(b, ver), lvl = verLvl(ver);
+  let sample = '';
+  for (let ch = 0; ch < b.chapters.length && sample.length < 9000; ch++) { const r = await dbGet('text', `${b.id}|${ch}`); if (r) sample += r.paras.join('\n') + '\n'; }
+  // nombres candidatos (en alfabeto latino: palabras con mayúscula que se repiten)
+  const freq = {};
+  for (let ch = 0; ch < b.chapters.length; ch++) { const r = await dbGet('text', `${b.id}|${ch}`); for (const p of r?.paras || []) for (const m of p.matchAll(/(?<![.!?]\s)(?<!^)\b\p{Lu}[\p{Ll}]{2,}(?:\s\p{Lu}[\p{Ll}]+)*/gu)) freq[m[0]] = (freq[m[0]] || 0) + 1; }
+  const cands = Object.entries(freq).filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1]).slice(0, 80).map(([w]) => w);
+  const out = await askRetry(model, [
+    `Preparas una versión de un libro en ${LANGS[lang].name}, nivel ${lvLabel(lang, lvl)}${b.lang !== lang ? `, traducida del ${LANGS[b.lang].name}` : ''}. Para que todos los fragmentos usen las mismas formas, haz la lista de NOMBRES Y TÉRMINOS del libro:`,
+    `- Los nombres propios de personas y lugares (src: como aparece en el original; dst: la forma que se usará siempre en ${LANGS[lang].name}${lang === 'ko' ? ', con la transcripción coreana más habitual' : ''}).`,
+    '- Hasta 10 palabras clave de la historia que se repiten y no se pueden evitar aunque estén sobre el nivel (p. ej. «orfanato»): src, dst, y en note una explicación muy simple de su significado.',
+    'Sé consistente y no inventes nombres que no aparecen.'
+  ].join('\n'), `LIBRO: «${b.title}»${b.author ? ' de ' + b.author : ''}\n${cands.length ? 'NOMBRES CANDIDATOS: ' + cands.join(', ') + '\n' : ''}\nCOMIENZO DEL LIBRO:\n${sample.slice(0, 9000)}`,
+    GLOSS_SCHEMA, { effort: 'low', maxTokens: 6000, ms: 120000, kind: 'simplify', retries: 6 });
+  return (out.terms || []).filter(t => t.src && t.dst).slice(0, 120);
 }
 const SIMP_PAR = () => S.simpPar || 50;   // pedidos simultáneos al simplificar (⚙ Ajustes)
 // todos los trozos de todos los capítulos van a una sola fila, con hasta SIMP_PAR pedidos a la vez; los capítulos se
@@ -1323,6 +1401,13 @@ async function simplifyBook(b, lvl, model, only = null){
   SIMP_JOBS.set(key, job);
   await dbPut('books', b); refreshViews();
   const known = knownWordsHint(verLang(b, lvl)), tasks = [], chapters = new Map();
+  // nombres y términos fijos (una vez por versión; se guardan con ella)
+  if (!b.versions[lvl].glossary) {
+    job.phase = 'nombres';  refreshViews();
+    try { b.versions[lvl].glossary = await bookGlossary(b, lvl, model); await dbPut('books', b); } catch (e) { console.warn('glosario:', e.message); b.versions[lvl].glossary = []; }
+    job.phase = '';
+  }
+  const terms = b.versions[lvl].glossary;
   for (const ch of chs) {
     const rec = await dbGet('text', `${b.id}|${ch}`); if (!rec) continue;
     const chunks = []; let cur = [], len = 0;
@@ -1346,7 +1431,7 @@ async function simplifyBook(b, lvl, model, only = null){
     while (next < tasks.length && !stopAll) {
       const t = tasks[next++], c = chapters.get(t.ch);
       if (c.failed) continue;
-      try { c.results[t.i] = await simplifyChunk(b, lvl, model, t.chunk, known); }
+      try { c.results[t.i] = await simplifyChunk(b, lvl, model, t.chunk, known, terms, job); }
       catch (e) {
         c.failed = true; job.failed++; job.err = errText(e);
         if (e instanceof NoKey || /clave|permiso|saldo/.test(e.message)) stopAll = true;   // no tiene sentido seguir
@@ -1357,6 +1442,7 @@ async function simplifyBook(b, lvl, model, only = null){
     }
   };
   await Promise.all(Array.from({ length: Math.min(SIMP_PAR(), tasks.length) }, worker));
+  if (job.fixed) console.info(`simplificación: ${job.fixed} párrafos reescritos por estar sobre el nivel`);
   if (job.failed) toast(`${job.failed} capítulo${job.failed > 1 ? 's' : ''} no se pudo simplificar (${job.err}). Puedes reintentar con «Completar».`);
   SIMP_JOBS.delete(key); refreshViews();
 }
@@ -1736,14 +1822,16 @@ async function drawBook(id){
   h += `</div><div class="box"><h3>Versiones simplificadas o traducidas</h3>`;
   for (const [lvl, v] of vers) {
     const d = (v.done || []).filter(Boolean).length, job = SIMP_JOBS.get(`${id}|${lvl}`);
-    h += `<div class="prog"><b>${esc(verName(b, lvl))}</b> <span class="small">${verKind(b, lvl)}</span> · ${d}/${b.chapters.length} capítulos · ${esc(mname(v.model))}${job ? ` · <span class="busy">preparando: ${job.doneParts}/${job.totalParts} partes, ${SIMP_PAR()} a la vez…</span>` : ''}
+    h += `<div class="prog"><b>${esc(verName(b, lvl))}</b> <span class="small">${verKind(b, lvl)}</span> · ${d}/${b.chapters.length} capítulos · ${esc(mname(v.model))}${job ? ` · <span class="busy">${job.phase === 'nombres' ? 'preparando la lista de nombres…' : `preparando: ${job.doneParts}/${job.totalParts} partes, ${SIMP_PAR()} a la vez${job.fixed ? ` · ${job.fixed} párrafos reescritos por estar sobre el nivel` : ''}…`}</span>` : ''}
       <div class="bar"><i style="width:${job && job.totalParts ? 100 * job.doneParts / job.totalParts : 100 * d / b.chapters.length}%"></i></div>
-      <div class="row" style="margin-top:6px"><button class="btn sec" data-readv="${lvl}">Leer</button>${d < b.chapters.length && !job ? `<button class="btn sec" data-cont="${lvl}">Completar</button>` : ''}<button class="btn sec" data-del="${lvl}">Borrar</button></div></div>`;
+      <div class="row" style="margin-top:6px"><button class="btn sec" data-readv="${lvl}">Leer</button>${d < b.chapters.length && !job ? `<button class="btn sec" data-cont="${lvl}">Completar</button>` : ''}${!job ? `<button class="btn sec" data-redo="${lvl}">Rehacer</button>` : ''}<button class="btn sec" data-del="${lvl}">Borrar</button></div></div>`;
   }
   h += `<p class="small">Reescribe cada párrafo con vocabulario y gramática del nivel elegido, sin cambiar la historia: en el mismo idioma (simplificar) o en otro (traducir y adaptar). Los párrafos quedan alineados con el original (en la lectura, ¶ muestra el original). Puedes hacerlo con todo el libro o ir capítulo por capítulo mientras lees.</p>
     <div class="field"><label>Idioma</label><select id="bTl">${Object.entries(LANGS).map(([k, L]) => `<option value="${k}" ${k === tl ? 'selected' : ''}>${L.native} · ${L.name}${k === lang ? ' (el del libro)' : ''}</option>`).join('')}</select></div>
     <div class="field"><label>Nivel</label><select id="bTgt">${CEFR.map(c => `<option value="${c}" ${c === tgt ? 'selected' : ''}>${esc(lvLabel(tl, c))}</option>`).join('')}</select></div>
     <div class="field"><label>Modelo</label><select id="bModel">${SIMP_MODELS.map(([m, l]) => `<option value="${m}" ${m === S.simpModel ? 'selected' : ''}>${esc(l)} · todo el libro ${cost(m)}</option>`).join('')}</select></div>
+    ${lvIdx(tgt) <= 1 && S.simpModel === 'claude-haiku-5-5' ? `<div class="form">💡 Para ${esc(lvLabel(tl, tgt))} conviene <b>Claude Sonnet 5.5</b>: bajar tanto el nivel sin perder la historia es difícil, y Haiku tiende a dejar palabras y gramática más altas.</div>` : ''}
+    <div class="small">${S.simpCheck === false ? 'Revisión del nivel desactivada (⚙ Ajustes).' : 'Después de cada parte, el modelo barato revisa si quedó algo sobre el nivel y, si es así, esos párrafos se reescriben (hasta 2 vueltas). Antes de empezar se arma una lista de nombres y términos para que no cambien.'}</div>
     <div class="row"><button class="btn" id="bSimpAll">${trn ? 'Traducir' : 'Simplificar'} todo el libro</button><button class="btn sec" id="bSimpRead">${trn ? 'Traducir' : 'Simplificar'} mientras leo</button></div></div>
     <div class="box"><h3>Llevar a otro aparato</h3><p class="small">Un archivo .leamos con el libro, sus versiones simplificadas, las traducciones y explicaciones ya pagadas, tu posición y tu diccionario de ${esc(LANGS[lang].name)}. En el otro aparato: biblioteca → «📥 Importar .leamos».</p>
       <button class="btn sec" id="bExport">📦 Exportar este libro</button></div>
@@ -1754,12 +1842,21 @@ async function drawBook(id){
   $('bRead').onclick = () => { closePanel(); openBook(id); };
   if ($('bReadO')) $('bReadO').onclick = () => { closePanel(); openBook(id, 'o'); };
   if ($('bEst')) $('bEst').onclick = () => runEstimate(b);
-  $('bTgt').onchange = e => { S.simpTarget = e.target.value; saveSet(); };
+  $('bTgt').onchange = e => { S.simpTarget = e.target.value; saveSet(); drawBook(id); };
   $('bTl').onchange = e => { S.simpLang = e.target.value; S.simpTarget = ''; saveSet(); drawBook(id); };
-  $('bModel').onchange = e => { S.simpModel = e.target.value; saveSet(); };
+  $('bModel').onchange = e => { S.simpModel = e.target.value; saveSet(); drawBook(id); };
   $('bSimpAll').onclick = () => { if (!KEYS[provOf(S.simpModel)]) { toast('Falta la clave de la API (⚙ Ajustes).'); return; } simplifyBook(b, verKey(b, tl, $('bTgt').value), S.simpModel); };
   $('bSimpRead').onclick = async () => { const lvl = verKey(b, tl, $('bTgt').value); b.versions[lvl] = b.versions[lvl] || { model: S.simpModel, lang: tl, done: [], date: Date.now() }; await dbPut('books', b); closePanel(); await openBook(id, lvl); };
   $('pbody').querySelectorAll('[data-readv]').forEach(x => x.onclick = () => { closePanel(); openBook(id, x.dataset.readv); });
+  $('pbody').querySelectorAll('[data-redo]').forEach(x => x.onclick = async () => {
+    const v = x.dataset.redo;
+    if (!confirm(`¿Rehacer la versión ${verName(b, v)}? Se borra lo hecho (y sus traducciones) y se vuelve a preparar todo el libro con ${mname(S.simpModel)}.`)) return;
+    if (BOOK?.id === id && CH?.ver === v) await openChapter('o', CH.ch, CUR.p, 0);
+    for (const st of ['simp', 'ana', 'expl']) await dbDelPrefix(st, `${id}|${v}|`);
+    b.versions[v] = { model: S.simpModel, lang: verLang(b, v), done: [], date: Date.now() };
+    await dbPut('books', b); if (BOOK?.id === id) BOOK.versions = b.versions;
+    simplifyBook(b, v, S.simpModel);
+  });
   $('pbody').querySelectorAll('[data-cont]').forEach(x => x.onclick = () => simplifyBook(b, x.dataset.cont, b.versions[x.dataset.cont].model || S.simpModel));
   $('pbody').querySelectorAll('[data-del]').forEach(x => x.onclick = async () => {
     if (!confirm(`¿Borrar la versión ${verName(b, x.dataset.del)}?`)) return;
@@ -1823,6 +1920,7 @@ function openSettings(){
       <button class="btn sec" id="vTest">🔊 Probar</button></div>
     <div class="box"><h3>Simplificar</h3>
       <div class="field"><label>Pedidos simultáneos a la API</label><select id="sPar">${[5, 10, 20, 50, 100].map(n => `<option value="${n}" ${n === SIMP_PAR() ? 'selected' : ''}>${n}${n === 50 ? ' (por defecto)' : ''}</option>`).join('')}</select>
+      <label class="check"><input type="checkbox" id="cCheck" ${S.simpCheck !== false ? 'checked' : ''}><span>Revisar el nivel: después de cada parte, el modelo barato busca palabras o gramática sobre el nivel y esos párrafos se reescriben (más fiel al nivel; cuesta ~35 % más).</span></label>
       <div class="small">Más pedidos a la vez = el libro se simplifica antes. Si tu cuenta tiene un límite bajo de pedidos por minuto, la API rechaza algunos y la app los reintenta (más lento); si ves fallas, baja este número.</div></div></div>
     <div class="box"><h3>Gutenberg: tu intermediario (opcional)</h3>
       <p class="small">El navegador no deja que una página descargue libros de otro sitio si ese sitio no lo autoriza, y los intermediarios gratuitos a veces fallan. Con uno propio funciona siempre: es gratis y toma unos 5 minutos.</p>
@@ -1849,6 +1947,7 @@ function openSettings(){
   on('cAuto', 'change', e => { S.autoAnalyze = e.target.checked; saveSet(); });
   on('cSilent', 'change', e => { S.silentRead = e.target.checked; saveSet(); });
   on('sPar', 'change', e => { S.simpPar = +e.target.value; saveSet(); });
+  on('cCheck', 'change', e => { S.simpCheck = e.target.checked; saveSet(); });
   for (const k of Object.keys(LANGS)) on('lv_' + k, 'change', e => { S.myLevel[k] = e.target.value; saveSet(); });
   on('vVoice', 'change', e => { S.voices[lang] = e.target.value; saveSet(); });
   on('rRate', 'input', e => { S.rate = +e.target.value; $('rateV').textContent = S.rate; saveSet(); });
