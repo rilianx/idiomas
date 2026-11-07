@@ -1,6 +1,6 @@
 # Hablemos coreano
 
-Una app para aprender idiomas conversando con una IA, empezando por el coreano. Es un solo archivo, [`index.html`](index.html): se abre en el navegador, en el computador o en el celular, sin instalar nada.
+Una app para aprender idiomas conversando con una IA, empezando por el coreano. Es [`index.html`](index.html) más dos archivos que comparte con el lector ([`comun.js`](comun.js) y [`comun.css`](comun.css)): se abre en el navegador, en el computador o en el celular, sin instalar nada.
 
 **Abrirla en línea:** https://rilianx.github.io/idiomas/ (con GitHub Pages activado; así el micrófono funciona en cualquier dispositivo).
 
@@ -64,7 +64,8 @@ La voz de 지수 usa la síntesis de voz del navegador, con una voz coreana (en 
 
 ## Cómo está hecho
 
-- **Un solo archivo**, sin bibliotecas ni compilación. La conversación, el diccionario y los ajustes se guardan en `localStorage`.
+- **Sin bibliotecas ni compilación.** La conversación, el diccionario y los ajustes se guardan en `localStorage`.
+- **Código común con el lector.** [`comun.js`](comun.js) tiene lo que usan las dos apps: la clave, la conexión con Claude y OpenAI (con streaming, salida estructurada, respaldo y registro del gasto), los precios, el hangul y su romanización, los esquemas, la voz del navegador, el significado sobre la palabra y la ficha del diccionario. [`comun.css`](comun.css) tiene los colores (claro y oscuro), los botones, la ficha y los paneles. Son scripts y hojas de estilo comunes (no módulos ES), así que todo sigue funcionando al abrir el archivo directamente.
 - **Dos pedidos por mensaje, para que 지수 responda rápido.** Primero, uno corto que trae solo lo que dice 지수 (coreano y traducción), sin razonamiento previo: aparece y se oye de inmediato. Después, en segundo plano, otro analiza cada palabra (forma de diccionario, significado, forma gramatical), corrige el mensaje del estudiante, anota su perfil y la gramática nueva; y un tercero propone las respuestas sugeridas. Todos usan salida estructurada (JSON fijo).
 - **Caché.** Las instrucciones fijas de cada nivel van primero, para que el proveedor las guarde en caché.
 - **Esfuerzo y respaldo.** La conversación usa esfuerzo bajo, para que sea rápida y barata; las definiciones, esfuerzo medio. En Opus, Sonnet y Fable, si el modelo declina una respuesta, el servidor la reintenta en otro modelo.
@@ -72,7 +73,7 @@ La voz de 지수 usa la síntesis de voz del navegador, con una voz coreana (en 
 
 ## Leamos: lector de libros
 
-Un segundo archivo, [`lector.html`](lector.html), igual de autónomo (sin bibliotecas ni compilación). Usa **la misma clave** de la API que «Hablemos» y, en coreano, **el mismo diccionario**: lo que aprendes leyendo se ve en la conversación y al revés. Se llega con 📚 desde «Hablemos» y con 💬 desde el lector.
+[`lector.html`](lector.html), sin bibliotecas ni compilación, con el mismo [`comun.js`](comun.js) y [`comun.css`](comun.css) que «Hablemos». Usa **la misma clave** de la API que «Hablemos» y, en coreano, **el mismo diccionario**: lo que aprendes leyendo se ve en la conversación y al revés. Se llega con 📚 desde «Hablemos» y con 💬 desde el lector.
 
 - **Abrir libros.** EPUB (se descomprime en el navegador), archivos `.txt` o texto pegado. Detecta el idioma (coreano, inglés, japonés, chino, francés, alemán, italiano, portugués; se puede cambiar), los capítulos y el índice. Trae dos cuentos de ejemplo, en coreano y en inglés. Los libros se guardan en IndexedDB.
 - **Leer en voz alta marcando la oración actual.** ▶ lee con la voz del sistema en el idioma del libro, oración por oración, resaltando la oración (y, si el navegador lo informa, la palabra que se está diciendo) y bajando la página sola. Sin voz, ⏭ y ⏮ (o las flechas del teclado) mueven la marca a mano. Velocidad ajustable; la pantalla no se apaga mientras lee.

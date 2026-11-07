@@ -4,35 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Leamos · lector</title>
+<link rel="stylesheet" href="comun.css">
 <style>
-:root{
-  --bg:#f6f3ee;--card:#fffdf9;--fg:#24211d;--muted:#7a7268;--line:#e3ddd3;
-  --accent:#c2412d;--accent-soft:#f6e1da;--cur:#fbefc4;
-  --new:#2f6f5e;--new-soft:#e1f0ea;--warn:#9a5b00;--warn-soft:#fbefd9;--shadow:0 1px 3px rgba(40,30,20,.12);
-  --fs:20px;
-}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
-  --bg:#191714;--card:#24211d;--fg:#eee8df;--muted:#a59c90;--line:#3a352f;
-  --accent:#ec7a63;--accent-soft:#4a2a22;--cur:#3b3320;
-  --new:#7fcbb3;--new-soft:#1e3a32;--warn:#f0b35c;--warn-soft:#3e3020;--shadow:0 1px 3px rgba(0,0,0,.4);
-}}
-:root[data-theme="dark"]{
-  --bg:#191714;--card:#24211d;--fg:#eee8df;--muted:#a59c90;--line:#3a352f;
-  --accent:#ec7a63;--accent-soft:#4a2a22;--cur:#3b3320;
-  --new:#7fcbb3;--new-soft:#1e3a32;--warn:#f0b35c;--warn-soft:#3e3020;--shadow:0 1px 3px rgba(0,0,0,.4);
-}
-*{box-sizing:border-box}
-html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",sans-serif}
-body{display:flex;flex-direction:column;height:100dvh}
-button,select{font:inherit;color:inherit;cursor:pointer}
-.ko,[lang=ko]{font-family:"Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif}
-
-header{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);background:var(--card)}
-header h1{font-size:17px;margin:0;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-header h1 small{color:var(--muted);font-weight:normal;font-size:13px;margin-left:6px}
-.ib{background:none;border:1px solid var(--line);border-radius:10px;height:38px;min-width:38px;padding:0 9px;font-size:15px;display:inline-flex;align-items:center;justify-content:center;gap:5px;text-decoration:none;color:inherit}
-.ib:hover{background:var(--bg)}
-.ib.on{background:var(--accent-soft);border-color:var(--accent)}
 header select{height:38px;border:1px solid var(--line);border-radius:10px;background:var(--card);padding:0 6px;max-width:34vw;min-width:0;font-size:14px}
 
 #view{flex:1;overflow-y:auto;position:relative}
@@ -48,8 +21,6 @@ header select{height:38px;border:1px solid var(--line);border-radius:10px;backgr
 .book .meta{font-size:13px;color:var(--muted)}
 .badge{display:inline-block;font-size:12px;border-radius:6px;padding:1px 7px;background:var(--new-soft);color:var(--new);margin-right:4px}
 .badge.lv{background:var(--accent-soft);color:var(--accent)}
-.bar{height:4px;background:var(--line);border-radius:2px;margin-top:6px;overflow:hidden}
-.bar i{display:block;height:100%;background:var(--new)}
 
 /* lectura */
 #book{max-width:700px;margin:0 auto;padding:18px 18px 45vh}
@@ -68,10 +39,6 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
 .chend{text-align:center;margin:30px 0;color:var(--muted)}
 .placeholder{background:var(--card);border:1px dashed var(--line);border-radius:12px;padding:18px;text-align:center;color:var(--muted);margin:20px 0}
 
-#tip{position:fixed;z-index:30;background:var(--fg);color:var(--bg);padding:5px 11px;border-radius:8px;font-size:15px;line-height:1.3;pointer-events:none;max-width:280px;transform:translate(-50%,-100%);box-shadow:var(--shadow);text-align:center}
-#tip.below{transform:translate(-50%,0)}
-#tip b{font-weight:600}
-#tip small{display:block;opacity:.7;font-size:11px}
 #selbtn{position:fixed;z-index:31;transform:translate(-50%,-100%)}
 
 #trbox{padding:8px 14px;background:var(--card);border-top:1px solid var(--line);font-size:15px;max-height:30dvh;overflow-y:auto}
@@ -82,46 +49,15 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
 #player .ib{height:42px;min-width:42px}
 #player .grow{flex:1;min-width:0;font-size:12px;color:var(--muted);text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
-.btn{border:none;background:var(--accent);color:#fff;border-radius:10px;padding:9px 15px;font-weight:600}
-.btn.sec{background:var(--bg);color:var(--fg);border:1px solid var(--line)}
-.btn:disabled{opacity:.5;cursor:default}
-.chip{border:1px solid var(--line);background:var(--bg);border-radius:999px;padding:3px 10px;font-size:13px}
-.chip:hover{border-color:var(--accent)}
 .chip.on{background:var(--accent);color:#fff;border-color:var(--accent)}
 
 /* ficha de palabra / explicación */
-#veil{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:20}
-#sheet{position:fixed;left:50%;bottom:0;transform:translateX(-50%);width:min(580px,100%);max-height:80dvh;overflow-y:auto;background:var(--card);border-radius:16px 16px 0 0;padding:16px 18px calc(18px + env(safe-area-inset-bottom));z-index:21;box-shadow:0 -4px 20px rgba(0,0,0,.2)}
-#sheet .big{font-size:32px;font-weight:600;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 #sheet .phrase{font-size:21px;line-height:1.6}
-.rom{color:var(--muted);font-size:14px}
-.pos{display:inline-block;font-size:12px;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:1px 7px;margin-right:6px;color:var(--muted)}
-.gloss{font-size:19px;margin:6px 0}
-.form{background:var(--new-soft);color:var(--fg);border-radius:8px;padding:7px 10px;margin:8px 0;font-size:15px}
-.fix{margin-top:7px;font-size:14px;background:var(--warn-soft);border-radius:8px;padding:6px 9px}
-.sec-t{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:12px 0 4px}
-.conj{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:15px}
-.ex{margin:4px 0;font-size:15px}
-.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
-.spk{background:none;border:none;font-size:20px;padding:0 4px}
-.busy{color:var(--muted);font-style:italic;font-size:14px}
-.gram{border-left:3px solid var(--line);padding:2px 0 2px 10px;margin:8px 0}
 
 /* paneles */
-#panel{position:fixed;inset:0;background:var(--bg);z-index:15;display:flex;flex-direction:column}
-#panel .ph{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);background:var(--card)}
-#panel .ph h2{flex:1;margin:0;font-size:18px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#panel .pb{flex:1;overflow-y:auto;padding:12px 14px 30px}
-#panel .pb > *{max-width:760px;margin-left:auto;margin-right:auto}
 .box{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:12px}
 .box h3{margin:0 0 6px;font-size:16px}
-.field{margin:12px 0}
-.field label{display:block;font-size:14px;color:var(--muted);margin-bottom:4px}
-.field input[type=text],.field input[type=password],.field select,.field textarea,.search{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--fg);font:inherit}
-.field textarea{min-height:180px;resize:vertical}
-.check{display:flex;gap:10px;align-items:flex-start;margin:10px 0;font-size:15px}
-.check input{margin-top:4px;width:18px;height:18px;flex:none}
-.small{font-size:13px;color:var(--muted)}
+.field textarea{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--fg);font:inherit;min-height:180px;resize:vertical}
 .ent{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin-bottom:6px;cursor:pointer}
 .ent .top{display:flex;align-items:center;gap:8px}
 .ent .top .lem{font-size:19px;font-weight:600}
@@ -132,8 +68,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
 .stats div{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px;text-align:center}
 .stats b{display:block;font-size:20px}
 .prog{font-size:14px;margin:6px 0}
-[hidden]{display:none !important}
-@media (max-width:520px){header h1 small{display:none}.ib .lbl{display:none}#player .grow{display:none}}
+@media (max-width:520px){header h1 small,.ib .lbl,#player .grow{display:none}}
 </style>
 </head>
 <body>
@@ -155,6 +90,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
 <div id="sheet" hidden></div>
 <div id="panel" hidden><div class="ph"><h2 id="ptitle"></h2><button class="ib" id="pclose">✕</button></div><div class="pb" id="pbody"></div></div>
 
+<script src="comun.js"></script>
 <script>
 'use strict';
 /* =====================================================================
@@ -165,25 +101,20 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-07 · 1';
-const $ = id => document.getElementById(id);
-const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const load = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } catch (e) { return d; } };
-const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { console.warn('no se pudo guardar', k, e); } };
+const APP_VERSION = '2026-11-07 · 2';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
-const paras = t => String(t || '').split(/\n\s*\n/).map(p => `<p style="margin:.35em 0">${esc(p.trim()).replace(/\n/g, '<br>')}</p>`).join('');
 
 /* ---------- idiomas y niveles ---------- */
 const LANGS = {
-  ko: { name: 'coreano', native: '한국어', tts: 'ko-KR', extra: 'Hanja' },
-  en: { name: 'inglés', native: 'English', tts: 'en-US', extra: 'Pronunciación' },
-  ja: { name: 'japonés', native: '日本語', tts: 'ja-JP', extra: 'Lectura' },
-  zh: { name: 'chino', native: '中文', tts: 'zh-CN', extra: 'Pinyin' },
-  fr: { name: 'francés', native: 'Français', tts: 'fr-FR', extra: 'Pronunciación' },
-  de: { name: 'alemán', native: 'Deutsch', tts: 'de-DE', extra: 'Pronunciación' },
-  it: { name: 'italiano', native: 'Italiano', tts: 'it-IT', extra: 'Pronunciación' },
-  pt: { name: 'portugués', native: 'Português', tts: 'pt-BR', extra: 'Pronunciación' }
+  ko: { name: 'coreano', native: '한국어', extra: 'Hanja' },
+  en: { name: 'inglés', native: 'English', extra: 'Pronunciación' },
+  ja: { name: 'japonés', native: '日本語', extra: 'Lectura' },
+  zh: { name: 'chino', native: '中文', extra: 'Pinyin' },
+  fr: { name: 'francés', native: 'Français', extra: 'Pronunciación' },
+  de: { name: 'alemán', native: 'Deutsch', extra: 'Pronunciación' },
+  it: { name: 'italiano', native: 'Italiano', extra: 'Pronunciación' },
+  pt: { name: 'portugués', native: 'Português', extra: 'Pronunciación' }
 };
 const CEFR = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
 const lvIdx = c => CEFR.indexOf(c);
@@ -195,8 +126,7 @@ const HAB = load('hab-set', {});
 const DEFAULT_SET = { chatModel: HAB.chatModel || 'claude-haiku-5-5', defModel: HAB.defModel || 'claude-opus-5-5', simpModel: HAB.chatModel || 'claude-haiku-5-5',
   myLevel: { ko: 'A2', en: 'B1' }, rate: 0.9, voices: {}, autoAnalyze: true, autoSpeakWord: true, fs: 20, theme: HAB.theme || '', showTr: false };
 const S = Object.assign({}, DEFAULT_SET, load('lec-set', {}));
-const KEYS = Object.assign({ anthropic: '', openai: '', workspace: '' }, load('hab-keys', {}));
-const saveSet = () => save('lec-set', S), saveKeys = () => save('hab-keys', KEYS);
+const saveSet = () => save('lec-set', S);
 let USAGE = load('lec-usage', {});
 const myLevel = lang => S.myLevel[lang] || 'A2';
 function applyLook(){ document.documentElement.style.setProperty('--fs', S.fs + 'px'); if (S.theme) document.documentElement.dataset.theme = S.theme; else delete document.documentElement.dataset.theme; }
@@ -283,28 +213,6 @@ function wordClass(tok){
   return sc < 30 ? 'new' : sc < 70 ? 'learn' : '';
 }
 
-/* ---------- hangul: romanización (para las fichas en coreano) ---------- */
-const H0 = 0xAC00, H1 = 0xD7A3;
-const dec = ch => { if (!ch) return null; const c = ch.charCodeAt(0); if (c < H0 || c > H1) return null; const d = c - H0; return { l: Math.floor(d / 588), v: Math.floor((d % 588) / 28), t: d % 28 }; };
-const RI = ['g','kk','n','d','tt','r','m','b','pp','s','ss','','j','jj','ch','k','t','p','h'];
-const RV = ['a','ae','ya','yae','eo','e','yeo','ye','o','wa','wae','oe','yo','u','wo','we','wi','yu','eu','ui','i'];
-const RF = ['','k','k','k','n','n','n','t','l','k','m','l','l','l','p','l','m','p','p','t','t','ng','t','t','k','t','p','t'];
-const LINK = { 1:['','g'],2:['','kk'],3:['k','s'],4:['','n'],5:['n','j'],6:['n',''],7:['','d'],8:['','r'],9:['l','g'],10:['l','m'],11:['l','b'],12:['l','s'],13:['l','t'],14:['l','p'],15:['l',''],16:['','m'],17:['','b'],18:['p','s'],19:['','s'],20:['','ss'],22:['','j'],23:['','ch'],24:['','k'],25:['','t'],26:['','p'],27:['',''] };
-function romanize(s){
-  const ch = [...s]; let out = '', carry = null;
-  for (let i = 0; i < ch.length; i++) {
-    const d = dec(ch[i]);
-    if (!d) { out += ch[i]; carry = null; continue; }
-    const n = dec(ch[i + 1]);
-    out += (carry !== null && (d.l === 11 || d.l === 5) ? carry : RI[d.l]) + RV[d.v]; carry = null;
-    if (d.t) {
-      if (n && n.l === 11 && LINK[d.t]) { out += LINK[d.t][0]; carry = LINK[d.t][1]; }
-      else if (d.t === 8 && n && n.l === 5) { out += 'l'; carry = 'l'; }
-      else out += RF[d.t];
-    }
-  }
-  return out;
-}
 
 /* ---------- libros en IndexedDB ----------
    books: datos del libro y posición · text: cada capítulo · simp: capítulos simplificados · ana: análisis de cada párrafo */
@@ -495,83 +403,15 @@ function splitSents(t, lang){
 }
 
 /* ---------- la IA (misma clave que «Hablemos») ---------- */
-const MODELS = {
-  'claude-haiku-5-5': { name: 'Claude Haiku 5.5', prov: 'anthropic' },
-  'claude-sonnet-5-5': { name: 'Claude Sonnet 5.5', prov: 'anthropic' },
-  'claude-opus-5-5': { name: 'Claude Opus 5.5', prov: 'anthropic' },
-  'claude-fable-5-1': { name: 'Claude Fable 5.1', prov: 'anthropic' },
-  'gpt-5.4-mini': { name: 'GPT-5.4 mini', prov: 'openai' }
-};
-const READ_MODELS = [['claude-haiku-5-5','Claude Haiku 5.5 · el más barato (recomendado)'],['gpt-5.4-mini','GPT-5.4 mini · OpenAI'],['claude-sonnet-5-5','Claude Sonnet 5.5 · mejor, más caro']];
-const DEF_MODELS = [['claude-opus-5-5','Claude Opus 5.5 · preciso (recomendado)'],['claude-sonnet-5-5','Claude Sonnet 5.5 · más barato'],['claude-fable-5-1','Claude Fable 5.1 · el más capaz y el más caro'],['gpt-5.4-mini','GPT-5.4 mini · OpenAI, barato']];
 const SIMP_MODELS = [['claude-haiku-5-5','Claude Haiku 5.5 · barato'],['claude-sonnet-5-5','Claude Sonnet 5.5 · más natural'],['claude-opus-5-5','Claude Opus 5.5 · el mejor, caro'],['gpt-5.4-mini','GPT-5.4 mini · OpenAI']];
 const mname = m => MODELS[m]?.name || m;
-const provOf = m => MODELS[m]?.prov || (m.startsWith('gpt') ? 'openai' : 'anthropic');
-class NoKey extends Error {}
 const errText = e => e instanceof NoKey ? 'falta la clave de la API (⚙ Ajustes)' : e.message;
 
-async function post(url, headers, body, ms){
-  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), ms);
-  let res;
-  try { res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: ctl.signal }); }
-  catch (e) { throw new Error(e.name === 'AbortError' ? 'la IA tardó demasiado' : 'sin conexión'); }
-  finally { clearTimeout(timer); }
-  return { res, data: await res.json().catch(() => ({})) };
-}
-const httpError = (res, data) => new Error({ 401: 'la clave no es válida', 403: 'la clave no tiene permiso', 429: 'demasiados pedidos seguidos (o sin saldo); espera un poco', 529: 'el servicio está saturado' }[res.status] || ('error ' + res.status + (data.error?.message ? ': ' + data.error.message : '')));
-function parseJSON(txt){ try { const o = JSON.parse(txt); if (o && typeof o === 'object') return o; } catch (e) {} throw new Error('la respuesta llegó incompleta'); }
-async function ask(model, system, user, schema, { effort = 'low', maxTokens = 8000, ms = 90000, kind = 'read' } = {}){
-  const prov = provOf(model);
-  if (!KEYS[prov]) throw new NoKey(prov);
-  const r = prov === 'openai' ? await openaiAsk(model, system, user, schema, effort, maxTokens, ms) : await claudeAsk(model, system, user, schema, effort, maxTokens, ms);
-  recordUsage(kind, model, r.served, r.usage);
-  return r.out;
-}
-async function claudeAsk(model, system, user, schema, effort, maxTokens, ms, fallback = true, fast = true){
-  const body = { model, max_tokens: maxTokens, system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }], messages: [{ role: 'user', content: user }], output_config: { format: { type: 'json_schema', schema }, effort } };
-  const headers = { 'content-type': 'application/json', 'x-api-key': KEYS.anthropic, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' };
-  if (KEYS.workspace) headers['anthropic-workspace-id'] = KEYS.workspace;
-  if (fallback && model !== 'claude-haiku-5-5') { body.fallbacks = 'default'; headers['anthropic-beta'] = 'server-side-fallback-2026-07-01'; }
-  // el análisis de párrafos es mecánico: Haiku responde sin razonar antes (más rápido)
-  if (fast && model === 'claude-haiku-5-5') body.thinking = { type: 'disabled' };
-  const { res, data } = await post('https://api.anthropic.com/v1/messages', headers, body, ms);
-  if (!res.ok) {
-    if (res.status === 400 && fallback && /fallback/i.test(data.error?.message || '')) return claudeAsk(model, system, user, schema, effort, maxTokens, ms, false, fast);
-    if (res.status === 400 && fast && /thinking/i.test(data.error?.message || '')) return claudeAsk(model, system, user, schema, effort, maxTokens, ms, fallback, false);
-    throw httpError(res, data);
-  }
-  if (data.stop_reason === 'refusal') throw new Error('el modelo no quiso responder eso');
-  if (data.stop_reason === 'max_tokens') throw new Error('la respuesta quedó cortada');
-  const u = data.usage || {};
-  return { out: parseJSON((data.content || []).filter(b => b.type === 'text').map(b => b.text).join('')), served: data.model,
-    usage: { in: u.input_tokens || 0, cacheW: u.cache_creation_input_tokens || 0, cacheR: u.cache_read_input_tokens || 0, out: u.output_tokens || 0 } };
-}
-async function openaiAsk(model, system, user, schema, effort, maxTokens, ms, strict = true){
-  const body = { model, max_completion_tokens: maxTokens, messages: [{ role: 'system', content: system + (strict ? '' : '\n\nResponde solo con un objeto JSON que siga este esquema: ' + JSON.stringify(schema)) }, { role: 'user', content: user }] };
-  if (strict) { body.response_format = { type: 'json_schema', json_schema: { name: 'respuesta', strict: true, schema } }; body.reasoning_effort = effort; }
-  else body.response_format = { type: 'json_object' };
-  const { res, data } = await post('https://api.openai.com/v1/chat/completions', { 'content-type': 'application/json', authorization: 'Bearer ' + KEYS.openai }, body, ms);
-  if (!res.ok) { if (res.status === 400 && strict) return openaiAsk(model, system, user, schema, effort, maxTokens, ms, false); throw httpError(res, data); }
-  const msg = data.choices?.[0]?.message || {};
-  if (msg.refusal) throw new Error('el modelo no quiso responder eso');
-  const u = data.usage || {}, cached = u.prompt_tokens_details?.cached_tokens || 0;
-  return { out: parseJSON(msg.content || ''), served: data.model, usage: { in: (u.prompt_tokens || 0) - cached, cacheW: 0, cacheR: cached, out: u.completion_tokens || 0 } };
-}
 
 /* ---------- gasto estimado ---------- */
-const PRICES = { 'claude-haiku-5-5': [0.10, 0.50, 0.01, 0.125], 'claude-sonnet-5-5': [2, 10, 0.20, 2.5], 'claude-opus-5-5': [4, 20, 0.20, 5], 'claude-fable-5-1': [10, 50, 0.25, 12.5] };
 const KINDS = [['read', 'Lectura (traducir palabras)'], ['explain', 'Explicaciones'], ['simplify', 'Simplificar']];
-const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
-function recordUsage(kind, model, served, u){
-  if (!u) return;
-  const pr = PRICES[served] || PRICES[model];
-  const day = USAGE[today()] || (USAGE[today()] = {});
-  const k = day[kind] || (day[kind] = { n: 0, tin: 0, tout: 0, cost: 0, unpriced: 0 });
-  k.n++; k.tin += u.in + u.cacheW + u.cacheR; k.tout += u.out;
-  if (pr) k.cost += (u.in * pr[0] + u.out * pr[1] + u.cacheR * pr[2] + u.cacheW * pr[3]) / 1e6; else k.unpriced++;
-  save('lec-usage', USAGE);
-}
-const money = c => c === 0 ? '$0' : c < 0.001 ? '< $0,001' : '$' + c.toFixed(c < 0.01 ? 3 : 2).replace('.', ',');
+function recordUsage(kind, model, served, u){ addUsage(USAGE, kind, model, served, u); save('lec-usage', USAGE); }
+AI.onUsage = recordUsage;
 function usageHTML(){
   const d = today(), month = d.slice(0, 7);
   const sum = f => { const t = {}; for (const [k] of KINDS) t[k] = { n: 0, cost: 0 }; for (const [day, v] of Object.entries(USAGE)) if (f(day)) for (const [k] of KINDS) if (v[k]) { t[k].n += v[k].n; t[k].cost += v[k].cost; } return t; };
@@ -588,9 +428,6 @@ function simpCost(chars, lang, model){
 }
 
 /* ---------- esquemas ---------- */
-const POS = ['sustantivo','verbo','adjetivo','adverbio','pronombre','número','partícula','preposición','conjunción','artículo','determinante','expresión','nombre propio','puntuación','otro'];
-const obj = props => ({ type: 'object', additionalProperties: false, required: Object.keys(props), properties: props });
-const STR = { type: 'string' };
 const TOK = obj({ t: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, form: STR, cefr: { type: 'string', enum: [...CEFR, '-'] } });
 const ANA_SCHEMA = obj({ sentences: { type: 'array', items: obj({ es: STR, tokens: { type: 'array', items: TOK } }) } });
 const ENTRY = obj({ query: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, meaning: STR, explanation: STR, hanja: STR, irregular: STR,
@@ -745,7 +582,7 @@ async function analyze(job){
   const lang = job.book.lang;
   const user = `LIBRO: «${job.book.title}»${job.book.author ? ' de ' + job.book.author : ''}\nNIVEL DEL LECTOR: ${myLevel(lang)}\n` +
     (job.prev ? `PÁRRAFO ANTERIOR (solo contexto): ${job.prev.slice(-500)}\n` : '') + `\nORACIONES:\n` + job.sents.map((s, i) => `${i + 1}. ${s}`).join('\n');
-  const out = await ask(S.chatModel, anaSystem(lang), user, ANA_SCHEMA, { effort: 'low', maxTokens: 12000, ms: 90000, kind: 'read' });
+  const out = await ask(S.chatModel, anaSystem(lang), user, ANA_SCHEMA, { effort: 'low', maxTokens: 12000, ms: 90000, kind: 'read', fast: true });
   const rec = { k: job.k, sents: job.sents.map((text, i) => ({ text, es: out.sentences?.[i]?.es || '', tokens: (out.sentences?.[i]?.tokens || []).filter(t => t.t) })), done: [], seenEs: [] };
   await dbPut('ana', rec); ANA.set(job.k, rec);
   return rec;
@@ -884,17 +721,7 @@ function creditSentence(p, s){
 }
 
 /* ---------- leer en voz alta ---------- */
-let VOICES = [];
-function loadVoices(){ VOICES = window.speechSynthesis?.getVoices() || []; }
-if ('speechSynthesis' in window) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
-const voicesFor = lang => VOICES.filter(v => v.lang.toLowerCase().replace('_', '-').startsWith(lang));
-function utter(text, lang, rate = S.rate){
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = LANGS[lang]?.tts || lang; u.rate = rate;
-  const vs = voicesFor(lang), v = vs.find(v => v.name === S.voices[lang]) || vs.find(v => v.lang === u.lang) || vs[0];
-  if (v) u.voice = v;
-  return u;
-}
+const utter = (text, lang, rate = S.rate) => makeUtterance(text, lang, rate, S.voices[lang]);
 function speakWord(text){
   if (!('speechSynthesis' in window) || PLAY) return;
   speechSynthesis.cancel(); speechSynthesis.speak(utter(text, BOOK?.lang || DLANG));
@@ -1012,12 +839,6 @@ function showTip(w){
   }
   placeTip(tip, w);
 }
-function placeTip(tip, w){
-  const r = w.getBoundingClientRect();
-  tip.style.left = Math.max(90, Math.min(innerWidth - 90, r.left + r.width / 2)) + 'px';
-  if (r.top > 100) { tip.classList.remove('below'); tip.style.top = (r.top - 6) + 'px'; } else { tip.classList.add('below'); tip.style.top = (r.bottom + 6) + 'px'; }
-  tip.hidden = false;
-}
 function hideTip(){ TIP_EL = null; const t = $('tip'); if (t) t.hidden = true; }
 $('view').addEventListener('scroll', () => { hideTip(); hideSelBtn(); }, { passive: true });
 
@@ -1070,19 +891,6 @@ async function explainWord(){
 function showSheet(){ $('veil').hidden = false; $('sheet').hidden = false; $('sheet').scrollTop = 0; }
 function closeSheet(){ SHEET = null; $('veil').hidden = true; $('sheet').hidden = true; if (CH && !CH.missing) document.querySelectorAll('#book .para').forEach(el => { const p = +el.dataset.p; if (Math.abs(p - CUR.p) < 40) rerenderPara(p); }); }
 $('veil').onclick = closeSheet;
-function entryHTML(e, lang){
-  let h = '';
-  if (e.meaning) h += `<div class="sec-t">Significado</div><div>${esc(e.meaning)}</div>`;
-  if (e.explanation) h += `<div class="sec-t">Explicación</div><div>${esc(e.explanation)}</div>`;
-  if (e.hanja) h += `<div class="small" style="margin-top:6px">${esc(LANGS[lang]?.extra || 'Nota')}: ${esc(e.hanja)}</div>`;
-  if (e.irregular) h += `<div class="form">⚠ ${esc(e.irregular)}</div>`;
-  if (e.conjugations?.length) h += `<div class="sec-t">Conjugación</div><div class="conj">${e.conjugations.map(c => `<span lang="${lang}" data-say="${esc(c.form)}" style="cursor:pointer">${esc(c.form)}</span><span>${esc(c.label)}</span>`).join('')}</div>`;
-  const forms = Object.entries(e.forms || {});
-  if (forms.length) h += `<div class="sec-t">Formas que has visto</div><div class="conj">${forms.slice(0, 12).map(([f, l]) => `<span lang="${lang}" data-say="${esc(f)}" style="cursor:pointer">${esc(f)}</span><span>${esc(l || '—')}</span>`).join('')}</div>`;
-  if (e.examples?.length) h += `<div class="sec-t">Ejemplos</div>${e.examples.map(x => `<div class="ex"><span lang="${lang}" data-say="${esc(x.ko)}" style="cursor:pointer">🔊 ${esc(x.ko)}</span><br><span class="small">${esc(x.es)}</span></div>`).join('')}`;
-  if (e.sentence) h += `<div class="sec-t">Donde la viste</div><div class="small" lang="${lang}">${esc(e.sentence)}</div>`;
-  return h;
-}
 function srsHTML(e){
   if (!e) return '';
   const sc = scoreOf(e), s = e.srs;
@@ -1103,7 +911,7 @@ function refreshSheet(){
     if (tok.form) h += `<div class="form">${esc(tok.form)}</div>`;
     h += srsHTML(e);
     if (SHEET.ctx) h += `<div class="sec-t">En esta oración</div><div class="form">${esc(SHEET.ctx)}</div>`;
-    if (e) h += entryHTML(e, lang);
+    if (e) h += entryHTML(e, { lang, extra: LANGS[lang]?.extra || 'Nota', sentence: true, maxForms: 12 });
     if (SHEET.busy === 'ana') h += `<div class="busy" style="margin-top:8px">Analizando el párrafo…</div>`;
     if (SHEET.busy === 'def') h += `<div class="busy" style="margin-top:8px">El profesor (${esc(mname(S.defModel))}) está explicando…</div>`;
     if (SHEET.err) h += `<div class="fix">${esc(SHEET.err)}</div>`;
@@ -1468,7 +1276,7 @@ function openSettings(){
       <div class="field"><label>OpenAI (opcional)</label><input type="password" id="kO" value="${esc(KEYS.openai)}" placeholder="sk-…"></div>
       <div class="field"><label>Workspace de Anthropic (solo para claves de organización)</label><input type="text" id="kW" value="${esc(KEYS.workspace)}"></div></div>
     <div class="box"><h3>Modelos</h3>
-      <div class="field"><label>Traducir palabras al leer (cada párrafo)</label>${sel('mRead', READ_MODELS, S.chatModel)}</div>
+      <div class="field"><label>Traducir palabras al leer (cada párrafo)</label>${sel('mRead', CHAT_MODELS, S.chatModel)}</div>
       <div class="field"><label>Explicaciones (doble toque, selección, nivel del libro)</label>${sel('mDef', DEF_MODELS, S.defModel)}</div>
       <label class="check"><input type="checkbox" id="cAuto" ${S.autoAnalyze ? 'checked' : ''}><span>Traducir por adelantado los párrafos que vas a leer (la palabra que toques ya estará lista). Si no, se traduce el párrafo al tocar una palabra.</span></label></div>
     <div class="box"><h3>Mi nivel</h3><div class="conj" style="align-items:center">${Object.entries(LANGS).map(([k, L]) => `<span>${L.native}</span>${sel('lv_' + k, CEFR.map(c => [c, lvLabel(k, c)]), myLevel(k))}`).join('')}</div></div>
