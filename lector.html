@@ -36,6 +36,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
 .w.learn{text-decoration:underline dotted 2px var(--new);text-underline-offset:5px}
 .w.speaking{background:var(--accent-soft)}
 .w.peeked{text-decoration-color:var(--accent)}
+.w.from{outline:2px dashed var(--accent);outline-offset:2px}
 .chend{text-align:center;margin:30px 0;color:var(--muted)}
 .placeholder{background:var(--card);border:1px dashed var(--line);border-radius:12px;padding:18px;text-align:center;color:var(--muted);margin:20px 0}
 
@@ -101,7 +102,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-07 · 10';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-07 · 11';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -568,6 +569,7 @@ async function openChapter(ver, ch, p = 0, s = 0){
   }
   renderReader();
   setCursor(CUR.p, CUR.s, { scroll: 'instant' });
+  prefetchVisible();
 }
 
 /* ---------- analizar párrafos (modelo barato), con una cola ---------- */
@@ -609,7 +611,24 @@ function onAnalyzed(job){
 }
 function prefetch(){
   if (!S.autoAnalyze || !CH || CH.missing) return;
-  for (let p = CUR.p; p < Math.min(CH.paras.length, CUR.p + 3); p++) ensureAna(p);
+  const ahead = PLAY ? 5 : 3;   // leyendo en voz alta, se mira más adelante
+  for (let p = CUR.p; p < Math.min(CH.paras.length, CUR.p + ahead); p++) ensureAna(p);
+}
+// lo que está a la vista (y la pantalla siguiente) también se traduce, aunque la marca no avance:
+// se revisa cuando se deja de bajar la página
+let visTimer = 0;
+function prefetchVisible(){
+  clearTimeout(visTimer);
+  visTimer = setTimeout(() => {
+    if (!S.autoAnalyze || !CH || CH.missing) return;
+    const v = $('view').getBoundingClientRect(); let n = 0;
+    for (const el of document.querySelectorAll('#book .para')) {
+      const r = el.getBoundingClientRect();
+      if (r.bottom < v.top) continue;
+      if (r.top > v.bottom + v.height || n >= 12) break;
+      ensureAna(+el.dataset.p); n++;
+    }
+  }, 500);
 }
 
 /* ---------- dibujar el libro ---------- */
@@ -663,6 +682,7 @@ function renderSentence(el, text, ana, p, si){
     const w = document.createElement('span'); w.className = 'w'; w.textContent = tok.t; w.dataset.o = off;
     const c = tok.lemma ? wordClass(tok) : ''; if (c) w.classList.add(c);
     if (tok.lemma && PEEK.has(`${anaKey(p)}#${si}#${lemmaOf(tok)}`)) w.classList.add('peeked');
+    if (FROM && FROM.p === p && FROM.si === si && FROM.off === off) w.classList.add('from');
     TOKS.set(w, { tok, p, si }); el.appendChild(w);
   };
   const plain = (s, base) => {
@@ -687,6 +707,7 @@ function sentEl(p, s){ return document.querySelector(`#book .para[data-p="${p}"]
 
 /* ---------- la oración actual ---------- */
 function setCursor(p, s, { scroll = 'smooth' } = {}){
+  setFrom(null);
   document.querySelectorAll('#book .s.cur').forEach(x => x.classList.remove('cur'));
   document.querySelectorAll('#book .w.speaking').forEach(x => x.classList.remove('speaking'));
   CUR.p = p; CUR.s = s;
@@ -742,9 +763,17 @@ function speakWord(text){
   speechSynthesis.cancel(); speechSynthesis.speak(utter(text, BOOK?.lang || DLANG));
 }
 let PLAY = false, UTT = null, WAKE = null;
+// la última palabra tocada (sin estar leyendo): ▶ parte desde ahí
+let FROM = null, START_OFF = 0;
+function setFrom(p, si, off){
+  document.querySelectorAll('#book .w.from').forEach(x => x.classList.remove('from'));
+  FROM = p === null ? null : { p, si, off };
+  if (FROM) findWord(p, si, off)?.classList.add('from');
+}
 async function play(){
   if (!('speechSynthesis' in window)) { toast('Este navegador no puede leer en voz alta.'); return; }
   if (!CH || CH.missing) return;
+  if (FROM) { const f = FROM; setCursor(f.p, f.si); START_OFF = f.off; }
   if (!voicesFor(BOOK.lang).length) toast(`No encontré una voz en ${LANGS[BOOK.lang].name}; se usará la voz por defecto (puedes instalar una en el sistema).`);
   PLAY = true; updatePlay();
   try { WAKE = await navigator.wakeLock?.request('screen'); } catch (e) {}
@@ -759,7 +788,8 @@ function stop(){
 function speakCurrent(){
   if (!PLAY) return;
   if (!CH || CH.missing) { stop(); return; }
-  const text = sentText(CUR.p, CUR.s).trim();
+  const off = START_OFF; START_OFF = 0;    // empezar a mitad de la oración (desde la palabra tocada)
+  const text = sentText(CUR.p, CUR.s).trim().slice(off);
   if (!/[\p{L}\p{N}]/u.test(text)) { advanceAfter(null); return; }
   const u = utter(text, BOOK.lang);
   u._t = Date.now();
@@ -770,7 +800,7 @@ function speakCurrent(){
     if (UTT !== u) return;
     const el = sentEl(CUR.p, CUR.s); if (!el) return;
     let best = null;
-    for (const w of el.querySelectorAll('.w')) { if (+w.dataset.o <= ev.charIndex) best = w; else break; }
+    for (const w of el.querySelectorAll('.w')) { if (+w.dataset.o <= ev.charIndex + off) best = w; else break; }
     el.querySelectorAll('.w.speaking').forEach(x => x.classList.remove('speaking'));
     best?.classList.add('speaking');
   };
@@ -836,6 +866,7 @@ function showTip(w){
   const { tok, p, si } = info;
   let tip = $('tip'); if (!tip) { tip = document.createElement('div'); tip.id = 'tip'; document.body.appendChild(tip); }
   TIP_EL = w;
+  if (!PLAY) setFrom(p, si, +w.dataset.o);
   if (!tok.lemma) {
     tip.innerHTML = `<span class="busy" style="color:inherit">traduciendo…</span>`;
     const off = w.dataset.o;
@@ -849,13 +880,13 @@ function showTip(w){
     w.classList.add('peeked');
     const l = lemmaOf(tok), e = DICT[l];
     const romo = BOOK.lang === 'ko' ? `<small>${esc(romanize(tok.t))}</small>` : '';
-    tip.innerHTML = `<b>${esc(tok.gloss || e?.gloss || '—')}</b>${l && l !== tok.t.toLowerCase() && l !== tok.t ? ` · <span lang="${BOOK.lang}">${esc(l)}</span>` : ''}${tok.form ? `<small>${esc(tok.form)}</small>` : ''}${romo}<small>toca dos veces para la explicación</small>`;
+    tip.innerHTML = `<b>${esc(tok.gloss || e?.gloss || '—')}</b>${l && l !== tok.t.toLowerCase() && l !== tok.t ? ` · <span lang="${BOOK.lang}">${esc(l)}</span>` : ''}${tok.form ? `<small>${esc(tok.form)}</small>` : ''}${romo}<small>toca dos veces para la explicación${PLAY ? '' : ' · ▶ lee desde aquí'}</small>`;
     if (S.autoSpeakWord) speakWord(tok.t);
   }
   placeTip(tip, w);
 }
 function hideTip(){ TIP_EL = null; const t = $('tip'); if (t) t.hidden = true; }
-$('view').addEventListener('scroll', () => { hideTip(); hideSelBtn(); }, { passive: true });
+$('view').addEventListener('scroll', () => { hideTip(); hideSelBtn(); prefetchVisible(); }, { passive: true });
 
 /* ---------- ficha de la palabra ---------- */
 let SHEET = null;
@@ -954,7 +985,7 @@ function refreshSheet(){
   $('sClose').onclick = closeSheet;
   if ($('sExplain')) $('sExplain').onclick = explainWord;
   if ($('sKnown')) $('sKnown').onclick = () => { const e = DICT[lemmaOf(SHEET.tok, lang)]; setKnown(e, scoreOf(e) < 70); refreshSheet(); if (PANEL === 'words') drawWords(); };
-  if ($('sFrom')) $('sFrom').onclick = () => { const { p, si } = SHEET; closeSheet(); stop(); setCursor(p, si); play(); };
+  if ($('sFrom')) $('sFrom').onclick = () => { const { p, si, off } = SHEET; closeSheet(); stop(); setFrom(p, si, +off); play(); };
 }
 
 /* ---------- seleccionar un trozo: explicación detallada ---------- */
