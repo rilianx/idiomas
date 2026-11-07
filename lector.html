@@ -101,7 +101,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-07 · 4';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-07 · 5';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -1177,22 +1177,37 @@ function openPaste(){
 /* ---------- Project Gutenberg: buscar con Gutendex y descargar el EPUB ----------
    Si el navegador no deja descargar directo (CORS), se intenta a través de un intermediario público:
    los libros son de dominio público y no se envía ninguna clave. */
-const PROXIES = [u => u, u => 'https://corsproxy.io/?url=' + encodeURIComponent(u), u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u)];
-const PROXY_OK = {};   // por sitio, el camino que funcionó la última vez
-async function fetchOpen(url, ms = 45000){
-  const host = new URL(url).host, first = PROXY_OK[host] || 0;
-  for (let k = 0; k < PROXIES.length; k++) {
-    const i = (first + k) % PROXIES.length, ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), ms);
+// los caminos posibles: tu intermediario (⚙ Ajustes), directo y dos intermediarios públicos gratuitos.
+// Se prueban todos a la vez y gana el primero que responde bien.
+const PATHS = () => [
+  ...(S.proxy ? [['tu intermediario', u => S.proxy.replace(/\/+$/, '') + '/?url=' + encodeURIComponent(u)]] : []),
+  ['directo', u => u],
+  ['codetabs', u => 'https://api.codetabs.com/v1/proxy/?quest=' + encodeURIComponent(u)],
+  ['allorigins', u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u)]
+];
+// check: valida lo recibido (un intermediario puede contestar 200 con una página de error)
+async function fetchOpen(url, { ms = 45000, check = null } = {}){
+  const ctls = [], fails = [];
+  const tries = PATHS().map(([name, make]) => (async () => {
+    const ctl = new AbortController(); ctls.push(ctl);
+    const timer = setTimeout(() => ctl.abort(), ms);
     try {
-      const r = await fetch(PROXIES[i](url), { signal: ctl.signal });
+      const r = await fetch(make(url), { signal: ctl.signal });
       if (!r.ok) throw new Error('error ' + r.status);
       const buf = await r.arrayBuffer();
-      PROXY_OK[host] = i; return buf;
-    } catch (e) { console.warn('descarga', i ? 'por intermediario ' + i : 'directa', e.message); }
-    finally { clearTimeout(timer); }
-  }
-  throw new Error('no se pudo descargar');
+      if (check) check(buf);
+      return buf;
+    } catch (e) {
+      const why = e.name === 'AbortError' ? 'no respondió' : /fetch|network|load failed/i.test(e.message) ? 'bloqueado' : e.message;
+      fails.push(name + ': ' + why); throw e;
+    } finally { clearTimeout(timer); }
+  })());
+  try { const buf = await Promise.any(tries); ctls.forEach(c => c.abort()); return buf; }
+  catch (e) { throw new Error(fails.join(' · ')); }
 }
+const isJSON = buf => JSON.parse(new TextDecoder().decode(buf));
+const isZip = buf => { const u = new Uint8Array(buf, 0, 2); if (u[0] !== 0x50 || u[1] !== 0x4b) throw new Error('no llegó un EPUB'); };
+const isText = buf => { if (/^\s*<(!doctype|html)/i.test(new TextDecoder().decode(buf.slice(0, 200)))) throw new Error('llegó una página web'); };
 const GUT = { q: '', lang: '', results: [], next: null, busy: false, err: '', add: {} };
 function openGutenberg(){
   if (!GUT.lang) GUT.lang = BOOK?.lang || (S.lastGutLang || 'en');
@@ -1203,9 +1218,9 @@ async function gutSearch(more = false){
   GUT.busy = true; GUT.err = ''; if (!more) { GUT.results = []; GUT.next = null; } drawGut();
   try {
     const url = more && GUT.next ? GUT.next : `https://gutendex.com/books/?languages=${GUT.lang}` + (GUT.q ? '&search=' + encodeURIComponent(GUT.q) : '');
-    const data = JSON.parse(new TextDecoder().decode(await fetchOpen(url, 30000)));
+    const data = isJSON(await fetchOpen(url, { ms: 60000, check: isJSON }));
     GUT.results.push(...(data.results || [])); GUT.next = data.next || null;
-  } catch (e) { GUT.err = 'No se pudo buscar en Gutenberg (' + e.message + '). Revisa la conexión o intenta más tarde.'; }
+  } catch (e) { GUT.err = e.message; }
   GUT.busy = false; drawGut();
 }
 const gutAuthor = b => (b.authors || []).map(a => a.name.replace(/^([^,]+),\s*(.+)$/, '$2 $1')).join(', ');
@@ -1217,11 +1232,11 @@ async function gutAdd(b){
   for (const [url, kind] of [[epub, 'epub'], [txt, 'txt']]) {
     if (!url || parsed) continue;
     try {
-      const buf = await fetchOpen(url);
+      const buf = await fetchOpen(url, { check: kind === 'epub' ? isZip : isText });
       parsed = kind === 'epub' ? await parseEpub(new File([buf], b.title + '.epub')) : parseText(new TextDecoder().decode(buf), b.title);
     } catch (e) { err = e.message; }
   }
-  if (!parsed) { GUT.add[b.id] = 'err'; console.warn('Gutenberg', b.id, err); drawGut(); return; }
+  if (!parsed) { GUT.add[b.id] = 'err'; GUT.addErr = GUT.addErr || {}; GUT.addErr[b.id] = err; drawGut(); return; }
   parsed.title = b.title; parsed.author = gutAuthor(b) || parsed.author;
   const l = (b.languages || [])[0]; if (LANGS[l]) parsed.lang = l;
   const meta = await saveNewBook(parsed);
@@ -1242,14 +1257,16 @@ function drawGut(){
     d.innerHTML = `<div class="cov" style="overflow:hidden">${cover ? `<img src="${esc(cover)}" alt="" style="width:100%;height:100%;object-fit:cover" loading="lazy">` : '📖'}</div>
       <div class="info"><h3 style="white-space:normal">${esc(b.title)}</h3><div class="meta">${esc(gutAuthor(b))}</div>
       <div class="meta">${(b.languages || []).map(l => esc(LANGS[l]?.name || l)).join(', ')} · ${(b.download_count || 0).toLocaleString('es')} descargas</div>
-      ${st === 'err' ? `<div class="fix">El navegador no pudo descargarlo. <a href="https://www.gutenberg.org/ebooks/${b.id}" target="_blank" rel="noopener">Ábrelo en Gutenberg</a>, descarga el «EPUB3» y ábrelo con 📂 en la biblioteca.</div>` : ''}</div>
+      ${st === 'err' ? `<div class="fix">El navegador no pudo descargarlo (${esc(GUT.addErr?.[b.id] || '')}). <a href="https://www.gutenberg.org/ebooks/${b.id}" target="_blank" rel="noopener">Ábrelo en Gutenberg</a>, descarga el «EPUB3» y ábrelo con 📂 en la biblioteca.</div>` : ''}</div>
       <div style="display:flex;flex-direction:column;gap:6px">${st === 'busy' ? '<span class="busy">descargando…</span>' : st && st !== 'err' ? '<button class="btn" data-open>Leer</button>' : `<button class="btn" data-add>${st === 'err' ? 'Reintentar' : 'Agregar'}</button>`}</div>`;
     d.querySelector('[data-add]')?.addEventListener('click', () => gutAdd(b));
     d.querySelector('[data-open]')?.addEventListener('click', () => openBookPanel(st, true));
     list.appendChild(d);
   }
   if (GUT.busy) list.insertAdjacentHTML('beforeend', '<p class="busy" style="text-align:center">Buscando…</p>');
-  else if (GUT.err) list.insertAdjacentHTML('beforeend', `<p class="fix">${esc(GUT.err)}</p>`);
+  else if (GUT.err) list.insertAdjacentHTML('beforeend', `<div class="fix"><b>No se pudo buscar en Gutenberg.</b><div class="small">${esc(GUT.err)}</div>
+    <p style="margin:6px 0">${S.proxy ? 'Revisa que la dirección de tu intermediario (⚙ Ajustes) esté bien.' : 'Los intermediarios gratuitos a veces fallan. Para que funcione siempre, crea tu propio intermediario (gratis, 5 minutos): ⚙ Ajustes → Gutenberg.'}</p>
+    <a href="https://www.gutenberg.org/ebooks/search/?query=${encodeURIComponent(GUT.q)}" target="_blank" rel="noopener">Buscar en gutenberg.org</a>: descarga el «EPUB3» y ábrelo con 📂 en la biblioteca.</div>`);
   else if (!GUT.results.length) list.insertAdjacentHTML('beforeend', '<p class="small" style="text-align:center">No se encontraron libros.</p>');
   else if (GUT.next) { list.insertAdjacentHTML('beforeend', '<div class="row" style="justify-content:center"><button class="btn sec" id="gMore">Más resultados</button></div>'); $('gMore').onclick = () => gutSearch(true); }
   const go = () => { GUT.q = $('gQ').value.trim(); gutSearch(); };
@@ -1382,6 +1399,16 @@ function openSettings(){
       <div class="field"><label>Velocidad: <b id="rateV">${S.rate}</b></label><input type="range" id="rRate" min="0.5" max="1.4" step="0.05" value="${S.rate}" style="width:100%"></div>
       <label class="check"><input type="checkbox" id="cSay" ${S.autoSpeakWord ? 'checked' : ''}><span>Decir la palabra al tocarla (si no está leyendo)</span></label>
       <button class="btn sec" id="vTest">🔊 Probar</button></div>
+    <div class="box"><h3>Gutenberg: tu intermediario (opcional)</h3>
+      <p class="small">El navegador no deja que una página descargue libros de otro sitio si ese sitio no lo autoriza, y los intermediarios gratuitos a veces fallan. Con uno propio funciona siempre: es gratis y toma unos 5 minutos.</p>
+      <ol class="small" style="padding-left:18px;margin:6px 0">
+        <li>Crea una cuenta gratis en <a href="https://dash.cloudflare.com/sign-up" target="_blank" rel="noopener">Cloudflare</a>.</li>
+        <li>En <b>Workers &amp; Pages</b> → <b>Create</b> → <b>Create Worker</b> (el «Hello World»), ponle un nombre y aprieta <b>Deploy</b>.</li>
+        <li><b>Edit code</b>: borra lo que hay, pega el código de <a href="gutenberg-proxy.js" target="_blank">gutenberg-proxy.js</a> y aprieta <b>Deploy</b>.</li>
+        <li>Copia la dirección del worker (algo como https://leamos.tu-nombre.workers.dev) y pégala aquí.</li>
+      </ol>
+      <div class="field"><label>Dirección del intermediario</label><input type="text" id="gProxy" value="${esc(S.proxy || '')}" placeholder="https://….workers.dev"></div>
+      <div class="small">Solo deja pasar gutenberg.org y gutendex.com. Por él pasan las direcciones de los libros, nunca tu clave.</div></div>
     <div class="box"><h3>Lectura</h3>
       <div class="field"><label>Tamaño de la letra: <b id="fsV">${S.fs}</b> px</label><input type="range" id="rFs" min="15" max="30" step="1" value="${S.fs}" style="width:100%"></div>
       <div class="field"><label>Tema</label>${sel('sTheme', [['', 'Automático'], ['light', 'Claro'], ['dark', 'Oscuro']], S.theme)}</div></div>
@@ -1402,6 +1429,7 @@ function openSettings(){
   on('vTest', 'click', () => { speechSynthesis.cancel(); speechSynthesis.speak(utter(lang === 'ko' ? '안녕하세요. 오늘은 무슨 책을 읽을까요?' : lang === 'en' ? 'Hello! What shall we read today?' : LANGS[lang].native, lang)); });
   on('rFs', 'input', e => { S.fs = +e.target.value; $('fsV').textContent = S.fs; applyLook(); saveSet(); });
   on('sTheme', 'change', e => { S.theme = e.target.value; applyLook(); saveSet(); });
+  on('gProxy', 'change', e => { let v = e.target.value.trim(); if (v && !/^https?:\/\//.test(v)) v = 'https://' + v; S.proxy = v; e.target.value = v; saveSet(); });
 }
 
 /* ---------- botones y teclado ---------- */
