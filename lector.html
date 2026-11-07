@@ -101,7 +101,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-07 · 6';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-07 · 7';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -360,15 +360,19 @@ async function parseEpub(file){
 }
 // texto pegado o .txt: párrafos separados por líneas en blanco; capítulos si hay líneas como «Capítulo 3», «Chapter 3» o «제3장»
 function parseText(text, title){
+  text = text.replace(/^\uFEFF/, '');
   const lines = text.replace(/\r/g, '').split(/\n\s*\n|\n(?=\s*(?:(?:chapter|cap[ií]tulo|part|parte)\s+\S|제\s*\d+\s*[장화부]))/i).map(s => s.replace(/\s+/g, ' ').trim()).filter(Boolean);
   const lang = guessLang(text.slice(0, 3000));
   const isHead = s => s.length < 80 && (/^(chapter|cap[ií]tulo|part|parte)\s+([\dIVXLC]+|one|two|three|uno|dos|tres)\b/i.test(s) || /^제\s*\d+\s*[장화부]/.test(s) || /^(\d+|[IVXLC]+)\.?$/.test(s));
   const chapters = []; let cur = null;
   for (const t of lines) {
-    if (isHead(t) || !cur || cur.blocks.length >= 80) { cur = { title: isHead(t) ? t : `Parte ${chapters.length + 1}`, blocks: [] }; chapters.push(cur); if (isHead(t)) { cur.blocks.push({ t, h: true }); continue; } }
+    if (isHead(t) || !cur || cur.blocks.length >= 80) { cur = { title: isHead(t) ? t : chapters.length ? `Parte ${chapters.length + 1}` : 'Inicio', blocks: [] }; chapters.push(cur); if (isHead(t)) { cur.blocks.push({ t, h: true }); continue; } }
     cur.blocks.push({ t, h: false });
   }
   chapters.forEach(c => c.blocks = splitLong(c.blocks, lang));
+  // un índice al principio («CHAPTER I», «CHAPTER II»…) deja capítulos con solo el título: se quitan
+  const full = chapters.filter(c => c.blocks.some(b => !b.h));
+  if (full.length) chapters.splice(0, chapters.length, ...full);
   return { title: title || (lines[0] || 'Texto').slice(0, 50), author: '', lang, chapters };
 }
 // los libros de Project Gutenberg traen la licencia al principio y al final: se deja solo el texto del libro
@@ -1229,7 +1233,8 @@ const gutAuthor = b => (b.authors || []).map(a => a.name.replace(/^([^,]+),\s*(.
 function gutUrls(b){
   const id = b.id, f = b.formats || {}, c = `https://www.gutenberg.org/cache/epub/${id}/pg${id}`;
   const epub = f['application/epub+zip'], txt = Object.entries(f).find(([k]) => k.startsWith('text/plain'))?.[1];
-  return [[c + '-images-3.epub', 'epub'], [c + '-images.epub', 'epub'], [c + '.epub', 'epub'], ...(epub ? [[epub, 'epub']] : []), [c + '.txt', 'txt'], ...(txt ? [[txt, 'txt']] : [])];
+  // primero el texto plano: una sola dirección, sin redireccionamiento; el EPUB queda de respaldo
+  return [[c + '.txt', 'txt'], [c + '-images-3.epub', 'epub'], [c + '.epub', 'epub'], ...(txt ? [[txt, 'txt']] : []), ...(epub ? [[epub, 'epub']] : [])];
 }
 async function gutAdd(b){
   GUT.add[b.id] = 'busy'; GUT.addErr = GUT.addErr || {}; drawGut();
@@ -1237,9 +1242,9 @@ async function gutAdd(b){
   const urls = gutUrls(b);
   for (let i = 0; i < urls.length && !parsed; i++) {
     const [url, kind] = urls[i];
-    GUT.addStep = GUT.addStep || {}; GUT.addStep[b.id] = `${i + 1}/${urls.length}`; drawGut();
+    GUT.addStep = GUT.addStep || {}; GUT.addStep[b.id] = `${kind === 'txt' ? 'texto' : 'EPUB'} (intento ${i + 1} de ${urls.length})`; drawGut();
     try {
-      const buf = await fetchOpen(url, { ms: 40000, check: kind === 'epub' ? isZip : isText });
+      const buf = await fetchOpen(url, { ms: 20000, check: kind === 'epub' ? isZip : isText });
       parsed = kind === 'epub' ? await parseEpub(new File([buf], b.title + '.epub')) : parseText(new TextDecoder().decode(buf), b.title);
     } catch (e) { err = e.message; console.warn('Gutenberg', url, e.message); }
   }
