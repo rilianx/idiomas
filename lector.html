@@ -101,7 +101,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-07 · 9';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-07 · 10';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -1261,7 +1261,7 @@ async function gutAdd(b){
       parsed = kind === 'epub' ? await parseEpub(new File([buf], b.title + '.epub')) : parseText(new TextDecoder().decode(buf), b.title);
     } catch (e) { err = e.message; console.warn('Gutenberg', url, e.message); }
   }
-  if (!parsed) { GUT.add[b.id] = 'err'; GUT.addErr[b.id] = err; if (!S.proxy) GUT.manual = true; drawGut(); return; }
+  if (!parsed) { GUT.add[b.id] = 'err'; GUT.addErr[b.id] = err; drawGut(); return; }
   parsed.title = b.title; parsed.author = gutAuthor(b) || parsed.author;
   const l = (b.languages || [])[0]; if (LANGS[l]) parsed.lang = l;
   const meta = await saveNewBook(parsed);
@@ -1272,6 +1272,7 @@ function drawGut(){
   if (PANEL !== 'gut') return;
   const pb = $('pbody');
   pb.innerHTML = `<div class="box"><p class="small" style="margin-top:0">Más de 70 000 libros de dominio público (clásicos). Hay muchísimos en inglés, francés, alemán, italiano y portugués; en coreano, japonés y chino hay muy pocos.</p>
+    ${S.proxy ? '' : '<p class="small">Para agregar un libro: <b>⬇ Descargar</b> y después <b>📂 Abrirlo</b> (elige el archivo recién bajado). Para que se agreguen solos con un toque, crea tu propio intermediario en ⚙ Ajustes → Gutenberg.</p>'}
     <div class="field"><label>Idioma</label><select id="gLang">${Object.entries(LANGS).map(([k, L]) => `<option value="${k}" ${k === GUT.lang ? 'selected' : ''}>${L.native} · ${L.name}</option>`).join('')}</select></div>
     <div class="row" style="margin-top:0"><input class="search" id="gQ" placeholder="Título o autor (vacío: los más leídos)" value="${esc(GUT.q)}" style="flex:1;min-width:0"><button class="btn" id="gGo">Buscar</button></div></div>
     <div id="gList"></div>`;
@@ -1286,7 +1287,7 @@ function drawGut(){
         <p style="margin:6px 0">Bájalo tú y ábrelo aquí (el navegador no deja que la página lo haga sola):</p>
         <div class="row" style="margin-top:4px"><a class="btn sec" style="text-decoration:none" href="https://www.gutenberg.org/cache/epub/${b.id}/pg${b.id}-images-3.epub" target="_blank" rel="noopener">1. ⬇ Descargar</a><button class="btn" data-pick>2. 📂 Ya lo bajé: abrirlo</button></div>
         ${S.proxy ? '' : '<p class="small" style="margin:6px 0 0">Para que se agregue solo, crea tu propio intermediario (⚙ Ajustes → Gutenberg).</p>'}</div>` : ''}</div>
-      <div style="display:flex;flex-direction:column;gap:6px">${!st && GUT.manual ? `<a class="btn sec" style="text-decoration:none;text-align:center" href="https://www.gutenberg.org/cache/epub/${b.id}/pg${b.id}-images-3.epub" target="_blank" rel="noopener">⬇ Descargar</a><button class="btn" data-pick>📂 Abrirlo</button><button class="chip" data-add>intentar solo</button>` : st === 'busy' ? `<span class="busy">descargando… ${esc(GUT.addStep?.[b.id] || '')}</span>` : st && st !== 'err' ? '<button class="btn" data-open>Leer</button>' : `<button class="btn" data-add>${st === 'err' ? 'Reintentar' : 'Agregar'}</button>`}</div>`;
+      <div style="display:flex;flex-direction:column;gap:6px">${!st && !S.proxy ? `<a class="btn sec" style="text-decoration:none;text-align:center" href="https://www.gutenberg.org/cache/epub/${b.id}/pg${b.id}-images-3.epub" target="_blank" rel="noopener">⬇ Descargar</a><button class="btn" data-pick>📂 Abrirlo</button><button class="chip" data-add>intentar solo</button>` : st === 'busy' ? `<span class="busy">descargando… ${esc(GUT.addStep?.[b.id] || '')}</span>` : st && st !== 'err' ? '<button class="btn" data-open>Leer</button>' : `<button class="btn" data-add>${st === 'err' ? 'Reintentar' : 'Agregar'}</button>`}</div>`;
     d.querySelector('[data-add]')?.addEventListener('click', () => gutAdd(b));
     d.querySelector('[data-pick]')?.addEventListener('click', () => { PICK_FOR = b; $('file').click(); });
     d.querySelector('[data-open]')?.addEventListener('click', () => openBookPanel(st, true));
