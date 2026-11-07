@@ -87,6 +87,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
 </footer>
 <button class="btn" id="selbtn" hidden>🎓 Explicar</button>
 <input type="file" id="file" accept=".epub,.txt,application/epub+zip,text/plain" hidden>
+<input type="file" id="fileImp" hidden>
 <div id="veil" hidden></div>
 <div id="sheet" hidden></div>
 <div id="panel" hidden><div class="ph"><h2 id="ptitle"></h2><button class="ib" id="pclose">✕</button></div><div class="pb" id="pbody"></div></div>
@@ -102,7 +103,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-07 · 15';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-07 · 18';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -240,6 +241,12 @@ const dbAll = s => idb(s, 'readonly', o => o.getAll());
 const dbPrefix = (s, p) => idb(s, 'readonly', o => o.getAll(IDBKeyRange.bound(p, p + '￿')));
 const dbDelPrefix = (s, p) => idb(s, 'readwrite', o => o.delete(IDBKeyRange.bound(p, p + '￿')));
 const dbDel = (s, k) => idb(s, 'readwrite', o => o.delete(k));
+// muchos registros en una sola transacción (importar un libro)
+async function dbPutMany(store, list){
+  if (!list?.length) return;
+  const d = await db();
+  return new Promise((ok, ko) => { const tx = d.transaction(store, 'readwrite'), o = tx.objectStore(store); for (const r of list) o.put(r); tx.oncomplete = () => ok(); tx.onerror = () => ko(tx.error); });
+}
 
 /* ---------- abrir un EPUB (es un zip: se descomprime con lo que trae el navegador) ---------- */
 async function unzip(buf){
@@ -490,8 +497,10 @@ function partialSentences(raw){
 }
 const ENTRY = obj({ query: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, meaning: STR, explanation: STR, hanja: STR, irregular: STR,
   conjugations: { type: 'array', items: obj({ form: STR, label: STR }) }, examples: { type: 'array', items: obj({ text: STR, es: STR }) }, in_context: STR });
-const PHRASE_SCHEMA = obj({ translation: STR, literal: STR, explanation: STR, grammar: { type: 'array', items: obj({ point: STR, explanation: STR }) },
-  words: { type: 'array', items: obj({ t: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, explanation: STR }) }, tip: STR });
+// explicar un trozo, en dos pedidos a la vez: la traducción (modelo barato, rápida) y la explicación (modelo caro);
+// el palabra por palabra sale del análisis del párrafo, que ya está
+const PHRASE_TR_SCHEMA = obj({ translation: STR, literal: STR });
+const PHRASE_EX_SCHEMA = obj({ explanation: STR, grammar: { type: 'array', items: obj({ point: STR, explanation: STR }) }, tip: STR });
 const LEVEL_SCHEMA = obj({ cefr: { type: 'string', enum: CEFR }, range: STR, summary: STR, vocabulary: STR, grammar: STR, advice: STR });
 const SIMP_SCHEMA = obj({ paras: { type: 'array', items: STR } });
 
@@ -541,16 +550,22 @@ function defSystem(lang){
     'Sé exacto: no inventes formas ni significados.'
   ].join('\n');
 }
-function phraseSystem(lang){
+function phraseTrSystem(lang){
   const L = LANGS[lang];
   return [
-    `Eres un profesor experto y cercano de ${L.name} para hispanohablantes. El estudiante está leyendo un libro y seleccionó un trozo porque necesita entenderlo de verdad: no te limites a traducir.`,
-    'Recibes las oraciones anteriores (contexto), la oración completa y el trozo seleccionado. Explica el trozo seleccionado dentro de esa oración. Escribe en español:',
-    '- translation: traducción natural del trozo (y, si es solo parte de una oración, de qué manera encaja en ella).',
-    `- literal: traducción literal que muestre la estructura del ${L.name}.`,
+    `Eres traductor de ${L.name} al español. Un estudiante que lee un libro seleccionó un trozo. Recibes las oraciones anteriores (contexto), la oración completa y el trozo.`,
+    '- translation: traducción natural al español del trozo, en ese contexto (si es solo parte de una oración, que se entienda cómo encaja).',
+    `- literal: traducción literal, palabra por palabra, que muestre la estructura del ${L.name}.`,
+    'Sé exacto.'
+  ].join('\n');
+}
+function phraseExSystem(lang){
+  const L = LANGS[lang];
+  return [
+    `Eres un profesor experto y cercano de ${L.name} para hispanohablantes. El estudiante está leyendo un libro y seleccionó un trozo porque necesita entenderlo de verdad. La traducción ya la ve aparte: no la repitas; explica.`,
+    'Recibes las oraciones anteriores (contexto), la oración completa y el trozo seleccionado. Escribe en español:',
     '- explanation: la explicación principal, detallada y en prosa (2 a 4 párrafos cortos separados por una línea en blanco): qué quiere decir aquí, cómo se construye, las formas gramaticales importantes y por qué se usan, registro, matices, expresiones idiomáticas, lo que en español se diría distinto y cualquier dato cultural útil. Adáptate al nivel del lector.',
     '- grammar: los 1 a 3 puntos gramaticales clave, cada uno con cómo se forma y otro ejemplo distinto.',
-    '- words: cada palabra del trozo en orden (sin signos): t tal como aparece; lemma, su forma de diccionario; pos; gloss, el significado aquí (1 a 4 palabras); explanation, en una frase, qué forma tiene y qué aporta.',
     '- tip: un consejo práctico breve (o "").',
     'Sé exacto y no inventes.'
   ].join('\n');
@@ -641,9 +656,13 @@ function pump(){ while (running < 3 && QUEUE.length) startJob(QUEUE.shift()); }
 const buildSents = (job, list) => job.sents.map((text, i) => ({ text, es: list[i]?.es, tokens: (list[i]?.t || []).map(parseTok).filter(Boolean) }));
 // si la API dice «demasiados pedidos» o «saturado» (pasa al pedir varios a la vez), se reintenta en vez de fallar
 async function askRetry(...args){
+  const tries = args[4]?.retries ?? 3;
   for (let a = 0; ; a++) {
     try { return await ask(...args); }
-    catch (e) { if (a >= 3 || e instanceof NoKey || !/demasiados|saturado|429|529/.test(e.message)) throw e; await new Promise(r => setTimeout(r, 1500 * (a + 1) ** 2)); }
+    catch (e) {
+      if (a >= tries || e instanceof NoKey || !/demasiados|saturado|429|529/.test(e.message)) throw e;
+      await new Promise(r => setTimeout(r, Math.min(30000, 1500 * (a + 1) ** 2) + Math.random() * 1500));
+    }
   }
 }
 // el párrafo se pide en grupos de 2 o 3 oraciones, todos a la vez: una palabra del final de un párrafo largo
@@ -775,7 +794,7 @@ function renderReader(){
   if (CH.missing) {
     const ph = document.createElement('div'); ph.className = 'placeholder';
     const job = SIMP_JOBS.get(`${BOOK.id}|${CH.ver}`);
-    ph.innerHTML = job ? `<p>Simplificando el libro a ${esc(CH.ver)}… (${job.doneCh}/${job.totalCh} capítulos)</p><p class="small">Este capítulo aparecerá cuando esté listo.</p>` :
+    ph.innerHTML = job ? `<p>Simplificando el libro a ${esc(CH.ver)}… (${job.doneCh}/${job.totalCh} capítulos · ${job.doneParts}/${job.totalParts} partes)</p><p class="small">Este capítulo aparecerá cuando esté listo.</p>` :
       `<p>Este capítulo todavía no está simplificado a ${esc(lvLabel(BOOK.lang, CH.ver))}.</p><div class="row" style="justify-content:center"><button class="btn" id="simpNow">Simplificar este capítulo</button><button class="btn sec" id="seeOrig">Leer el original</button></div>`;
     bk.appendChild(ph);
     v.appendChild(bk);
@@ -1037,7 +1056,7 @@ async function openWord(w){
   let { tok, p, si } = info;
   peek(info);
   SHEET = { kind: 'word', tok, p, si, off: w.dataset.o, busy: false, err: '', ctx: '' };
-  showSheet();
+  showSheet(); refreshSheet();
   if (!tok.lemma) {   // primero el análisis del párrafo (rápido), después la explicación
     SHEET.busy = 'ana'; refreshSheet();
     const rec = await ensureAna(p, true); if (SHEET?.off !== w.dataset.o) return;
@@ -1106,19 +1125,16 @@ function refreshSheet(){
     if (SHEET.kind === 'word') h += `<button class="btn sec" id="sFrom">▶ Leer desde aquí</button>`;
     h += `<button class="btn sec" id="sClose">Cerrar</button></div>`;
   } else if (SHEET.kind === 'phrase') {
-    const x = SHEET.x;
+    const x = SHEET.x || {}, words = x.words?.length ? x.words : phraseWords(SHEET);
     h += `<div class="phrase" lang="${lang}">${esc(SHEET.text)} <button class="spk" data-say="${esc(SHEET.text)}">🔊</button></div>`;
-    if (SHEET.busy) h += `<div class="busy" style="margin-top:8px">El profesor (${esc(mname(S.defModel))}) está explicando…</div>`;
     if (SHEET.err) h += `<div class="fix">${esc(SHEET.err)}</div>`;
-    if (x) {
-      h += `<div class="gloss"><b>${esc(x.translation)}</b></div>${x.literal ? `<div class="small">Literal: ${esc(x.literal)}</div>` : ''}`;
-      if (x.explanation) h += `<div class="sec-t">Explicación</div>${paras(x.explanation)}`;
-      if (x.grammar?.length) h += `<div class="sec-t">Gramática</div>${x.grammar.map(g => `<div class="gram"><b lang="${lang}">${esc(g.point)}</b><div>${esc(g.explanation)}</div></div>`).join('')}`;
-      if (x.words?.length) h += `<details style="margin-top:8px"><summary class="sec-t" style="cursor:pointer;display:list-item">Palabra por palabra</summary><div class="conj">${x.words.map(w => `<span lang="${lang}" data-say="${esc(w.t)}" style="cursor:pointer">${esc(w.t)}</span><span><b>${esc(w.gloss)}</b>${w.lemma && w.lemma !== w.t ? ` <span lang="${lang}">(${esc(w.lemma)})</span>` : ''} · ${esc(w.explanation)}</span>`).join('')}</div></details>`;
-      if (x.tip) h += `<div class="form">💡 ${esc(x.tip)}</div>`;
-    }
+    h += x.translation ? `<div class="gloss"><b>${esc(x.translation)}</b></div>${x.literal ? `<div class="small">Literal: ${esc(x.literal)}</div>` : ''}` : SHEET.busyTr ? '<div class="busy" style="margin-top:8px">Traduciendo…</div>' : '';
+    if (x.explanation || SHEET.busyEx) h += `<div class="sec-t">Explicación</div>${paras(x.explanation || '')}${SHEET.busyEx ? `<div class="busy">El profesor (${esc(mname(S.defModel))}) está explicando…</div>` : ''}`;
+    if (x.grammar?.length) h += `<div class="sec-t">Gramática</div>${x.grammar.map(g => `<div class="gram"><b lang="${lang}">${esc(g.point)}</b><div>${esc(g.explanation)}</div></div>`).join('')}`;
+    if (x.tip) h += `<div class="form">💡 ${esc(x.tip)}</div>`;
+    if (words.length) h += `<details style="margin-top:8px"><summary class="sec-t" style="cursor:pointer;display:list-item">Palabra por palabra</summary><div class="conj">${words.map(w => `<span lang="${lang}" data-say="${esc(w.t)}" style="cursor:pointer">${esc(w.t)}</span><span><b>${esc(w.gloss)}</b>${w.lemma && w.lemma.toLowerCase() !== w.t.toLowerCase() ? ` <span lang="${lang}">(${esc(w.lemma)})</span>` : ''}${w.form || w.explanation ? ' · ' + esc(w.form || w.explanation) : ''}</span>`).join('')}</div></details>`;
     if (SHEET.saved) h += `<div class="small" style="margin-top:8px">Explicación guardada (no se volvió a pedir).</div>`;
-    h += `<div class="row">${x && !SHEET.busy ? '<button class="btn sec" id="sAgain">Explicar de nuevo</button>' : ''}<button class="btn sec" id="sClose">Cerrar</button></div>`;
+    h += `<div class="row">${!SHEET.busyTr && !SHEET.busyEx ? '<button class="btn sec" id="sAgain">Explicar de nuevo</button>' : ''}<button class="btn sec" id="sClose">Cerrar</button></div>`;
   }
   sh.innerHTML = h;
   sh.querySelectorAll('[data-say]').forEach(b => b.onclick = () => { if ('speechSynthesis' in window) { speechSynthesis.cancel(); speechSynthesis.speak(utter(b.dataset.say, lang, 0.85)); } });
@@ -1154,23 +1170,45 @@ async function explainPhrase(sel, again = false){
   hideTip();
   // las oraciones seleccionadas no suben al pasar (pediste ayuda con ellas)
   const [a, b] = p < p2 || (p === p2 && si <= si2) ? [[p, si], [p2, si2]] : [[p2, si2], [p, si]];
-  const whole = [];
+  const whole = [], range = [];
   for (let pp = a[0]; pp <= b[0]; pp++) for (let ss = pp === a[0] ? a[1] : 0; ss <= (pp === b[0] ? b[1] : CH.sents[pp].length - 1); ss++) {
-    whole.push(sentText(pp, ss).trim());
+    whole.push(sentText(pp, ss).trim()); range.push([pp, ss]);
     const rec = ANA.get(anaKey(pp)); if (rec) { rec.seenEs[ss] = true; dbPut('ana', rec); }
   }
-  SHEET = { kind: 'phrase', text, busy: false, err: '', x: null, key: `${anaKey(a[0])}|f|${a[1]}|${text}`, args: sel };
-  showSheet();
+  SHEET = { kind: 'phrase', text, err: '', x: {}, key: `${anaKey(a[0])}|f|${a[1]}|${text}`, args: sel, range, busyTr: false, busyEx: false };
+  showSheet(); refreshSheet();
   const sh = SHEET, saved = !again && await dbGet('expl', sh.key).catch(() => null);
+  // el palabra por palabra sale del análisis de los párrafos (si falta, se pide; es el modelo barato)
+  for (const pp of new Set(range.map(r => r[0]))) if (!ANA.has(anaKey(pp))) ensureAna(pp, true).then(() => { if (SHEET === sh) refreshSheet(); });
   if (saved) { sh.x = saved.x; sh.saved = saved.date; refreshSheet(); return; }
-  sh.busy = true; refreshSheet();
-  try {
-    const lang = BOOK.lang;
-    const user = `LIBRO: «${BOOK.title}»\nNIVEL DEL LECTOR: ${myLevel(lang)}\n` + (prevSentences(a[0], a[1]) ? `ORACIONES ANTERIORES: ${prevSentences(a[0], a[1])}\n` : '') + `ORACIÓN COMPLETA: «${whole.join(' ')}»\nTROZO SELECCIONADO: «${text}»`;
-    sh.x = await ask(S.defModel, phraseSystem(lang), user, PHRASE_SCHEMA, { effort: 'low', maxTokens: 14000, ms: 150000, kind: 'explain' });
-    dbPut('expl', { k: sh.key, x: sh.x, date: Date.now() });
-  } catch (e) { sh.err = 'No se pudo explicar: ' + errText(e); }
-  sh.busy = false; if (SHEET === sh) refreshSheet();
+  sh.busyTr = sh.busyEx = true; refreshSheet();
+  const lang = BOOK.lang;
+  const user = `LIBRO: «${BOOK.title}»\nNIVEL DEL LECTOR: ${myLevel(lang)}\n` + (prevSentences(a[0], a[1]) ? `ORACIONES ANTERIORES: ${prevSentences(a[0], a[1])}\n` : '') + `ORACIÓN COMPLETA: «${whole.join(' ')}»\nTROZO SELECCIONADO: «${text}»`;
+  let last = 0;
+  const redraw = (force) => { if (SHEET !== sh) return; if (!force && Date.now() - last < 200) return; last = Date.now(); refreshSheet(); };
+  const errs = [];
+  await Promise.all([
+    // la traducción: rápida, con el modelo barato
+    askRetry(S.chatModel, phraseTrSystem(lang), user, PHRASE_TR_SCHEMA, { effort: 'low', maxTokens: 3000, ms: 60000, kind: 'read', fast: true,
+      onText: raw => { sh.x.translation = partialString(raw, 'translation'); sh.x.literal = partialString(raw, 'literal'); redraw(); } })
+      .then(o => Object.assign(sh.x, o), e => errs.push('traducción: ' + errText(e))).finally(() => { sh.busyTr = false; redraw(true); }),
+    // la explicación: el modelo caro, y se va mostrando mientras la escribe
+    askRetry(S.defModel, phraseExSystem(lang), user, PHRASE_EX_SCHEMA, { effort: 'low', maxTokens: 12000, ms: 150000, kind: 'explain',
+      onText: raw => { sh.x.explanation = partialString(raw, 'explanation'); redraw(); } })
+      .then(o => Object.assign(sh.x, o), e => errs.push('explicación: ' + errText(e))).finally(() => { sh.busyEx = false; redraw(true); })
+  ]);
+  if (errs.length) sh.err = 'No se pudo: ' + errs.join(' · ');
+  else dbPut('expl', { k: sh.key, x: { translation: sh.x.translation, literal: sh.x.literal, explanation: sh.x.explanation, grammar: sh.x.grammar || [], tip: sh.x.tip || '' }, date: Date.now() });
+  redraw(true);
+}
+// las palabras del trozo, con lo que ya dice el análisis de cada párrafo
+function phraseWords(sh){
+  const sel = sh.text.toLowerCase(), out = []; let from = 0;
+  for (const [pp, ss] of sh.range) {
+    const st = ANA.get(anaKey(pp))?.sents?.[ss]; if (!st) continue;
+    for (const t of st.tokens) { const i = sel.indexOf(t.t.toLowerCase(), from); if (i >= 0) { out.push(t); from = i + t.t.length; } }
+  }
+  return out;
 }
 
 /* ---------- estimar el nivel del libro ---------- */
@@ -1203,11 +1241,14 @@ async function simplifyChunk(b, lvl, model, chunk, known){
   const user = `LIBRO: «${b.title}»${b.author ? ' de ' + b.author : ''}\nNIVEL: ${lvLabel(b.lang, lvl)}\n` + (known ? `PALABRAS QUE EL LECTOR YA CONOCE: ${known}\n` : '') +
     `\nPÁRRAFOS (${chunk.length}):\n` + chunk.map((t, i) => `[${i + 1}] ${t}`).join('\n\n');
   for (let attempt = 0; attempt < 2; attempt++) {
-    const out = await ask(model, simpSystem(b.lang, lvl), user, SIMP_SCHEMA, { effort: 'low', maxTokens: 20000, ms: 180000, kind: 'simplify' });
+    const out = await askRetry(model, simpSystem(b.lang, lvl), user, SIMP_SCHEMA, { effort: 'low', maxTokens: 20000, ms: 180000, kind: 'simplify', retries: 6 });
     const ps = (out.paras || []).map(s => String(s).trim());
     if (ps.length === chunk.length || attempt === 1) return chunk.map((orig, i) => ps[i] || orig);
   }
 }
+const SIMP_PAR = () => S.simpPar || 50;   // pedidos simultáneos al simplificar (⚙ Ajustes)
+// todos los trozos de todos los capítulos van a una sola fila, con hasta SIMP_PAR pedidos a la vez; los capítulos se
+// atienden en el orden pedido (el que estás leyendo primero) y cada uno se guarda apenas terminan sus trozos
 async function simplifyBook(b, lvl, model, only = null){
   const key = `${b.id}|${lvl}`;
   if (SIMP_JOBS.has(key)) return;
@@ -1215,26 +1256,45 @@ async function simplifyBook(b, lvl, model, only = null){
   b.versions[lvl].done = b.versions[lvl].done || [];
   const chs = (only || b.chapters.map((_, i) => i)).filter(i => !b.versions[lvl].done[i]);
   if (!chs.length) return;
-  const job = { doneCh: 0, totalCh: chs.length, err: '' };
+  const job = { doneCh: 0, totalCh: chs.length, doneParts: 0, totalParts: 0, failed: 0, err: '' };
   SIMP_JOBS.set(key, job);
   await dbPut('books', b); refreshViews();
-  const known = knownWordsHint(b.lang);
-  try {
-    for (const ch of chs) {
-      const rec = await dbGet('text', `${b.id}|${ch}`);
-      const chunks = []; let cur = [], len = 0;
-      rec.paras.forEach(t => { if (cur.length && (len + t.length > 2500 || cur.length >= 40)) { chunks.push(cur); cur = []; len = 0; } cur.push(t); len += t.length; });
-      if (cur.length) chunks.push(cur);
-      const results = new Array(chunks.length); let idx = 0;
-      await Promise.all([0, 1, 2].map(async () => { while (idx < chunks.length) { const i = idx++; results[i] = await simplifyChunk(b, lvl, model, chunks[i], known); } }));
-      await dbPut('simp', { k: `${b.id}|${lvl}|${ch}`, paras: results.flat(), heads: rec.heads });
-      const fresh = await dbGet('books', b.id) || b; fresh.versions[lvl] = fresh.versions[lvl] || { model, done: [] }; fresh.versions[lvl].done[ch] = true; await dbPut('books', fresh);
-      if (BOOK?.id === b.id) BOOK.versions = fresh.versions;
-      Object.assign(b, { versions: fresh.versions });
-      job.doneCh++; refreshViews();
-      if (BOOK?.id === b.id && CH?.ver === lvl && CH.ch === ch && CH.missing) await openChapter(lvl, ch, CUR.p, 0);
+  const known = knownWordsHint(b.lang), tasks = [], chapters = new Map();
+  for (const ch of chs) {
+    const rec = await dbGet('text', `${b.id}|${ch}`); if (!rec) continue;
+    const chunks = []; let cur = [], len = 0;
+    rec.paras.forEach(t => { if (cur.length && (len + t.length > 2500 || cur.length >= 40)) { chunks.push(cur); cur = []; len = 0; } cur.push(t); len += t.length; });
+    if (cur.length) chunks.push(cur);
+    chapters.set(ch, { rec, results: new Array(chunks.length), left: chunks.length, failed: false });
+    chunks.forEach((chunk, i) => tasks.push({ ch, i, chunk }));
+  }
+  job.totalParts = tasks.length; refreshViews();
+  const chapterDone = async ch => {
+    const c = chapters.get(ch);
+    await dbPut('simp', { k: `${b.id}|${lvl}|${ch}`, paras: c.results.flat(), heads: c.rec.heads });
+    const fresh = await dbGet('books', b.id) || b; fresh.versions[lvl] = fresh.versions[lvl] || { model, done: [] }; fresh.versions[lvl].done[ch] = true; await dbPut('books', fresh);
+    if (BOOK?.id === b.id) BOOK.versions = fresh.versions;
+    Object.assign(b, { versions: fresh.versions });
+    job.doneCh++; refreshViews();
+    if (BOOK?.id === b.id && CH?.ver === lvl && CH.ch === ch && CH.missing) await openChapter(lvl, ch, CUR.p, 0);
+  };
+  let next = 0, stopAll = false;
+  const worker = async () => {
+    while (next < tasks.length && !stopAll) {
+      const t = tasks[next++], c = chapters.get(t.ch);
+      if (c.failed) continue;
+      try { c.results[t.i] = await simplifyChunk(b, lvl, model, t.chunk, known); }
+      catch (e) {
+        c.failed = true; job.failed++; job.err = errText(e);
+        if (e instanceof NoKey || /clave|permiso|saldo/.test(e.message)) stopAll = true;   // no tiene sentido seguir
+        continue;
+      }
+      job.doneParts++;
+      if (--c.left === 0) await chapterDone(t.ch); else if (job.doneParts % 5 === 0) refreshViews();
     }
-  } catch (e) { job.err = errText(e); toast('Se detuvo la simplificación: ' + job.err); }
+  };
+  await Promise.all(Array.from({ length: Math.min(SIMP_PAR(), tasks.length) }, worker));
+  if (job.failed) toast(`${job.failed} capítulo${job.failed > 1 ? 's' : ''} no se pudo simplificar (${job.err}). Puedes reintentar con «Completar».`);
   SIMP_JOBS.delete(key); refreshViews();
 }
 function refreshViews(){
@@ -1305,7 +1365,7 @@ async function drawLibrary(){
       <p><b>Toca</b> una palabra para ver qué significa ahí; <b>tócala dos veces</b> para la explicación detallada; <b>selecciona</b> un trozo para que te lo expliquen. Las palabras nuevas aparecen subrayadas: si las lees sin pedir ayuda, suben; si pides la traducción, bajan (como en Anki).</p>
       <p>También puede <b>estimar el nivel</b> del libro y <b>simplificarlo</b> al tuyo.</p>
       ${noKey ? `<p class="fix">Para traducir hace falta tu clave de la API (la misma de «Hablemos»): ⚙ Ajustes.</p>` : ''}
-      <div class="row"><button class="btn" id="lOpen">📂 Abrir EPUB o .txt</button><button class="btn sec" id="lPaste">📋 Pegar texto</button><button class="btn sec" id="lGut">🔎 Buscar en Gutenberg</button>
+      <div class="row"><button class="btn" id="lOpen">📂 Abrir EPUB o .txt</button><button class="btn sec" id="lPaste">📋 Pegar texto</button><button class="btn sec" id="lGut">🔎 Buscar en Gutenberg</button><button class="btn sec" id="lImp">📥 Importar .leamos</button>${books.length ? '<button class="btn sec" id="lExpAll">📦 Exportar todo</button>' : ''}
       <button class="btn sec" id="lSampleKo">Probar en coreano</button><button class="btn sec" id="lSampleEn">Probar en inglés</button></div>
     </div>
     <div id="lBooks">${books.length ? '' : '<p class="small" style="text-align:center">Todavía no hay libros.</p>'}</div>
@@ -1319,7 +1379,7 @@ async function drawLibrary(){
     d.innerHTML = `<div class="cov">${b.lang === 'ko' ? '한' : b.lang === 'ja' ? '日' : b.lang === 'zh' ? '中' : '📖'}</div>
       <div class="info"><h3>${esc(b.title)}</h3><div class="meta">${esc(b.author || '')}</div>
       <div><span class="badge">${esc(LANGS[b.lang]?.name || b.lang)}</span>${b.level ? `<span class="badge lv">nivel ${esc(b.level.cefr)}</span>` : ''}${Object.keys(b.versions || {}).map(v => `<span class="badge">${esc(v)} simplificado</span>`).join('')}
-      ${jobs.map(([k, j]) => `<span class="small">simplificando ${j.doneCh}/${j.totalCh}…</span>`).join('')}</div>
+      ${jobs.map(([k, j]) => `<span class="small">simplificando ${j.doneParts}/${j.totalParts} partes…</span>`).join('')}</div>
       <div class="bar"><i style="width:${pct}%"></i></div></div>
       <div style="display:flex;flex-direction:column;gap:6px"><button class="btn" data-read>Leer</button><button class="btn sec" data-info>Nivel…</button></div>`;
     d.querySelector('[data-read]').onclick = () => openBook(b.id);
@@ -1329,12 +1389,15 @@ async function drawLibrary(){
   $('lOpen').onclick = () => $('file').click();
   $('lPaste').onclick = openPaste;
   $('lGut').onclick = openGutenberg;
+  $('lImp').onclick = () => $('fileImp').click();
+  if ($('lExpAll')) $('lExpAll').onclick = () => exportBooks(books.map(b => b.id), 'Leamos ' + today());
   $('lSampleKo').onclick = () => importText(SAMPLES.ko.text, SAMPLES.ko.title);
   $('lSampleEn').onclick = () => importText(SAMPLES.en.text, SAMPLES.en.title);
 }
 // abrir un archivo (con 📂 o arrastrándolo). gut: el libro de Gutenberg que se bajó a mano (se usan sus datos)
 let PICK_FOR = null;
 async function importFile(f, gut = null){
+  if (/\.(leamos|json)$/i.test(f.name)) return importBackup(f);
   toast('Abriendo «' + f.name + '»…');
   try {
     const parsed = /\.txt$/i.test(f.name) || f.type === 'text/plain' ? parseText(await f.text(), f.name.replace(/\.txt$/i, '')) : await parseEpub(f);
@@ -1351,10 +1414,85 @@ addEventListener('dragover', e => { if ([...(e.dataTransfer?.items || [])].some(
 addEventListener('drop', e => {
   const f = e.dataTransfer?.files?.[0]; if (!f) return;
   e.preventDefault();
-  if (!/\.(epub|txt)$/i.test(f.name)) { toast('Solo archivos EPUB o .txt.'); return; }
+  if (!/\.(epub|txt|leamos|json)$/i.test(f.name)) { toast('Solo archivos EPUB, .txt o .leamos.'); return; }
   if (BOOK) closeBook();
   importFile(f);
 });
+/* ---------- exportar e importar (llevar libros a otro aparato) ----------
+   Un archivo .leamos (JSON comprimido con gzip) con cada libro completo: texto, versiones simplificadas, traducciones,
+   explicaciones guardadas y posición; y el diccionario de sus idiomas, con el avance de cada palabra. */
+const safeName = t => String(t).replace(/[\\/:*?"<>|]+/g, ' ').trim().slice(0, 80) || 'libro';
+function downloadBlob(blob, name){
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+}
+async function exportBooks(ids, name){
+  toast('Preparando el archivo…'); flushDict();
+  try {
+    const books = [];
+    for (const id of ids) {
+      const meta = await dbGet('books', id); if (!meta) continue;
+      const p = id + '|', bk = { meta };
+      for (const st of ['text', 'simp', 'ana', 'expl']) bk[st] = await dbPrefix(st, p);
+      books.push(bk);
+    }
+    const dicts = {};
+    for (const l of new Set(books.map(b => b.meta.lang))) dicts[l] = load(dictKey(l), {});
+    let blob = new Blob([JSON.stringify({ app: 'leamos', format: 1, version: APP_VERSION, date: Date.now(), books, dicts })], { type: 'application/json' });
+    if ('CompressionStream' in window) blob = await new Response(blob.stream().pipeThrough(new CompressionStream('gzip'))).blob();
+    downloadBlob(blob, safeName(name) + '.leamos');
+    toast(`Listo: ${books.length} libro${books.length === 1 ? '' : 's'} (${(blob.size / 1e6).toFixed(1).replace('.', ',')} MB). Ábrelo en el otro aparato con «📥 Importar .leamos».`);
+  } catch (e) { console.error(e); toast('No se pudo exportar: ' + e.message); }
+}
+// junta un diccionario importado con el de aquí: de cada palabra queda la versión con actividad más reciente,
+// completada con lo que traiga la otra (definición detallada, formas vistas)
+function mergeDict(lang, incoming){
+  const mine = lang === DLANG ? DICT : load(dictKey(lang), {});
+  const act = x => Math.max(x.srs?.last || 0, x.srs?.lapsedAt || 0, x.last || 0, x.knownAt || 0, x.added || 0);
+  let n = 0;
+  for (const [l, e] of Object.entries(incoming || {})) {
+    const cur = mine[l];
+    if (!cur) { mine[l] = e; n++; if (lang === DLANG) touch(l); continue; }
+    const [base, other] = act(e) > act(cur) ? [e, cur] : [cur, e];
+    const m = { ...other, ...base, forms: { ...(other.forms || {}), ...(base.forms || {}) } };
+    if (!base.detailed && other.detailed) for (const f of ['meaning', 'explanation', 'hanja', 'irregular', 'conjugations', 'examples', 'detailed']) m[f] = other[f];
+    if (JSON.stringify(m) !== JSON.stringify(cur)) { mine[l] = m; n++; if (lang === DLANG) touch(l); }
+  }
+  if (lang === DLANG) flushDict(); else save(dictKey(lang), mine);
+  return n;
+}
+async function importBackup(f){
+  toast('Importando «' + f.name + '»…');
+  try {
+    const buf = await f.arrayBuffer(), u = new Uint8Array(buf, 0, 2);
+    const txt = u[0] === 0x1f && u[1] === 0x8b ? await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).text() : new TextDecoder().decode(buf);
+    const data = JSON.parse(txt);
+    if (data.app !== 'leamos') throw new Error('no es un archivo de Leamos');
+    const STORES = ['text', 'simp', 'ana', 'expl'];
+    let n = 0, last = null;
+    for (const bk of data.books || []) {
+      let id = bk.meta.id;
+      if (await dbGet('books', id)) {
+        if (confirm(`«${bk.meta.title}» ya está en tu biblioteca. ¿Reemplazarlo por el del archivo?\n(Cancelar: agregarlo como copia)`)) {
+          if (BOOK?.id === id) closeBook();
+          for (const st of STORES) await dbDelPrefix(st, id + '|');
+        } else {
+          const nid = uid();
+          for (const st of STORES) bk[st] = (bk[st] || []).map(r => ({ ...r, k: nid + r.k.slice(id.length) }));
+          bk.meta = { ...bk.meta, id: nid, title: bk.meta.title + ' (copia)' }; id = nid;
+        }
+      }
+      for (const st of STORES) await dbPutMany(st, bk[st]);
+      await dbPut('books', bk.meta); n++; last = id;
+    }
+    let words = 0;
+    for (const [lang, d] of Object.entries(data.dicts || {})) words += mergeDict(lang, d);
+    toast(`Importado: ${n} libro${n === 1 ? '' : 's'}${words ? ` y ${words} palabra${words === 1 ? '' : 's'} del diccionario` : ''}.`);
+    if (!BOOK) drawLibrary();
+  } catch (e) { console.error(e); toast('No se pudo importar: ' + e.message); }
+}
+$('fileImp').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) importBackup(f); };
+
 async function importText(text, title){
   const b = await saveNewBook(parseText(text, title));
   openBookPanel(b.id, true);
@@ -1526,14 +1664,16 @@ async function drawBook(id){
   h += `</div><div class="box"><h3>Versión simplificada</h3>`;
   for (const [lvl, v] of vers) {
     const d = (v.done || []).filter(Boolean).length, job = SIMP_JOBS.get(`${id}|${lvl}`);
-    h += `<div class="prog"><b>${esc(lvLabel(lang, lvl))}</b> · ${d}/${b.chapters.length} capítulos · ${esc(mname(v.model))}${job ? ` · <span class="busy">simplificando (${job.doneCh}/${job.totalCh})…</span>` : ''}
-      <div class="bar"><i style="width:${100 * d / b.chapters.length}%"></i></div>
+    h += `<div class="prog"><b>${esc(lvLabel(lang, lvl))}</b> · ${d}/${b.chapters.length} capítulos · ${esc(mname(v.model))}${job ? ` · <span class="busy">simplificando: ${job.doneParts}/${job.totalParts} partes, ${SIMP_PAR()} a la vez…</span>` : ''}
+      <div class="bar"><i style="width:${job && job.totalParts ? 100 * job.doneParts / job.totalParts : 100 * d / b.chapters.length}%"></i></div>
       <div class="row" style="margin-top:6px"><button class="btn sec" data-readv="${lvl}">Leer ${esc(lvl)}</button>${d < b.chapters.length && !job ? `<button class="btn sec" data-cont="${lvl}">Completar</button>` : ''}<button class="btn sec" data-del="${lvl}">Borrar</button></div></div>`;
   }
   h += `<p class="small">Reescribe cada párrafo con vocabulario y gramática del nivel elegido, sin cambiar la historia. Los párrafos quedan alineados con el original (en la lectura, ¶ muestra el original). Puedes simplificar todo el libro o ir capítulo por capítulo mientras lees.</p>
     <div class="field"><label>Nivel</label><select id="bTgt">${CEFR.map(c => `<option value="${c}" ${c === tgt ? 'selected' : ''}>${esc(lvLabel(lang, c))}</option>`).join('')}</select></div>
     <div class="field"><label>Modelo</label><select id="bModel">${SIMP_MODELS.map(([m, l]) => `<option value="${m}" ${m === S.simpModel ? 'selected' : ''}>${esc(l)} · todo el libro ${cost(m)}</option>`).join('')}</select></div>
     <div class="row"><button class="btn" id="bSimpAll">Simplificar todo el libro</button><button class="btn sec" id="bSimpRead">Simplificar mientras leo</button></div></div>
+    <div class="box"><h3>Llevar a otro aparato</h3><p class="small">Un archivo .leamos con el libro, sus versiones simplificadas, las traducciones y explicaciones ya pagadas, tu posición y tu diccionario de ${esc(LANGS[lang].name)}. En el otro aparato: biblioteca → «📥 Importar .leamos».</p>
+      <button class="btn sec" id="bExport">📦 Exportar este libro</button></div>
     <div class="box"><button class="btn sec" id="bDelete">🗑 Borrar el libro</button></div>`;
   $('pbody').innerHTML = h;
   $('bLang').onchange = async e => { b.lang = e.target.value; await dbPut('books', b); await dbDelPrefix('ana', b.id + '|'); await dbDelPrefix('expl', b.id + '|'); if (BOOK?.id === id) { BOOK.lang = b.lang; useDict(b.lang); ANA.clear(); } drawBook(id); };
@@ -1553,6 +1693,7 @@ async function drawBook(id){
     if (BOOK?.id === id) { BOOK.versions = b.versions; if (CH.ver === x.dataset.del) await openChapter('o', CH.ch, CUR.p, 0); }
     drawBook(id);
   });
+  $('bExport').onclick = () => exportBooks([id], b.title);
   $('bDelete').onclick = async () => {
     if (!confirm(`¿Borrar «${b.title}»? (tus palabras quedan en el diccionario)`)) return;
     if (BOOK?.id === id) closeBook();
@@ -1606,6 +1747,9 @@ function openSettings(){
       <div class="field"><label>Velocidad: <b id="rateV">${S.rate}</b></label><input type="range" id="rRate" min="0.5" max="1.4" step="0.05" value="${S.rate}" style="width:100%"></div>
       <label class="check"><input type="checkbox" id="cSay" ${S.autoSpeakWord ? 'checked' : ''}><span>Decir la palabra al tocarla (si no está leyendo)</span></label>
       <button class="btn sec" id="vTest">🔊 Probar</button></div>
+    <div class="box"><h3>Simplificar</h3>
+      <div class="field"><label>Pedidos simultáneos a la API</label><select id="sPar">${[5, 10, 20, 50, 100].map(n => `<option value="${n}" ${n === SIMP_PAR() ? 'selected' : ''}>${n}${n === 50 ? ' (por defecto)' : ''}</option>`).join('')}</select>
+      <div class="small">Más pedidos a la vez = el libro se simplifica antes. Si tu cuenta tiene un límite bajo de pedidos por minuto, la API rechaza algunos y la app los reintenta (más lento); si ves fallas, baja este número.</div></div></div>
     <div class="box"><h3>Gutenberg: tu intermediario (opcional)</h3>
       <p class="small">El navegador no deja que una página descargue libros de otro sitio si ese sitio no lo autoriza, y los intermediarios gratuitos a veces fallan. Con uno propio funciona siempre: es gratis y toma unos 5 minutos.</p>
       <ol class="small" style="padding-left:18px;margin:6px 0">
@@ -1630,6 +1774,7 @@ function openSettings(){
   on('mDef', 'change', e => { S.defModel = e.target.value; saveSet(); });
   on('cAuto', 'change', e => { S.autoAnalyze = e.target.checked; saveSet(); });
   on('cSilent', 'change', e => { S.silentRead = e.target.checked; saveSet(); });
+  on('sPar', 'change', e => { S.simpPar = +e.target.value; saveSet(); });
   for (const k of Object.keys(LANGS)) on('lv_' + k, 'change', e => { S.myLevel[k] = e.target.value; saveSet(); });
   on('vVoice', 'change', e => { S.voices[lang] = e.target.value; saveSet(); });
   on('rRate', 'input', e => { S.rate = +e.target.value; $('rateV').textContent = S.rate; saveSet(); });
