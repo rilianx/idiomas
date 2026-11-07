@@ -102,7 +102,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-07 · 12';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-07 · 13';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -450,8 +450,44 @@ function simpCost(chars, lang, model){
 }
 
 /* ---------- esquemas ---------- */
-const TOK = obj({ t: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, form: STR, cefr: { type: 'string', enum: [...CEFR, '-'] } });
-const ANA_SCHEMA = obj({ sentences: { type: 'array', items: obj({ es: STR, tokens: { type: 'array', items: TOK } }) } });
+// cada palabra llega como un texto compacto «palabra|lema|categoría|significado|forma|nivel» (la mitad de tokens que un objeto)
+const POS_CODE = { n: 'sustantivo', v: 'verbo', adj: 'adjetivo', adv: 'adverbio', pron: 'pronombre', num: 'número', part: 'partícula', prep: 'preposición', conj: 'conjunción', art: 'artículo', det: 'determinante', expr: 'expresión', prop: 'nombre propio', otro: 'otro' };
+// la traducción de cada oración (es) solo se pide si está activado 文
+const anaSchema = withEs => obj({ sentences: { type: 'array', items: obj({ t: { type: 'array', items: STR }, ...(withEs ? { es: STR } : {}) }) } });
+const TR_SCHEMA = obj({ es: { type: 'array', items: STR } });
+function parseTok(str){
+  const [t, l, p, g, f, c] = String(str).split('|').map(x => (x || '').trim());
+  if (!t || !/[\p{L}\p{N}]/u.test(t)) return null;
+  return { t, lemma: l || '', pos: POS_CODE[p] || POS_CODE[(p || '').toLowerCase()] || 'otro', gloss: g || '', form: f || '', cefr: CEFR.includes(c) ? c : '-' };
+}
+// lo que ya llegó de una respuesta que todavía se está escribiendo: [{ t: [textos completos], es }]
+function partialSentences(raw){
+  const out = []; let i = 0;
+  const str = j => {   // lee un texto JSON que empieza en raw[j] === '"'; devuelve [texto, fin] o null si está incompleto
+    let o = '';
+    for (let k = j + 1; k < raw.length; k++) {
+      const ch = raw[k];
+      if (ch === '"') return [o, k + 1];
+      if (ch === '\\') { const n = raw[k + 1]; if (n === undefined) return null; if (n === 'u') { const h = raw.substr(k + 2, 4); if (h.length < 4) return null; o += String.fromCharCode(parseInt(h, 16)); k += 5; } else { o += { n: '\n', t: '\t' }[n] ?? n; k++; } continue; }
+      o += ch;
+    }
+    return null;
+  };
+  while ((i = raw.indexOf('"t"', i)) >= 0) {
+    let j = raw.indexOf('[', i); if (j < 0) break;
+    const sent = { t: [] }; j++;
+    for (;;) {
+      while (j < raw.length && /[\s,]/.test(raw[j])) j++;
+      if (raw[j] !== '"') break;
+      const r = str(j); if (!r) break;
+      sent.t.push(r[0]); j = r[1];
+    }
+    const m = raw.slice(j).match(/^\s*\]\s*,\s*"es"\s*:\s*/);
+    if (m) { const r = str(j + m[0].length); if (r) sent.es = r[0]; }
+    out.push(sent); i = j;
+  }
+  return out;
+}
 const ENTRY = obj({ query: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, meaning: STR, explanation: STR, hanja: STR, irregular: STR,
   conjugations: { type: 'array', items: obj({ form: STR, label: STR }) }, examples: { type: 'array', items: obj({ text: STR, es: STR }) }, in_context: STR });
 const PHRASE_SCHEMA = obj({ translation: STR, literal: STR, explanation: STR, grammar: { type: 'array', items: obj({ point: STR, explanation: STR }) },
@@ -466,19 +502,22 @@ function lemmaRule(lang){
   if (lang === 'zh') return '- lemma: la palabra tal cual (en chino no hay conjugación).';
   return '- lemma: la forma de diccionario: verbos en infinitivo' + (lang === 'en' ? ' (sin "to")' : '') + ', sustantivos en singular, adjetivos en su forma básica (masculino singular), en minúsculas salvo nombres propios. Si la palabra es parte de una expresión o verbo con partícula (p. ej. "give up", "look forward to"), usa la expresión completa como lemma en cada palabra que la forma.';
 }
-function anaSystem(lang){
+function anaSystem(lang, withEs){
   const L = LANGS[lang];
+  const ex = { ko: '먹었다|먹다|v|comer|-었다: pasado|A1', ja: '食べました|食べる|v|comer|-ました: pasado cortés|A1', zh: '朋友|朋友|n|amigo||A1' }[lang] || 'went|go|v|fue|pasado de go|A1';
   return [
     `Eres profesor de ${L.name} para hispanohablantes. Analizas un párrafo de un libro para una app de lectura: el lector toca una palabra y ve qué significa en ese contexto.`,
     'Recibes las oraciones del párrafo, numeradas. Devuelve en sentences un elemento por oración, en el mismo orden y la misma cantidad:',
-    '- es: traducción natural al español de la oración, en el contexto del párrafo.',
-    '- tokens: todas las palabras de la oración en orden, sin omitir ninguna. t es el texto EXACTO de la palabra tal como aparece (mismas letras, mayúsculas y tildes), sin signos de puntuación; no incluyas los signos como tokens.' +
-      (lang === 'ko' ? ' En coreano, cada token es una palabra separada por espacios, con sus partículas y terminaciones pegadas (학교에서, 먹었다).' : '') +
+    '- t: todas las palabras de la oración en orden, sin omitir ninguna y sin signos de puntuación. Cada palabra es UN texto con 6 campos separados por "|": palabra|lema|categoría|significado|forma|nivel. Ejemplo: "' + ex + '". No uses "|" dentro de los campos.' +
+      (lang === 'ko' ? ' En coreano, cada palabra es lo que va entre espacios, con sus partículas y terminaciones pegadas (학교에서, 먹었다).' : '') +
       (CJK(lang) ? ' Separa el texto en palabras (no en caracteres sueltos, salvo que la palabra sea de un carácter).' : ''),
-    lemmaRule(lang),
-    '- gloss: el significado en español EN ESTE CONTEXTO, en 1 a 4 palabras.',
-    '- form: si la palabra no está en su forma básica, qué forma es, muy breve' + (lang === 'ko' ? ' (p. ej. "-았다: pasado", "에서: partícula de lugar (en)", "-고 싶다: querer hacer")' : ' (p. ej. "pasado de go", "plural", "3.ª persona del presente", "participio")') + '; "" si es la forma básica.',
-    '- cefr: el nivel del MCER (A1 a C2) en que normalmente se aprende esa palabra con ese sentido; "-" para nombres propios y números.',
+    '  · palabra: el texto EXACTO tal como aparece (mismas letras, mayúsculas y tildes).',
+    '  · ' + lemmaRule(lang).replace(/^- /, ''),
+    '  · categoría: uno de estos códigos: n (sustantivo), v (verbo), adj (adjetivo' + (lang === 'ko' ? ', incluidos los verbos descriptivos' : '') + '), adv, pron, num, part (partícula), prep, conj, art, det, expr (expresión), prop (nombre propio), otro.',
+    '  · significado: en español, EN ESTE CONTEXTO, 1 a 4 palabras.',
+    '  · forma: si no está en su forma básica, qué forma es, muy breve' + (lang === 'ko' ? ' (p. ej. "-았다: pasado", "에서: en (lugar)")' : ' (p. ej. "pasado de go", "plural", "participio")') + '; vacío si es la forma básica.',
+    '  · nivel: el nivel MCER (A1 a C2) en que normalmente se aprende esa palabra con ese sentido; "-" para nombres propios y números.',
+    ...(withEs ? ['- es: traducción natural al español de la oración, en el contexto del párrafo.'] : []),
     'Sé exacto y no inventes.'
   ].join('\n');
 }
@@ -579,41 +618,78 @@ async function openChapter(ver, ch, p = 0, s = 0){
 }
 
 /* ---------- analizar párrafos (modelo barato), con una cola ---------- */
-const INFLIGHT = new Map(), QUEUE = []; let running = 0;
+const INFLIGHT = new Map(), QUEUE = [], PARTIAL = new Map(); let running = 0;
 function ensureAna(p, urgent = false){
   if (!CH || CH.missing || p < 0 || p >= CH.paras.length) return Promise.resolve(null);
   const k = anaKey(p);
   if (ANA.has(k)) return Promise.resolve(ANA.get(k));
-  if (INFLIGHT.has(k)) { if (urgent) { const i = QUEUE.findIndex(j => j.k === k); if (i > 0) QUEUE.unshift(...QUEUE.splice(i, 1)); } return INFLIGHT.get(k).promise; }
+  const old = INFLIGHT.get(k);
+  if (old) { if (urgent && !old.started) { QUEUE.splice(QUEUE.indexOf(old), 1); startJob(old); } return old.promise; }
   let resolve; const promise = new Promise(r => resolve = r);
   const job = { k, p, text: CH.paras[p], sents: CH.sents[p].map(x => x.trim()), prev: CH.paras[p - 1] || '', book: BOOK, ver: CH.ver, ch: CH.ch, resolve, promise };
-  INFLIGHT.set(k, job);
-  if (urgent) QUEUE.unshift(job); else QUEUE.push(job);
-  pump(); markBusy(p, true);
+  INFLIGHT.set(k, job); markBusy(p, true);
+  // lo que pide el lector (una palabra tocada) parte de inmediato, aunque ya haya 3 en curso
+  if (urgent) startJob(job); else { QUEUE.push(job); pump(); }
   return promise;
 }
-async function pump(){
-  while (running < 3 && QUEUE.length) {
-    const job = QUEUE.shift(); running++;
-    analyze(job).then(rec => job.resolve(rec), e => { console.warn('análisis:', e.message); job.resolve(null); if (e instanceof NoKey || /clave|saldo|permiso/.test(e.message)) toast('No se pudo traducir: ' + errText(e)); })
-      .finally(() => { running--; INFLIGHT.delete(job.k); onAnalyzed(job); pump(); });
-  }
+function startJob(job){
+  job.started = true; running++;
+  analyze(job).then(rec => job.resolve(rec), e => { console.warn('análisis:', e.message); job.resolve(null); if (e instanceof NoKey || /clave|saldo|permiso/.test(e.message)) toast('No se pudo traducir: ' + errText(e)); })
+    .finally(() => { running--; INFLIGHT.delete(job.k); PARTIAL.delete(job.k); onAnalyzed(job); pump(); });
 }
+function pump(){ while (running < 3 && QUEUE.length) startJob(QUEUE.shift()); }
+const buildSents = (job, list) => job.sents.map((text, i) => ({ text, es: list[i]?.es, tokens: (list[i]?.t || []).map(parseTok).filter(Boolean) }));
 async function analyze(job){
   const stored = await dbGet('ana', job.k);
   if (stored) { ANA.set(job.k, stored); return stored; }
-  const lang = job.book.lang;
+  const lang = job.book.lang, withEs = !!S.showTr;
   const user = `LIBRO: «${job.book.title}»${job.book.author ? ' de ' + job.book.author : ''}\nNIVEL DEL LECTOR: ${myLevel(lang)}\n` +
     (job.prev ? `PÁRRAFO ANTERIOR (solo contexto): ${job.prev.slice(-500)}\n` : '') + `\nORACIONES:\n` + job.sents.map((s, i) => `${i + 1}. ${s}`).join('\n');
-  const out = await ask(S.chatModel, anaSystem(lang), user, ANA_SCHEMA, { effort: 'low', maxTokens: 12000, ms: 90000, kind: 'read', fast: true });
-  const rec = { k: job.k, sents: job.sents.map((text, i) => ({ text, es: out.sentences?.[i]?.es || '', tokens: (out.sentences?.[i]?.tokens || []).filter(t => t.t) })), done: [], seenEs: [] };
+  // se lee mientras se escribe: las palabras de las primeras oraciones se pueden tocar antes de que termine
+  let last = 0;
+  const onText = raw => {
+    if (Date.now() - last < 250) return; last = Date.now();
+    PARTIAL.set(job.k, { k: job.k, sents: buildSents(job, partialSentences(raw)), partial: true });
+    onPartial(job);
+  };
+  const out = await ask(S.chatModel, anaSystem(lang, withEs), user, anaSchema(withEs), { effort: 'low', maxTokens: 12000, ms: 90000, kind: 'read', fast: true, onText });
+  const rec = { k: job.k, sents: buildSents(job, out.sentences || []), done: [], seenEs: [] };
   await dbPut('ana', rec); ANA.set(job.k, rec);
   return rec;
 }
-function onAnalyzed(job){
-  if (!CH || job.book.id !== BOOK?.id || job.ver !== CH.ver || job.ch !== CH.ch) return;
+const sameChapter = job => CH && job.book.id === BOOK?.id && job.ver === CH.ver && job.ch === CH.ch;
+function onPartial(job){
+  if (!sameChapter(job)) return;
   rerenderPara(job.p);
+  // si el lector espera el significado de una palabra de este párrafo y ya llegó, se muestra
+  if (TIP_WAIT && TIP_WAIT.p === job.p) {
+    const nw = findWord(TIP_WAIT.p, TIP_WAIT.si, TIP_WAIT.off);
+    if (nw && TOKS.get(nw)?.tok.lemma) { TIP_WAIT = null; showTip(nw); }
+  }
+}
+function onAnalyzed(job){
+  if (!sameChapter(job)) return;
+  rerenderPara(job.p);
+  if (TIP_WAIT && TIP_WAIT.p === job.p) {
+    const w = findWord(TIP_WAIT.p, TIP_WAIT.si, TIP_WAIT.off); TIP_WAIT = null;
+    if (w && TOKS.get(w)?.tok.lemma) showTip(w); else if (TIP_EL) { const t = $('tip'); if (t) t.innerHTML = ANA.has(job.k) ? 'sin traducción' : 'no se pudo traducir'; }
+  }
   if (job.p === CUR.p) showTr();
+}
+// la traducción de las oraciones de un párrafo, cuando se activa 文 y el párrafo se analizó sin ella
+const TR_INFLIGHT = new Set();
+async function ensureTr(p){
+  const k = anaKey(p), rec = ANA.get(k);
+  if (!rec || TR_INFLIGHT.has(k)) return;
+  TR_INFLIGHT.add(k);
+  try {
+    const out = await ask(S.chatModel, `Traduce al español, de forma natural, cada oración numerada de un libro en ${LANGS[BOOK.lang].name}, en el contexto del párrafo. Devuelve en es una traducción por oración, en el mismo orden y la misma cantidad.`,
+      rec.sents.map((x, i) => `${i + 1}. ${x.text}`).join('\n'), TR_SCHEMA, { effort: 'low', maxTokens: 4000, ms: 60000, kind: 'read', fast: true });
+    rec.sents.forEach((x, i) => { x.es = out.es?.[i] || ''; });
+    await dbPut('ana', rec);
+  } catch (e) { rec.sents.forEach(x => { if (x.es === undefined) x.es = ''; }); toast('No se pudo traducir la oración: ' + errText(e)); }
+  TR_INFLIGHT.delete(k);
+  if (p === CUR.p) showTr();
 }
 function prefetch(){
   if (!S.autoAnalyze || !CH || CH.missing) return;
@@ -667,7 +743,7 @@ function renderReader(){
 }
 function paraEl(p){
   const el = document.createElement(CH.heads.has(p) ? 'h3' : 'p'); el.className = 'para'; el.dataset.p = p;
-  const rec = ANA.get(anaKey(p));
+  const rec = ANA.get(anaKey(p)) || PARTIAL.get(anaKey(p));
   CH.sents[p].forEach((st, si) => {
     const sp = document.createElement('span'); sp.className = 's'; sp.dataset.s = si;
     if (p === CUR.p && si === CUR.s) sp.classList.add('cur');
@@ -839,8 +915,9 @@ async function showTr(){
   if (S.showTr) {
     const rec = ANA.get(anaKey(CUR.p));
     if (rec) { rec.seenEs[CUR.s] = true; dbPut('ana', rec); }
-    h += `<div class="lab">Traducción</div><p>${rec ? esc(rec.sents[CUR.s]?.es || '—') : '<span class="busy">traduciendo…</span>'}</p>`;
-    if (!rec) ensureAna(CUR.p, true);
+    const es = rec?.sents[CUR.s]?.es;
+    h += `<div class="lab">Traducción</div><p>${rec && es !== undefined ? esc(es || '—') : '<span class="busy">traduciendo…</span>'}</p>`;
+    if (!rec) ensureAna(CUR.p, true); else if (es === undefined) ensureTr(CUR.p);
   }
   if (SHOW_ORIG && CH.ver !== 'o') {
     const o = await dbGet('text', `${BOOK.id}|${CH.ch}`);
@@ -850,7 +927,7 @@ async function showTr(){
 }
 
 /* ---------- tocar una palabra: significado; dos veces: explicación detallada ---------- */
-let TAP = { el: null, t: 0 }, TIP_EL = null, LAST_DBL = 0;
+let TAP = { el: null, t: 0 }, TIP_EL = null, TIP_WAIT = null, LAST_DBL = 0;
 document.addEventListener('click', ev => {
   const w = ev.target.closest?.('#book .w');
   if (!w) { if (!ev.target.closest?.('#selbtn')) hideTip(); return; }
@@ -873,14 +950,15 @@ function showTip(w){
   let tip = $('tip'); if (!tip) { tip = document.createElement('div'); tip.id = 'tip'; document.body.appendChild(tip); }
   TIP_EL = w;
   if (!PLAY) setFrom(p, si, +w.dataset.o);
+  TIP_WAIT = null;
   if (!tok.lemma) {
-    tip.innerHTML = `<span class="busy" style="color:inherit">traduciendo…</span>`;
-    const off = w.dataset.o;
-    ensureAna(p, true).then(rec => {
-      if (TIP_EL !== w) return;
-      const nw = findWord(p, si, off);
-      if (rec && nw && TOKS.get(nw)?.tok.lemma) showTip(nw); else { tip.innerHTML = rec ? 'sin traducción' : 'no se pudo traducir'; }
-    });
+    if (ANA.has(anaKey(p))) tip.innerHTML = 'sin traducción';
+    else {
+      // se muestra apenas llegue esa palabra (onPartial / onAnalyzed), aunque el resto del párrafo siga llegando
+      tip.innerHTML = `<span class="busy" style="color:inherit">traduciendo…</span>`;
+      TIP_WAIT = { p, si, off: w.dataset.o };
+      ensureAna(p, true);
+    }
   } else {
     peek(info);
     w.classList.add('peeked');
@@ -891,7 +969,7 @@ function showTip(w){
   }
   placeTip(tip, w);
 }
-function hideTip(){ TIP_EL = null; const t = $('tip'); if (t) t.hidden = true; }
+function hideTip(){ TIP_EL = null; TIP_WAIT = null; const t = $('tip'); if (t) t.hidden = true; }
 $('view').addEventListener('scroll', () => { hideTip(); hideSelBtn(); prefetchVisible(); }, { passive: true });
 
 /* ---------- ficha de la palabra ---------- */
