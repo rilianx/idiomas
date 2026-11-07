@@ -102,7 +102,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-07 · 11';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-07 · 12';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -216,12 +216,18 @@ function wordClass(tok){
 
 
 /* ---------- libros en IndexedDB ----------
-   books: datos del libro y posición · text: cada capítulo · simp: capítulos simplificados · ana: análisis de cada párrafo */
+   books: datos del libro y posición · text: cada capítulo · simp: capítulos simplificados · ana: análisis de cada párrafo
+   expl: explicaciones guardadas (para no volver a pagarlas) */
 let DBP = null;
 function db(){
   if (!DBP) DBP = new Promise((ok, ko) => {
-    const r = indexedDB.open('leamos', 1);
-    r.onupgradeneeded = () => { const d = r.result; d.createObjectStore('books', { keyPath: 'id' }); for (const s of ['text', 'simp', 'ana']) d.createObjectStore(s, { keyPath: 'k' }); };
+    // v2: expl guarda las explicaciones del modelo caro (palabra en su oración y trozos seleccionados)
+    const r = indexedDB.open('leamos', 2);
+    r.onupgradeneeded = () => {
+      const d = r.result, has = n => d.objectStoreNames.contains(n);
+      if (!has('books')) d.createObjectStore('books', { keyPath: 'id' });
+      for (const s of ['text', 'simp', 'ana', 'expl']) if (!has(s)) d.createObjectStore(s, { keyPath: 'k' });
+    };
     r.onsuccess = () => ok(r.result); r.onerror = () => ko(r.error);
   });
   return DBP;
@@ -913,10 +919,14 @@ async function openWord(w){
     if (!rec) { SHEET.err = 'No se pudo analizar el párrafo.'; refreshSheet(); return; }
   }
   if (S.autoSpeakWord) speakWord(tok.t);
+  const sh = SHEET, saved = await dbGet('expl', wordKey(sh)).catch(() => null);
+  if (SHEET !== sh) return;
+  if (saved) { sh.ctx = saved.ctx; sh.saved = saved.date; }
   const e = DICT[lemmaOf(tok)];
-  // la explicación detallada: se pide sola si la palabra no la tiene
-  if (!e?.detailed) explainWord(); else refreshSheet();
+  // la explicación detallada: se pide sola si la palabra no la tiene (ni hay una guardada para esta oración)
+  if (!e?.detailed && !saved) explainWord(); else refreshSheet();
 }
+const wordKey = sh => `${anaKey(sh.p)}|w|${sh.si}|${sh.off}`;
 async function explainWord(){
   const sh = SHEET; if (!sh) return;
   sh.busy = 'def'; sh.err = ''; refreshSheet();
@@ -930,7 +940,8 @@ async function explainWord(){
     Object.assign(e, { pos: x.pos || e.pos, gloss: e.gloss || x.gloss, meaning: x.meaning, explanation: x.explanation, hanja: x.hanja, irregular: x.irregular,
       conjugations: x.conjugations || [], examples: (x.examples || []).map(ex => ({ ko: ex.text, es: ex.es })), detailed: true });
     touch(l);
-    if (SHEET === sh) { sh.ctx = x.in_context || ''; if (l !== lemmaOf(sh.tok)) sh.tok = { ...sh.tok, lemma: l, pos: x.pos || sh.tok.pos }; }
+    if (x.in_context) dbPut('expl', { k: wordKey(sh), ctx: x.in_context, lemma: l, date: Date.now() });
+    if (SHEET === sh) { sh.ctx = x.in_context || ''; sh.saved = 0; if (l !== lemmaOf(sh.tok)) sh.tok = { ...sh.tok, lemma: l, pos: x.pos || sh.tok.pos }; }
   } catch (err) { if (SHEET === sh) sh.err = 'No se pudo explicar: ' + errText(err); }
   if (SHEET === sh) { sh.busy = false; refreshSheet(); }
 }
@@ -956,7 +967,7 @@ function refreshSheet(){
     if (pos || gloss) h += `<div class="gloss">${pos ? `<span class="pos">${esc(pos)}</span>` : ''}${esc(gloss || '')}${tok.cefr && tok.cefr !== '-' ? ` <span class="badge lv">${esc(tok.cefr)}</span>` : ''}</div>`;
     if (tok.form) h += `<div class="form">${esc(tok.form)}</div>`;
     h += srsHTML(e);
-    if (SHEET.ctx) h += `<div class="sec-t">En esta oración</div><div class="form">${esc(SHEET.ctx)}</div>`;
+    if (SHEET.ctx) h += `<div class="sec-t">En esta oración${SHEET.saved ? ' <span style="text-transform:none;letter-spacing:0">· guardada</span>' : ''}</div><div class="form">${esc(SHEET.ctx)}</div>`;
     if (e) h += entryHTML(e, { lang, extra: LANGS[lang]?.extra || 'Nota', sentence: true, maxForms: 12 });
     if (SHEET.busy === 'ana') h += `<div class="busy" style="margin-top:8px">Analizando el párrafo…</div>`;
     if (SHEET.busy === 'def') h += `<div class="busy" style="margin-top:8px">El profesor (${esc(mname(S.defModel))}) está explicando…</div>`;
@@ -978,12 +989,14 @@ function refreshSheet(){
       if (x.words?.length) h += `<details style="margin-top:8px"><summary class="sec-t" style="cursor:pointer;display:list-item">Palabra por palabra</summary><div class="conj">${x.words.map(w => `<span lang="${lang}" data-say="${esc(w.t)}" style="cursor:pointer">${esc(w.t)}</span><span><b>${esc(w.gloss)}</b>${w.lemma && w.lemma !== w.t ? ` <span lang="${lang}">(${esc(w.lemma)})</span>` : ''} · ${esc(w.explanation)}</span>`).join('')}</div></details>`;
       if (x.tip) h += `<div class="form">💡 ${esc(x.tip)}</div>`;
     }
-    h += `<div class="row"><button class="btn sec" id="sClose">Cerrar</button></div>`;
+    if (SHEET.saved) h += `<div class="small" style="margin-top:8px">Explicación guardada (no se volvió a pedir).</div>`;
+    h += `<div class="row">${x && !SHEET.busy ? '<button class="btn sec" id="sAgain">Explicar de nuevo</button>' : ''}<button class="btn sec" id="sClose">Cerrar</button></div>`;
   }
   sh.innerHTML = h;
   sh.querySelectorAll('[data-say]').forEach(b => b.onclick = () => { if ('speechSynthesis' in window) { speechSynthesis.cancel(); speechSynthesis.speak(utter(b.dataset.say, lang, 0.85)); } });
   $('sClose').onclick = closeSheet;
   if ($('sExplain')) $('sExplain').onclick = explainWord;
+  if ($('sAgain')) $('sAgain').onclick = () => explainPhrase(SHEET.args, true);
   if ($('sKnown')) $('sKnown').onclick = () => { const e = DICT[lemmaOf(SHEET.tok, lang)]; setKnown(e, scoreOf(e) < 70); refreshSheet(); if (PANEL === 'words') drawWords(); };
   if ($('sFrom')) $('sFrom').onclick = () => { const { p, si, off } = SHEET; closeSheet(); stop(); setFrom(p, si, +off); play(); };
 }
@@ -1008,7 +1021,8 @@ function checkSel(){
 function hideSelBtn(){ $('selbtn').hidden = true; }
 $('selbtn').addEventListener('pointerdown', e => e.preventDefault());
 $('selbtn').onclick = () => { const s = $('selbtn')._sel; hideSelBtn(); getSelection()?.removeAllRanges(); if (s) explainPhrase(s); };
-async function explainPhrase({ text, p, si, p2, si2 }){
+async function explainPhrase(sel, again = false){
+  const { text, p, si, p2, si2 } = sel;
   hideTip();
   // las oraciones seleccionadas no suben al pasar (pediste ayuda con ellas)
   const [a, b] = p < p2 || (p === p2 && si <= si2) ? [[p, si], [p2, si2]] : [[p2, si2], [p, si]];
@@ -1017,13 +1031,16 @@ async function explainPhrase({ text, p, si, p2, si2 }){
     whole.push(sentText(pp, ss).trim());
     const rec = ANA.get(anaKey(pp)); if (rec) { rec.seenEs[ss] = true; dbPut('ana', rec); }
   }
-  SHEET = { kind: 'phrase', text, busy: true, err: '', x: null };
-  showSheet(); refreshSheet();
-  const sh = SHEET;
+  SHEET = { kind: 'phrase', text, busy: false, err: '', x: null, key: `${anaKey(a[0])}|f|${a[1]}|${text}`, args: sel };
+  showSheet();
+  const sh = SHEET, saved = !again && await dbGet('expl', sh.key).catch(() => null);
+  if (saved) { sh.x = saved.x; sh.saved = saved.date; refreshSheet(); return; }
+  sh.busy = true; refreshSheet();
   try {
     const lang = BOOK.lang;
     const user = `LIBRO: «${BOOK.title}»\nNIVEL DEL LECTOR: ${myLevel(lang)}\n` + (prevSentences(a[0], a[1]) ? `ORACIONES ANTERIORES: ${prevSentences(a[0], a[1])}\n` : '') + `ORACIÓN COMPLETA: «${whole.join(' ')}»\nTROZO SELECCIONADO: «${text}»`;
     sh.x = await ask(S.defModel, phraseSystem(lang), user, PHRASE_SCHEMA, { effort: 'low', maxTokens: 14000, ms: 150000, kind: 'explain' });
+    dbPut('expl', { k: sh.key, x: sh.x, date: Date.now() });
   } catch (e) { sh.err = 'No se pudo explicar: ' + errText(e); }
   sh.busy = false; if (SHEET === sh) refreshSheet();
 }
@@ -1391,7 +1408,7 @@ async function drawBook(id){
     <div class="row"><button class="btn" id="bSimpAll">Simplificar todo el libro</button><button class="btn sec" id="bSimpRead">Simplificar mientras leo</button></div></div>
     <div class="box"><button class="btn sec" id="bDelete">🗑 Borrar el libro</button></div>`;
   $('pbody').innerHTML = h;
-  $('bLang').onchange = async e => { b.lang = e.target.value; await dbPut('books', b); await dbDelPrefix('ana', b.id + '|'); if (BOOK?.id === id) { BOOK.lang = b.lang; useDict(b.lang); ANA.clear(); } drawBook(id); };
+  $('bLang').onchange = async e => { b.lang = e.target.value; await dbPut('books', b); await dbDelPrefix('ana', b.id + '|'); await dbDelPrefix('expl', b.id + '|'); if (BOOK?.id === id) { BOOK.lang = b.lang; useDict(b.lang); ANA.clear(); } drawBook(id); };
   $('bMy').onchange = e => { S.myLevel[lang] = e.target.value; saveSet(); drawBook(id); };
   $('bRead').onclick = () => { closePanel(); openBook(id); };
   if ($('bReadO')) $('bReadO').onclick = () => { closePanel(); openBook(id, 'o'); };
@@ -1404,14 +1421,14 @@ async function drawBook(id){
   $('pbody').querySelectorAll('[data-cont]').forEach(x => x.onclick = () => simplifyBook(b, x.dataset.cont, b.versions[x.dataset.cont].model || S.simpModel));
   $('pbody').querySelectorAll('[data-del]').forEach(x => x.onclick = async () => {
     if (!confirm(`¿Borrar la versión ${x.dataset.del}?`)) return;
-    delete b.versions[x.dataset.del]; await dbPut('books', b); await dbDelPrefix('simp', `${id}|${x.dataset.del}|`); await dbDelPrefix('ana', `${id}|${x.dataset.del}|`);
+    delete b.versions[x.dataset.del]; await dbPut('books', b); await dbDelPrefix('simp', `${id}|${x.dataset.del}|`); await dbDelPrefix('ana', `${id}|${x.dataset.del}|`); await dbDelPrefix('expl', `${id}|${x.dataset.del}|`);
     if (BOOK?.id === id) { BOOK.versions = b.versions; if (CH.ver === x.dataset.del) await openChapter('o', CH.ch, CUR.p, 0); }
     drawBook(id);
   });
   $('bDelete').onclick = async () => {
     if (!confirm(`¿Borrar «${b.title}»? (tus palabras quedan en el diccionario)`)) return;
     if (BOOK?.id === id) closeBook();
-    for (const s of ['text', 'simp', 'ana']) await dbDelPrefix(s, id + '|');
+    for (const s of ['text', 'simp', 'ana', 'expl']) await dbDelPrefix(s, id + '|');
     await dbDel('books', id); closePanel();
   };
 }
