@@ -87,6 +87,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
 </footer>
 <button class="btn" id="selbtn" hidden>🎓 Explicar</button>
 <input type="file" id="file" accept=".epub,.txt,application/epub+zip,text/plain" hidden>
+<input type="file" id="fileImp" hidden>
 <div id="veil" hidden></div>
 <div id="sheet" hidden></div>
 <div id="panel" hidden><div class="ph"><h2 id="ptitle"></h2><button class="ib" id="pclose">✕</button></div><div class="pb" id="pbody"></div></div>
@@ -102,7 +103,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-07 · 17';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-07 · 18';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -240,6 +241,12 @@ const dbAll = s => idb(s, 'readonly', o => o.getAll());
 const dbPrefix = (s, p) => idb(s, 'readonly', o => o.getAll(IDBKeyRange.bound(p, p + '￿')));
 const dbDelPrefix = (s, p) => idb(s, 'readwrite', o => o.delete(IDBKeyRange.bound(p, p + '￿')));
 const dbDel = (s, k) => idb(s, 'readwrite', o => o.delete(k));
+// muchos registros en una sola transacción (importar un libro)
+async function dbPutMany(store, list){
+  if (!list?.length) return;
+  const d = await db();
+  return new Promise((ok, ko) => { const tx = d.transaction(store, 'readwrite'), o = tx.objectStore(store); for (const r of list) o.put(r); tx.oncomplete = () => ok(); tx.onerror = () => ko(tx.error); });
+}
 
 /* ---------- abrir un EPUB (es un zip: se descomprime con lo que trae el navegador) ---------- */
 async function unzip(buf){
@@ -1358,7 +1365,7 @@ async function drawLibrary(){
       <p><b>Toca</b> una palabra para ver qué significa ahí; <b>tócala dos veces</b> para la explicación detallada; <b>selecciona</b> un trozo para que te lo expliquen. Las palabras nuevas aparecen subrayadas: si las lees sin pedir ayuda, suben; si pides la traducción, bajan (como en Anki).</p>
       <p>También puede <b>estimar el nivel</b> del libro y <b>simplificarlo</b> al tuyo.</p>
       ${noKey ? `<p class="fix">Para traducir hace falta tu clave de la API (la misma de «Hablemos»): ⚙ Ajustes.</p>` : ''}
-      <div class="row"><button class="btn" id="lOpen">📂 Abrir EPUB o .txt</button><button class="btn sec" id="lPaste">📋 Pegar texto</button><button class="btn sec" id="lGut">🔎 Buscar en Gutenberg</button>
+      <div class="row"><button class="btn" id="lOpen">📂 Abrir EPUB o .txt</button><button class="btn sec" id="lPaste">📋 Pegar texto</button><button class="btn sec" id="lGut">🔎 Buscar en Gutenberg</button><button class="btn sec" id="lImp">📥 Importar .leamos</button>${books.length ? '<button class="btn sec" id="lExpAll">📦 Exportar todo</button>' : ''}
       <button class="btn sec" id="lSampleKo">Probar en coreano</button><button class="btn sec" id="lSampleEn">Probar en inglés</button></div>
     </div>
     <div id="lBooks">${books.length ? '' : '<p class="small" style="text-align:center">Todavía no hay libros.</p>'}</div>
@@ -1382,12 +1389,15 @@ async function drawLibrary(){
   $('lOpen').onclick = () => $('file').click();
   $('lPaste').onclick = openPaste;
   $('lGut').onclick = openGutenberg;
+  $('lImp').onclick = () => $('fileImp').click();
+  if ($('lExpAll')) $('lExpAll').onclick = () => exportBooks(books.map(b => b.id), 'Leamos ' + today());
   $('lSampleKo').onclick = () => importText(SAMPLES.ko.text, SAMPLES.ko.title);
   $('lSampleEn').onclick = () => importText(SAMPLES.en.text, SAMPLES.en.title);
 }
 // abrir un archivo (con 📂 o arrastrándolo). gut: el libro de Gutenberg que se bajó a mano (se usan sus datos)
 let PICK_FOR = null;
 async function importFile(f, gut = null){
+  if (/\.(leamos|json)$/i.test(f.name)) return importBackup(f);
   toast('Abriendo «' + f.name + '»…');
   try {
     const parsed = /\.txt$/i.test(f.name) || f.type === 'text/plain' ? parseText(await f.text(), f.name.replace(/\.txt$/i, '')) : await parseEpub(f);
@@ -1404,10 +1414,85 @@ addEventListener('dragover', e => { if ([...(e.dataTransfer?.items || [])].some(
 addEventListener('drop', e => {
   const f = e.dataTransfer?.files?.[0]; if (!f) return;
   e.preventDefault();
-  if (!/\.(epub|txt)$/i.test(f.name)) { toast('Solo archivos EPUB o .txt.'); return; }
+  if (!/\.(epub|txt|leamos|json)$/i.test(f.name)) { toast('Solo archivos EPUB, .txt o .leamos.'); return; }
   if (BOOK) closeBook();
   importFile(f);
 });
+/* ---------- exportar e importar (llevar libros a otro aparato) ----------
+   Un archivo .leamos (JSON comprimido con gzip) con cada libro completo: texto, versiones simplificadas, traducciones,
+   explicaciones guardadas y posición; y el diccionario de sus idiomas, con el avance de cada palabra. */
+const safeName = t => String(t).replace(/[\\/:*?"<>|]+/g, ' ').trim().slice(0, 80) || 'libro';
+function downloadBlob(blob, name){
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+}
+async function exportBooks(ids, name){
+  toast('Preparando el archivo…'); flushDict();
+  try {
+    const books = [];
+    for (const id of ids) {
+      const meta = await dbGet('books', id); if (!meta) continue;
+      const p = id + '|', bk = { meta };
+      for (const st of ['text', 'simp', 'ana', 'expl']) bk[st] = await dbPrefix(st, p);
+      books.push(bk);
+    }
+    const dicts = {};
+    for (const l of new Set(books.map(b => b.meta.lang))) dicts[l] = load(dictKey(l), {});
+    let blob = new Blob([JSON.stringify({ app: 'leamos', format: 1, version: APP_VERSION, date: Date.now(), books, dicts })], { type: 'application/json' });
+    if ('CompressionStream' in window) blob = await new Response(blob.stream().pipeThrough(new CompressionStream('gzip'))).blob();
+    downloadBlob(blob, safeName(name) + '.leamos');
+    toast(`Listo: ${books.length} libro${books.length === 1 ? '' : 's'} (${(blob.size / 1e6).toFixed(1).replace('.', ',')} MB). Ábrelo en el otro aparato con «📥 Importar .leamos».`);
+  } catch (e) { console.error(e); toast('No se pudo exportar: ' + e.message); }
+}
+// junta un diccionario importado con el de aquí: de cada palabra queda la versión con actividad más reciente,
+// completada con lo que traiga la otra (definición detallada, formas vistas)
+function mergeDict(lang, incoming){
+  const mine = lang === DLANG ? DICT : load(dictKey(lang), {});
+  const act = x => Math.max(x.srs?.last || 0, x.srs?.lapsedAt || 0, x.last || 0, x.knownAt || 0, x.added || 0);
+  let n = 0;
+  for (const [l, e] of Object.entries(incoming || {})) {
+    const cur = mine[l];
+    if (!cur) { mine[l] = e; n++; if (lang === DLANG) touch(l); continue; }
+    const [base, other] = act(e) > act(cur) ? [e, cur] : [cur, e];
+    const m = { ...other, ...base, forms: { ...(other.forms || {}), ...(base.forms || {}) } };
+    if (!base.detailed && other.detailed) for (const f of ['meaning', 'explanation', 'hanja', 'irregular', 'conjugations', 'examples', 'detailed']) m[f] = other[f];
+    if (JSON.stringify(m) !== JSON.stringify(cur)) { mine[l] = m; n++; if (lang === DLANG) touch(l); }
+  }
+  if (lang === DLANG) flushDict(); else save(dictKey(lang), mine);
+  return n;
+}
+async function importBackup(f){
+  toast('Importando «' + f.name + '»…');
+  try {
+    const buf = await f.arrayBuffer(), u = new Uint8Array(buf, 0, 2);
+    const txt = u[0] === 0x1f && u[1] === 0x8b ? await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).text() : new TextDecoder().decode(buf);
+    const data = JSON.parse(txt);
+    if (data.app !== 'leamos') throw new Error('no es un archivo de Leamos');
+    const STORES = ['text', 'simp', 'ana', 'expl'];
+    let n = 0, last = null;
+    for (const bk of data.books || []) {
+      let id = bk.meta.id;
+      if (await dbGet('books', id)) {
+        if (confirm(`«${bk.meta.title}» ya está en tu biblioteca. ¿Reemplazarlo por el del archivo?\n(Cancelar: agregarlo como copia)`)) {
+          if (BOOK?.id === id) closeBook();
+          for (const st of STORES) await dbDelPrefix(st, id + '|');
+        } else {
+          const nid = uid();
+          for (const st of STORES) bk[st] = (bk[st] || []).map(r => ({ ...r, k: nid + r.k.slice(id.length) }));
+          bk.meta = { ...bk.meta, id: nid, title: bk.meta.title + ' (copia)' }; id = nid;
+        }
+      }
+      for (const st of STORES) await dbPutMany(st, bk[st]);
+      await dbPut('books', bk.meta); n++; last = id;
+    }
+    let words = 0;
+    for (const [lang, d] of Object.entries(data.dicts || {})) words += mergeDict(lang, d);
+    toast(`Importado: ${n} libro${n === 1 ? '' : 's'}${words ? ` y ${words} palabra${words === 1 ? '' : 's'} del diccionario` : ''}.`);
+    if (!BOOK) drawLibrary();
+  } catch (e) { console.error(e); toast('No se pudo importar: ' + e.message); }
+}
+$('fileImp').onchange = e => { const f = e.target.files[0]; e.target.value = ''; if (f) importBackup(f); };
+
 async function importText(text, title){
   const b = await saveNewBook(parseText(text, title));
   openBookPanel(b.id, true);
@@ -1587,6 +1672,8 @@ async function drawBook(id){
     <div class="field"><label>Nivel</label><select id="bTgt">${CEFR.map(c => `<option value="${c}" ${c === tgt ? 'selected' : ''}>${esc(lvLabel(lang, c))}</option>`).join('')}</select></div>
     <div class="field"><label>Modelo</label><select id="bModel">${SIMP_MODELS.map(([m, l]) => `<option value="${m}" ${m === S.simpModel ? 'selected' : ''}>${esc(l)} · todo el libro ${cost(m)}</option>`).join('')}</select></div>
     <div class="row"><button class="btn" id="bSimpAll">Simplificar todo el libro</button><button class="btn sec" id="bSimpRead">Simplificar mientras leo</button></div></div>
+    <div class="box"><h3>Llevar a otro aparato</h3><p class="small">Un archivo .leamos con el libro, sus versiones simplificadas, las traducciones y explicaciones ya pagadas, tu posición y tu diccionario de ${esc(LANGS[lang].name)}. En el otro aparato: biblioteca → «📥 Importar .leamos».</p>
+      <button class="btn sec" id="bExport">📦 Exportar este libro</button></div>
     <div class="box"><button class="btn sec" id="bDelete">🗑 Borrar el libro</button></div>`;
   $('pbody').innerHTML = h;
   $('bLang').onchange = async e => { b.lang = e.target.value; await dbPut('books', b); await dbDelPrefix('ana', b.id + '|'); await dbDelPrefix('expl', b.id + '|'); if (BOOK?.id === id) { BOOK.lang = b.lang; useDict(b.lang); ANA.clear(); } drawBook(id); };
@@ -1606,6 +1693,7 @@ async function drawBook(id){
     if (BOOK?.id === id) { BOOK.versions = b.versions; if (CH.ver === x.dataset.del) await openChapter('o', CH.ch, CUR.p, 0); }
     drawBook(id);
   });
+  $('bExport').onclick = () => exportBooks([id], b.title);
   $('bDelete').onclick = async () => {
     if (!confirm(`¿Borrar «${b.title}»? (tus palabras quedan en el diccionario)`)) return;
     if (BOOK?.id === id) closeBook();
