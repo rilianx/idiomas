@@ -102,7 +102,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-07 · 16';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-07 · 17';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -649,9 +649,13 @@ function pump(){ while (running < 3 && QUEUE.length) startJob(QUEUE.shift()); }
 const buildSents = (job, list) => job.sents.map((text, i) => ({ text, es: list[i]?.es, tokens: (list[i]?.t || []).map(parseTok).filter(Boolean) }));
 // si la API dice «demasiados pedidos» o «saturado» (pasa al pedir varios a la vez), se reintenta en vez de fallar
 async function askRetry(...args){
+  const tries = args[4]?.retries ?? 3;
   for (let a = 0; ; a++) {
     try { return await ask(...args); }
-    catch (e) { if (a >= 3 || e instanceof NoKey || !/demasiados|saturado|429|529/.test(e.message)) throw e; await new Promise(r => setTimeout(r, 1500 * (a + 1) ** 2)); }
+    catch (e) {
+      if (a >= tries || e instanceof NoKey || !/demasiados|saturado|429|529/.test(e.message)) throw e;
+      await new Promise(r => setTimeout(r, Math.min(30000, 1500 * (a + 1) ** 2) + Math.random() * 1500));
+    }
   }
 }
 // el párrafo se pide en grupos de 2 o 3 oraciones, todos a la vez: una palabra del final de un párrafo largo
@@ -783,7 +787,7 @@ function renderReader(){
   if (CH.missing) {
     const ph = document.createElement('div'); ph.className = 'placeholder';
     const job = SIMP_JOBS.get(`${BOOK.id}|${CH.ver}`);
-    ph.innerHTML = job ? `<p>Simplificando el libro a ${esc(CH.ver)}… (${job.doneCh}/${job.totalCh} capítulos)</p><p class="small">Este capítulo aparecerá cuando esté listo.</p>` :
+    ph.innerHTML = job ? `<p>Simplificando el libro a ${esc(CH.ver)}… (${job.doneCh}/${job.totalCh} capítulos · ${job.doneParts}/${job.totalParts} partes)</p><p class="small">Este capítulo aparecerá cuando esté listo.</p>` :
       `<p>Este capítulo todavía no está simplificado a ${esc(lvLabel(BOOK.lang, CH.ver))}.</p><div class="row" style="justify-content:center"><button class="btn" id="simpNow">Simplificar este capítulo</button><button class="btn sec" id="seeOrig">Leer el original</button></div>`;
     bk.appendChild(ph);
     v.appendChild(bk);
@@ -1230,11 +1234,14 @@ async function simplifyChunk(b, lvl, model, chunk, known){
   const user = `LIBRO: «${b.title}»${b.author ? ' de ' + b.author : ''}\nNIVEL: ${lvLabel(b.lang, lvl)}\n` + (known ? `PALABRAS QUE EL LECTOR YA CONOCE: ${known}\n` : '') +
     `\nPÁRRAFOS (${chunk.length}):\n` + chunk.map((t, i) => `[${i + 1}] ${t}`).join('\n\n');
   for (let attempt = 0; attempt < 2; attempt++) {
-    const out = await ask(model, simpSystem(b.lang, lvl), user, SIMP_SCHEMA, { effort: 'low', maxTokens: 20000, ms: 180000, kind: 'simplify' });
+    const out = await askRetry(model, simpSystem(b.lang, lvl), user, SIMP_SCHEMA, { effort: 'low', maxTokens: 20000, ms: 180000, kind: 'simplify', retries: 6 });
     const ps = (out.paras || []).map(s => String(s).trim());
     if (ps.length === chunk.length || attempt === 1) return chunk.map((orig, i) => ps[i] || orig);
   }
 }
+const SIMP_PAR = () => S.simpPar || 50;   // pedidos simultáneos al simplificar (⚙ Ajustes)
+// todos los trozos de todos los capítulos van a una sola fila, con hasta SIMP_PAR pedidos a la vez; los capítulos se
+// atienden en el orden pedido (el que estás leyendo primero) y cada uno se guarda apenas terminan sus trozos
 async function simplifyBook(b, lvl, model, only = null){
   const key = `${b.id}|${lvl}`;
   if (SIMP_JOBS.has(key)) return;
@@ -1242,26 +1249,45 @@ async function simplifyBook(b, lvl, model, only = null){
   b.versions[lvl].done = b.versions[lvl].done || [];
   const chs = (only || b.chapters.map((_, i) => i)).filter(i => !b.versions[lvl].done[i]);
   if (!chs.length) return;
-  const job = { doneCh: 0, totalCh: chs.length, err: '' };
+  const job = { doneCh: 0, totalCh: chs.length, doneParts: 0, totalParts: 0, failed: 0, err: '' };
   SIMP_JOBS.set(key, job);
   await dbPut('books', b); refreshViews();
-  const known = knownWordsHint(b.lang);
-  try {
-    for (const ch of chs) {
-      const rec = await dbGet('text', `${b.id}|${ch}`);
-      const chunks = []; let cur = [], len = 0;
-      rec.paras.forEach(t => { if (cur.length && (len + t.length > 2500 || cur.length >= 40)) { chunks.push(cur); cur = []; len = 0; } cur.push(t); len += t.length; });
-      if (cur.length) chunks.push(cur);
-      const results = new Array(chunks.length); let idx = 0;
-      await Promise.all([0, 1, 2].map(async () => { while (idx < chunks.length) { const i = idx++; results[i] = await simplifyChunk(b, lvl, model, chunks[i], known); } }));
-      await dbPut('simp', { k: `${b.id}|${lvl}|${ch}`, paras: results.flat(), heads: rec.heads });
-      const fresh = await dbGet('books', b.id) || b; fresh.versions[lvl] = fresh.versions[lvl] || { model, done: [] }; fresh.versions[lvl].done[ch] = true; await dbPut('books', fresh);
-      if (BOOK?.id === b.id) BOOK.versions = fresh.versions;
-      Object.assign(b, { versions: fresh.versions });
-      job.doneCh++; refreshViews();
-      if (BOOK?.id === b.id && CH?.ver === lvl && CH.ch === ch && CH.missing) await openChapter(lvl, ch, CUR.p, 0);
+  const known = knownWordsHint(b.lang), tasks = [], chapters = new Map();
+  for (const ch of chs) {
+    const rec = await dbGet('text', `${b.id}|${ch}`); if (!rec) continue;
+    const chunks = []; let cur = [], len = 0;
+    rec.paras.forEach(t => { if (cur.length && (len + t.length > 2500 || cur.length >= 40)) { chunks.push(cur); cur = []; len = 0; } cur.push(t); len += t.length; });
+    if (cur.length) chunks.push(cur);
+    chapters.set(ch, { rec, results: new Array(chunks.length), left: chunks.length, failed: false });
+    chunks.forEach((chunk, i) => tasks.push({ ch, i, chunk }));
+  }
+  job.totalParts = tasks.length; refreshViews();
+  const chapterDone = async ch => {
+    const c = chapters.get(ch);
+    await dbPut('simp', { k: `${b.id}|${lvl}|${ch}`, paras: c.results.flat(), heads: c.rec.heads });
+    const fresh = await dbGet('books', b.id) || b; fresh.versions[lvl] = fresh.versions[lvl] || { model, done: [] }; fresh.versions[lvl].done[ch] = true; await dbPut('books', fresh);
+    if (BOOK?.id === b.id) BOOK.versions = fresh.versions;
+    Object.assign(b, { versions: fresh.versions });
+    job.doneCh++; refreshViews();
+    if (BOOK?.id === b.id && CH?.ver === lvl && CH.ch === ch && CH.missing) await openChapter(lvl, ch, CUR.p, 0);
+  };
+  let next = 0, stopAll = false;
+  const worker = async () => {
+    while (next < tasks.length && !stopAll) {
+      const t = tasks[next++], c = chapters.get(t.ch);
+      if (c.failed) continue;
+      try { c.results[t.i] = await simplifyChunk(b, lvl, model, t.chunk, known); }
+      catch (e) {
+        c.failed = true; job.failed++; job.err = errText(e);
+        if (e instanceof NoKey || /clave|permiso|saldo/.test(e.message)) stopAll = true;   // no tiene sentido seguir
+        continue;
+      }
+      job.doneParts++;
+      if (--c.left === 0) await chapterDone(t.ch); else if (job.doneParts % 5 === 0) refreshViews();
     }
-  } catch (e) { job.err = errText(e); toast('Se detuvo la simplificación: ' + job.err); }
+  };
+  await Promise.all(Array.from({ length: Math.min(SIMP_PAR(), tasks.length) }, worker));
+  if (job.failed) toast(`${job.failed} capítulo${job.failed > 1 ? 's' : ''} no se pudo simplificar (${job.err}). Puedes reintentar con «Completar».`);
   SIMP_JOBS.delete(key); refreshViews();
 }
 function refreshViews(){
@@ -1346,7 +1372,7 @@ async function drawLibrary(){
     d.innerHTML = `<div class="cov">${b.lang === 'ko' ? '한' : b.lang === 'ja' ? '日' : b.lang === 'zh' ? '中' : '📖'}</div>
       <div class="info"><h3>${esc(b.title)}</h3><div class="meta">${esc(b.author || '')}</div>
       <div><span class="badge">${esc(LANGS[b.lang]?.name || b.lang)}</span>${b.level ? `<span class="badge lv">nivel ${esc(b.level.cefr)}</span>` : ''}${Object.keys(b.versions || {}).map(v => `<span class="badge">${esc(v)} simplificado</span>`).join('')}
-      ${jobs.map(([k, j]) => `<span class="small">simplificando ${j.doneCh}/${j.totalCh}…</span>`).join('')}</div>
+      ${jobs.map(([k, j]) => `<span class="small">simplificando ${j.doneParts}/${j.totalParts} partes…</span>`).join('')}</div>
       <div class="bar"><i style="width:${pct}%"></i></div></div>
       <div style="display:flex;flex-direction:column;gap:6px"><button class="btn" data-read>Leer</button><button class="btn sec" data-info>Nivel…</button></div>`;
     d.querySelector('[data-read]').onclick = () => openBook(b.id);
@@ -1553,8 +1579,8 @@ async function drawBook(id){
   h += `</div><div class="box"><h3>Versión simplificada</h3>`;
   for (const [lvl, v] of vers) {
     const d = (v.done || []).filter(Boolean).length, job = SIMP_JOBS.get(`${id}|${lvl}`);
-    h += `<div class="prog"><b>${esc(lvLabel(lang, lvl))}</b> · ${d}/${b.chapters.length} capítulos · ${esc(mname(v.model))}${job ? ` · <span class="busy">simplificando (${job.doneCh}/${job.totalCh})…</span>` : ''}
-      <div class="bar"><i style="width:${100 * d / b.chapters.length}%"></i></div>
+    h += `<div class="prog"><b>${esc(lvLabel(lang, lvl))}</b> · ${d}/${b.chapters.length} capítulos · ${esc(mname(v.model))}${job ? ` · <span class="busy">simplificando: ${job.doneParts}/${job.totalParts} partes, ${SIMP_PAR()} a la vez…</span>` : ''}
+      <div class="bar"><i style="width:${job && job.totalParts ? 100 * job.doneParts / job.totalParts : 100 * d / b.chapters.length}%"></i></div>
       <div class="row" style="margin-top:6px"><button class="btn sec" data-readv="${lvl}">Leer ${esc(lvl)}</button>${d < b.chapters.length && !job ? `<button class="btn sec" data-cont="${lvl}">Completar</button>` : ''}<button class="btn sec" data-del="${lvl}">Borrar</button></div></div>`;
   }
   h += `<p class="small">Reescribe cada párrafo con vocabulario y gramática del nivel elegido, sin cambiar la historia. Los párrafos quedan alineados con el original (en la lectura, ¶ muestra el original). Puedes simplificar todo el libro o ir capítulo por capítulo mientras lees.</p>
@@ -1633,6 +1659,9 @@ function openSettings(){
       <div class="field"><label>Velocidad: <b id="rateV">${S.rate}</b></label><input type="range" id="rRate" min="0.5" max="1.4" step="0.05" value="${S.rate}" style="width:100%"></div>
       <label class="check"><input type="checkbox" id="cSay" ${S.autoSpeakWord ? 'checked' : ''}><span>Decir la palabra al tocarla (si no está leyendo)</span></label>
       <button class="btn sec" id="vTest">🔊 Probar</button></div>
+    <div class="box"><h3>Simplificar</h3>
+      <div class="field"><label>Pedidos simultáneos a la API</label><select id="sPar">${[5, 10, 20, 50, 100].map(n => `<option value="${n}" ${n === SIMP_PAR() ? 'selected' : ''}>${n}${n === 50 ? ' (por defecto)' : ''}</option>`).join('')}</select>
+      <div class="small">Más pedidos a la vez = el libro se simplifica antes. Si tu cuenta tiene un límite bajo de pedidos por minuto, la API rechaza algunos y la app los reintenta (más lento); si ves fallas, baja este número.</div></div></div>
     <div class="box"><h3>Gutenberg: tu intermediario (opcional)</h3>
       <p class="small">El navegador no deja que una página descargue libros de otro sitio si ese sitio no lo autoriza, y los intermediarios gratuitos a veces fallan. Con uno propio funciona siempre: es gratis y toma unos 5 minutos.</p>
       <ol class="small" style="padding-left:18px;margin:6px 0">
@@ -1657,6 +1686,7 @@ function openSettings(){
   on('mDef', 'change', e => { S.defModel = e.target.value; saveSet(); });
   on('cAuto', 'change', e => { S.autoAnalyze = e.target.checked; saveSet(); });
   on('cSilent', 'change', e => { S.silentRead = e.target.checked; saveSet(); });
+  on('sPar', 'change', e => { S.simpPar = +e.target.value; saveSet(); });
   for (const k of Object.keys(LANGS)) on('lv_' + k, 'change', e => { S.myLevel[k] = e.target.value; saveSet(); });
   on('vVoice', 'change', e => { S.voices[lang] = e.target.value; saveSet(); });
   on('rRate', 'input', e => { S.rate = +e.target.value; $('rateV').textContent = S.rate; saveSet(); });
