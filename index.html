@@ -157,6 +157,7 @@ footer{display:flex;align-items:flex-end;gap:8px;padding:8px 12px calc(10px + en
 <body>
 <header>
   <h1><span class="ko">한국어</span> · Hablemos <small id="lvname"></small></h1>
+  <a class="ib" href="lector.html" title="Leamos: lector de libros" style="text-decoration:none;color:inherit">📚<span class="lbl">Libros</span></a>
   <button class="ib" id="bLevels" title="Niveles">🎓<span class="lbl">Niveles</span></button>
   <button class="ib" id="bDict" title="Diccionario">📖<span class="lbl">Diccionario</span></button>
   <button class="ib" id="bListen" title="Modo escucha: ocultar el texto coreano">👂</button>
@@ -182,7 +183,7 @@ footer{display:flex;align-items:flex-end;gap:8px;padding:8px 12px calc(10px + en
    Todo vive en el navegador: las claves, la conversación y el diccionario.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-06 · 1';   // (subir en cada cambio: sirve para confirmar que el navegador tiene la última)
+const APP_VERSION = '2026-11-07 · 1';   // (subir en cada cambio: sirve para confirmar que el navegador tiene la última)
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const load = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } catch (e) { return d; } };

@@ -1,0 +1,1522 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Leamos · lector</title>
+<style>
+:root{
+  --bg:#f6f3ee;--card:#fffdf9;--fg:#24211d;--muted:#7a7268;--line:#e3ddd3;
+  --accent:#c2412d;--accent-soft:#f6e1da;--cur:#fbefc4;
+  --new:#2f6f5e;--new-soft:#e1f0ea;--warn:#9a5b00;--warn-soft:#fbefd9;--shadow:0 1px 3px rgba(40,30,20,.12);
+  --fs:20px;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#191714;--card:#24211d;--fg:#eee8df;--muted:#a59c90;--line:#3a352f;
+  --accent:#ec7a63;--accent-soft:#4a2a22;--cur:#3b3320;
+  --new:#7fcbb3;--new-soft:#1e3a32;--warn:#f0b35c;--warn-soft:#3e3020;--shadow:0 1px 3px rgba(0,0,0,.4);
+}}
+:root[data-theme="dark"]{
+  --bg:#191714;--card:#24211d;--fg:#eee8df;--muted:#a59c90;--line:#3a352f;
+  --accent:#ec7a63;--accent-soft:#4a2a22;--cur:#3b3320;
+  --new:#7fcbb3;--new-soft:#1e3a32;--warn:#f0b35c;--warn-soft:#3e3020;--shadow:0 1px 3px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,"Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",sans-serif}
+body{display:flex;flex-direction:column;height:100dvh}
+button,select{font:inherit;color:inherit;cursor:pointer}
+.ko,[lang=ko]{font-family:"Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif}
+
+header{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);background:var(--card)}
+header h1{font-size:17px;margin:0;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+header h1 small{color:var(--muted);font-weight:normal;font-size:13px;margin-left:6px}
+.ib{background:none;border:1px solid var(--line);border-radius:10px;height:38px;min-width:38px;padding:0 9px;font-size:15px;display:inline-flex;align-items:center;justify-content:center;gap:5px;text-decoration:none;color:inherit}
+.ib:hover{background:var(--bg)}
+.ib.on{background:var(--accent-soft);border-color:var(--accent)}
+header select{height:38px;border:1px solid var(--line);border-radius:10px;background:var(--card);padding:0 6px;max-width:34vw;min-width:0;font-size:14px}
+
+#view{flex:1;overflow-y:auto;position:relative}
+/* biblioteca */
+.lib{max-width:760px;margin:0 auto;padding:14px 14px 40px}
+.welcome{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:14px}
+.welcome h2{margin:.1em 0 .4em;font-size:20px}
+.welcome p{margin:.4em 0;color:var(--muted)}
+.book{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:10px;display:flex;gap:12px;align-items:center}
+.book .cov{width:46px;height:64px;border-radius:6px;background:var(--accent-soft);display:flex;align-items:center;justify-content:center;font-size:22px;flex:none}
+.book .info{flex:1;min-width:0}
+.book h3{margin:0;font-size:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.book .meta{font-size:13px;color:var(--muted)}
+.badge{display:inline-block;font-size:12px;border-radius:6px;padding:1px 7px;background:var(--new-soft);color:var(--new);margin-right:4px}
+.badge.lv{background:var(--accent-soft);color:var(--accent)}
+.bar{height:4px;background:var(--line);border-radius:2px;margin-top:6px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--new)}
+
+/* lectura */
+#book{max-width:700px;margin:0 auto;padding:18px 18px 45vh}
+#book .chtitle{font-size:22px;margin:.2em 0 1em;color:var(--muted);font-weight:600}
+.para{font-size:var(--fs);line-height:1.95;margin:0 0 .9em}
+h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
+#book[lang=ko] .para{word-break:keep-all}
+.s{border-radius:6px;transition:background .2s;padding:3px 0;-webkit-box-decoration-break:clone;box-decoration-break:clone}
+.s.cur{background:var(--cur)}
+.w{cursor:pointer;border-radius:4px;touch-action:manipulation;transition:background .15s}
+.w:hover{background:var(--accent-soft)}
+.w.new{text-decoration:underline 2px var(--new);text-underline-offset:5px}
+.w.learn{text-decoration:underline dotted 2px var(--new);text-underline-offset:5px}
+.w.speaking{background:var(--accent-soft)}
+.w.peeked{text-decoration-color:var(--accent)}
+.chend{text-align:center;margin:30px 0;color:var(--muted)}
+.placeholder{background:var(--card);border:1px dashed var(--line);border-radius:12px;padding:18px;text-align:center;color:var(--muted);margin:20px 0}
+
+#tip{position:fixed;z-index:30;background:var(--fg);color:var(--bg);padding:5px 11px;border-radius:8px;font-size:15px;line-height:1.3;pointer-events:none;max-width:280px;transform:translate(-50%,-100%);box-shadow:var(--shadow);text-align:center}
+#tip.below{transform:translate(-50%,0)}
+#tip b{font-weight:600}
+#tip small{display:block;opacity:.7;font-size:11px}
+#selbtn{position:fixed;z-index:31;transform:translate(-50%,-100%)}
+
+#trbox{padding:8px 14px;background:var(--card);border-top:1px solid var(--line);font-size:15px;max-height:30dvh;overflow-y:auto}
+#trbox .lab{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+#trbox p{margin:2px 0 6px}
+#player{display:flex;align-items:center;gap:8px;padding:8px 12px calc(10px + env(safe-area-inset-bottom));background:var(--card);border-top:1px solid var(--line)}
+#player .big{width:50px;height:50px;border-radius:50%;border:none;background:var(--accent);color:#fff;font-size:22px;flex:none}
+#player .ib{height:42px;min-width:42px}
+#player .grow{flex:1;min-width:0;font-size:12px;color:var(--muted);text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+.btn{border:none;background:var(--accent);color:#fff;border-radius:10px;padding:9px 15px;font-weight:600}
+.btn.sec{background:var(--bg);color:var(--fg);border:1px solid var(--line)}
+.btn:disabled{opacity:.5;cursor:default}
+.chip{border:1px solid var(--line);background:var(--bg);border-radius:999px;padding:3px 10px;font-size:13px}
+.chip:hover{border-color:var(--accent)}
+.chip.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+
+/* ficha de palabra / explicación */
+#veil{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:20}
+#sheet{position:fixed;left:50%;bottom:0;transform:translateX(-50%);width:min(580px,100%);max-height:80dvh;overflow-y:auto;background:var(--card);border-radius:16px 16px 0 0;padding:16px 18px calc(18px + env(safe-area-inset-bottom));z-index:21;box-shadow:0 -4px 20px rgba(0,0,0,.2)}
+#sheet .big{font-size:32px;font-weight:600;display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+#sheet .phrase{font-size:21px;line-height:1.6}
+.rom{color:var(--muted);font-size:14px}
+.pos{display:inline-block;font-size:12px;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:1px 7px;margin-right:6px;color:var(--muted)}
+.gloss{font-size:19px;margin:6px 0}
+.form{background:var(--new-soft);color:var(--fg);border-radius:8px;padding:7px 10px;margin:8px 0;font-size:15px}
+.fix{margin-top:7px;font-size:14px;background:var(--warn-soft);border-radius:8px;padding:6px 9px}
+.sec-t{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin:12px 0 4px}
+.conj{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;font-size:15px}
+.ex{margin:4px 0;font-size:15px}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.spk{background:none;border:none;font-size:20px;padding:0 4px}
+.busy{color:var(--muted);font-style:italic;font-size:14px}
+.gram{border-left:3px solid var(--line);padding:2px 0 2px 10px;margin:8px 0}
+
+/* paneles */
+#panel{position:fixed;inset:0;background:var(--bg);z-index:15;display:flex;flex-direction:column}
+#panel .ph{display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);background:var(--card)}
+#panel .ph h2{flex:1;margin:0;font-size:18px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#panel .pb{flex:1;overflow-y:auto;padding:12px 14px 30px}
+#panel .pb > *{max-width:760px;margin-left:auto;margin-right:auto}
+.box{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 14px;margin-bottom:12px}
+.box h3{margin:0 0 6px;font-size:16px}
+.field{margin:12px 0}
+.field label{display:block;font-size:14px;color:var(--muted);margin-bottom:4px}
+.field input[type=text],.field input[type=password],.field select,.field textarea,.search{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--fg);font:inherit}
+.field textarea{min-height:180px;resize:vertical}
+.check{display:flex;gap:10px;align-items:flex-start;margin:10px 0;font-size:15px}
+.check input{margin-top:4px;width:18px;height:18px;flex:none}
+.small{font-size:13px;color:var(--muted)}
+.ent{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 12px;margin-bottom:6px;cursor:pointer}
+.ent .top{display:flex;align-items:center;gap:8px}
+.ent .top .lem{font-size:19px;font-weight:600}
+.ent .top .g{flex:1;min-width:0;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ent .bar{margin-top:5px}
+.filters{display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 12px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin:8px 0}
+.stats div{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px;text-align:center}
+.stats b{display:block;font-size:20px}
+.prog{font-size:14px;margin:6px 0}
+[hidden]{display:none !important}
+@media (max-width:520px){header h1 small{display:none}.ib .lbl{display:none}#player .grow{display:none}}
+</style>
+</head>
+<body>
+<header id="hdr"></header>
+<main id="view"></main>
+<div id="trbox" hidden></div>
+<footer id="player" hidden>
+  <button class="ib" id="pPrev" title="Oración anterior (←)">⏮</button>
+  <button class="big" id="pPlay" title="Leer en voz alta (espacio)">▶</button>
+  <button class="ib" id="pNext" title="Siguiente oración (→)">⏭</button>
+  <button class="ib" id="pRate" title="Velocidad de la voz">1×</button>
+  <button class="ib" id="pTr" title="Traducción de la oración actual (T)">文<span class="lbl">Traducción</span></button>
+  <button class="ib" id="pOrig" title="Ver el párrafo original" hidden>¶<span class="lbl">Original</span></button>
+  <span class="grow" id="pInfo"></span>
+</footer>
+<button class="btn" id="selbtn" hidden>🎓 Explicar</button>
+<input type="file" id="file" accept=".epub,.txt,application/epub+zip,text/plain" hidden>
+<div id="veil" hidden></div>
+<div id="sheet" hidden></div>
+<div id="panel" hidden><div class="ph"><h2 id="ptitle"></h2><button class="ib" id="pclose">✕</button></div><div class="pb" id="pbody"></div></div>
+
+<script>
+'use strict';
+/* =====================================================================
+   Leamos: lector de libros para aprender idiomas (app hermana de «Hablemos coreano»).
+   Lee en voz alta marcando la oración actual, traduce la palabra que tocas, sigue
+   cuánto sabes de cada palabra (como Anki) y simplifica el libro a tu nivel.
+   Todo vive en el navegador: la clave y el diccionario en localStorage (compartidos con
+   «Hablemos» en el mismo sitio), los libros en IndexedDB.
+   ===================================================================== */
+
+const APP_VERSION = '2026-11-07 · 1';
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const load = (k, d) => { try { const v = JSON.parse(localStorage.getItem(k)); return v ?? d; } catch (e) { return d; } };
+const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { console.warn('no se pudo guardar', k, e); } };
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const DAY = 864e5;
+const paras = t => String(t || '').split(/\n\s*\n/).map(p => `<p style="margin:.35em 0">${esc(p.trim()).replace(/\n/g, '<br>')}</p>`).join('');
+
+/* ---------- idiomas y niveles ---------- */
+const LANGS = {
+  ko: { name: 'coreano', native: '한국어', tts: 'ko-KR', extra: 'Hanja' },
+  en: { name: 'inglés', native: 'English', tts: 'en-US', extra: 'Pronunciación' },
+  ja: { name: 'japonés', native: '日本語', tts: 'ja-JP', extra: 'Lectura' },
+  zh: { name: 'chino', native: '中文', tts: 'zh-CN', extra: 'Pinyin' },
+  fr: { name: 'francés', native: 'Français', tts: 'fr-FR', extra: 'Pronunciación' },
+  de: { name: 'alemán', native: 'Deutsch', tts: 'de-DE', extra: 'Pronunciación' },
+  it: { name: 'italiano', native: 'Italiano', tts: 'it-IT', extra: 'Pronunciación' },
+  pt: { name: 'portugués', native: 'Português', tts: 'pt-BR', extra: 'Pronunciación' }
+};
+const CEFR = ['A1', 'A2', 'B1', 'B2', 'C1', 'C2'];
+const lvIdx = c => CEFR.indexOf(c);
+const lvLabel = (lang, c) => !c ? '—' : lang === 'ko' ? `${c} · TOPIK ${lvIdx(c) + 1}` : c;
+const CJK = l => l === 'ja' || l === 'zh';
+
+/* ---------- ajustes (la clave es la misma de «Hablemos») ---------- */
+const HAB = load('hab-set', {});
+const DEFAULT_SET = { chatModel: HAB.chatModel || 'claude-haiku-5-5', defModel: HAB.defModel || 'claude-opus-5-5', simpModel: HAB.chatModel || 'claude-haiku-5-5',
+  myLevel: { ko: 'A2', en: 'B1' }, rate: 0.9, voices: {}, autoAnalyze: true, autoSpeakWord: true, fs: 20, theme: HAB.theme || '', showTr: false };
+const S = Object.assign({}, DEFAULT_SET, load('lec-set', {}));
+const KEYS = Object.assign({ anthropic: '', openai: '', workspace: '' }, load('hab-keys', {}));
+const saveSet = () => save('lec-set', S), saveKeys = () => save('hab-keys', KEYS);
+let USAGE = load('lec-usage', {});
+const myLevel = lang => S.myLevel[lang] || 'A2';
+function applyLook(){ document.documentElement.style.setProperty('--fs', S.fs + 'px'); if (S.theme) document.documentElement.dataset.theme = S.theme; else delete document.documentElement.dataset.theme; }
+applyLook();
+// si se cambia la clave en «Hablemos» (otra pestaña), se usa la nueva
+addEventListener('storage', e => {
+  if (e.key === 'hab-keys') Object.assign(KEYS, load('hab-keys', {}));
+  if (e.key === dictKey(DLANG)) { const cur = load(e.key, {}); for (const l of DIRTY) if (DICT[l]) cur[l] = DICT[l]; DICT = cur; }
+});
+
+/* ---------- diccionario por idioma (el coreano es el mismo de «Hablemos») ---------- */
+const dictKey = lang => lang === 'ko' ? 'hab-dict' : 'lec-dict-' + lang;
+let DLANG = 'ko', DICT = load(dictKey('ko'), {});
+const DIRTY = new Set(); let dictTimer = 0;
+function useDict(lang){ if (lang === DLANG) return; flushDict(); DLANG = lang; DICT = load(dictKey(lang), {}); }
+function touch(lemma){ DIRTY.add(lemma); clearTimeout(dictTimer); dictTimer = setTimeout(flushDict, 500); }
+// se guardan solo las palabras cambiadas, sobre lo que haya guardado la otra app
+function flushDict(){
+  clearTimeout(dictTimer); if (!DIRTY.size) return;
+  const cur = load(dictKey(DLANG), {});
+  for (const l of DIRTY) { if (DICT[l]) cur[l] = DICT[l]; else delete cur[l]; }
+  DIRTY.clear(); save(dictKey(DLANG), cur);
+  for (const [l, e] of Object.entries(cur)) if (!DICT[l]) DICT[l] = e;
+}
+addEventListener('pagehide', () => { flushDict(); savePosNow(); });
+const SKIP_POS = new Set(['puntuación', 'nombre propio', 'número', 'partícula', 'artículo']);
+function lemmaOf(tok, lang = BOOK?.lang){
+  let l = (tok.lemma || '').trim(); if (!l) return '';
+  if (lang !== 'ko' && tok.pos !== 'nombre propio') l = l.toLowerCase();
+  return l;
+}
+function ensureEntry(tok, sentence){
+  const l = lemmaOf(tok); if (!l) return null;
+  let e = DICT[l];
+  if (!e) e = DICT[l] = { lemma: l, pos: tok.pos || 'otro', gloss: tok.gloss || '', status: 'nueva', seen: 0, forms: {}, added: Date.now(), source: 'lector', level: null, detailed: false };
+  if (!e.gloss && tok.gloss) e.gloss = tok.gloss;
+  e.forms = e.forms || {};
+  if (tok.t && tok.t.toLowerCase() !== l.toLowerCase() && !e.forms[tok.t]) e.forms[tok.t] = tok.form || '';
+  if (!e.sentence && sentence) e.sentence = sentence.trim();
+  touch(l);
+  return e;
+}
+
+/* ---------- repetición espaciada (como Anki) ----------
+   Cada palabra tiene un intervalo. Leer una oración sin pedir la traducción de una palabra es un «bien»: si ya le
+   tocaba repaso, el intervalo crece (1 día, luego ×facilidad). Pedir su traducción es un «otra vez»: el intervalo
+   vuelve a cero y la facilidad baja. El puntaje (0–100 %) sale del intervalo: 1 día ≈ 17 %, 1 semana ≈ 50 %, 2 meses = 100 %. */
+function srsOf(e){
+  if (!e.srs) e.srs = { ivl: e.status === 'conocida' ? 21 : 0, ease: 2.5, due: 0, reps: 0, lapses: 0, last: 0, lapsedAt: 0 };
+  return e.srs;
+}
+const scoreOf = e => { if (!e) return 0; const s = e.srs; if (!s) return e.status === 'conocida' ? 75 : 0; return Math.min(100, Math.round(100 * Math.log(1 + s.ivl) / Math.log(61))); };
+function srsGood(e){
+  const s = srsOf(e), now = Date.now();
+  if (now < s.due) return false;
+  if (s.ivl === 0) s.ivl = s.lapses ? 10 / 1440 : 1;        // tras un olvido, primero un paso de 10 minutos
+  else if (s.ivl < 1) s.ivl = 1;
+  else s.ivl = Math.max(s.ivl + 1, s.ivl * s.ease);
+  s.reps++; s.last = now; s.due = now + s.ivl * DAY;
+  e.heard = (e.heard || 0) + 1; e.seen = (e.seen || 0) + 1; e.last = now;   // (para «Hablemos»)
+  if (scoreOf(e) >= 50 && e.status !== 'conocida') { e.status = 'conocida'; e.knownAt = now; }
+  touch(e.lemma); return true;
+}
+function srsAgain(e){
+  const s = srsOf(e), now = Date.now();
+  if (s.lapsedAt && now - s.lapsedAt < 10 * 60e3) return;    // mirarla varias veces seguidas cuenta como un solo olvido
+  if (s.reps || s.ivl) { s.lapses++; s.ease = Math.max(1.3, s.ease - 0.2); }
+  s.ivl = 0; s.due = now + 10 * 60e3; s.lapsedAt = now; e.lookups = (e.lookups || 0) + 1;
+  touch(e.lemma);
+}
+function setKnown(e, known){
+  const s = srsOf(e), now = Date.now();
+  if (known) { s.ivl = Math.max(s.ivl, 30); s.due = now + s.ivl * DAY; e.status = 'conocida'; e.knownAt = now; e.heard = Math.max(e.heard || 0, 5); }
+  else { s.ivl = 0; s.due = 0; e.status = 'nueva'; }
+  touch(e.lemma);
+}
+// subrayado: «nueva» (línea continua) bajo 30 %, «aprendiendo» (punteada) hasta 70 %
+function wordClass(tok){
+  if (!tok.lemma || SKIP_POS.has(tok.pos)) return '';
+  const e = DICT[lemmaOf(tok)];
+  if (!e) return tok.cefr && lvIdx(tok.cefr) >= lvIdx(myLevel(BOOK.lang)) ? 'new' : '';
+  if (!e.srs && e.status === 'conocida') return '';
+  const sc = scoreOf(e);
+  return sc < 30 ? 'new' : sc < 70 ? 'learn' : '';
+}
+
+/* ---------- hangul: romanización (para las fichas en coreano) ---------- */
+const H0 = 0xAC00, H1 = 0xD7A3;
+const dec = ch => { if (!ch) return null; const c = ch.charCodeAt(0); if (c < H0 || c > H1) return null; const d = c - H0; return { l: Math.floor(d / 588), v: Math.floor((d % 588) / 28), t: d % 28 }; };
+const RI = ['g','kk','n','d','tt','r','m','b','pp','s','ss','','j','jj','ch','k','t','p','h'];
+const RV = ['a','ae','ya','yae','eo','e','yeo','ye','o','wa','wae','oe','yo','u','wo','we','wi','yu','eu','ui','i'];
+const RF = ['','k','k','k','n','n','n','t','l','k','m','l','l','l','p','l','m','p','p','t','t','ng','t','t','k','t','p','t'];
+const LINK = { 1:['','g'],2:['','kk'],3:['k','s'],4:['','n'],5:['n','j'],6:['n',''],7:['','d'],8:['','r'],9:['l','g'],10:['l','m'],11:['l','b'],12:['l','s'],13:['l','t'],14:['l','p'],15:['l',''],16:['','m'],17:['','b'],18:['p','s'],19:['','s'],20:['','ss'],22:['','j'],23:['','ch'],24:['','k'],25:['','t'],26:['','p'],27:['',''] };
+function romanize(s){
+  const ch = [...s]; let out = '', carry = null;
+  for (let i = 0; i < ch.length; i++) {
+    const d = dec(ch[i]);
+    if (!d) { out += ch[i]; carry = null; continue; }
+    const n = dec(ch[i + 1]);
+    out += (carry !== null && (d.l === 11 || d.l === 5) ? carry : RI[d.l]) + RV[d.v]; carry = null;
+    if (d.t) {
+      if (n && n.l === 11 && LINK[d.t]) { out += LINK[d.t][0]; carry = LINK[d.t][1]; }
+      else if (d.t === 8 && n && n.l === 5) { out += 'l'; carry = 'l'; }
+      else out += RF[d.t];
+    }
+  }
+  return out;
+}
+
+/* ---------- libros en IndexedDB ----------
+   books: datos del libro y posición · text: cada capítulo · simp: capítulos simplificados · ana: análisis de cada párrafo */
+let DBP = null;
+function db(){
+  if (!DBP) DBP = new Promise((ok, ko) => {
+    const r = indexedDB.open('leamos', 1);
+    r.onupgradeneeded = () => { const d = r.result; d.createObjectStore('books', { keyPath: 'id' }); for (const s of ['text', 'simp', 'ana']) d.createObjectStore(s, { keyPath: 'k' }); };
+    r.onsuccess = () => ok(r.result); r.onerror = () => ko(r.error);
+  });
+  return DBP;
+}
+const req = r => new Promise((ok, ko) => { r.onsuccess = () => ok(r.result); r.onerror = () => ko(r.error); });
+async function idb(store, mode, fn){ const d = await db(); return req(fn(d.transaction(store, mode).objectStore(store))); }
+const dbGet = (s, k) => idb(s, 'readonly', o => o.get(k));
+const dbPut = (s, v) => idb(s, 'readwrite', o => o.put(v));
+const dbAll = s => idb(s, 'readonly', o => o.getAll());
+const dbPrefix = (s, p) => idb(s, 'readonly', o => o.getAll(IDBKeyRange.bound(p, p + '￿')));
+const dbDelPrefix = (s, p) => idb(s, 'readwrite', o => o.delete(IDBKeyRange.bound(p, p + '￿')));
+const dbDel = (s, k) => idb(s, 'readwrite', o => o.delete(k));
+
+/* ---------- abrir un EPUB (es un zip: se descomprime con lo que trae el navegador) ---------- */
+async function unzip(buf){
+  const dv = new DataView(buf), u8 = new Uint8Array(buf), td = new TextDecoder();
+  let eocd = -1;
+  for (let i = buf.byteLength - 22; i >= Math.max(0, buf.byteLength - 65557); i--) if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  if (eocd < 0) throw new Error('no parece un EPUB (no es un zip)');
+  const n = dv.getUint16(eocd + 10, true); let p = dv.getUint32(eocd + 16, true);
+  const files = {};
+  for (let i = 0; i < n && dv.getUint32(p, true) === 0x02014b50; i++) {
+    const method = dv.getUint16(p + 10, true), csize = dv.getUint32(p + 20, true), nl = dv.getUint16(p + 28, true), el = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true), off = dv.getUint32(p + 42, true);
+    files[td.decode(u8.subarray(p + 46, p + 46 + nl))] = { method, csize, off };
+    p += 46 + nl + el + cl;
+  }
+  const lower = {}; for (const k of Object.keys(files)) lower[k.toLowerCase()] = k;
+  return {
+    async text(name){
+      const f = files[name] || files[lower[name.toLowerCase()]]; if (!f) throw new Error('falta ' + name + ' en el EPUB');
+      const start = f.off + 30 + dv.getUint16(f.off + 26, true) + dv.getUint16(f.off + 28, true);
+      const data = u8.subarray(start, start + f.csize);
+      if (f.method === 0) return td.decode(data);
+      if (f.method !== 8) throw new Error('compresión no soportada');
+      if (!('DecompressionStream' in window)) throw new Error('este navegador no puede descomprimir EPUB (actualízalo)');
+      const out = await new Response(new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate-raw'))).arrayBuffer();
+      return td.decode(out);
+    }
+  };
+}
+function parseXML(s, type = 'application/xml'){
+  let d = new DOMParser().parseFromString(s, type);
+  if (d.getElementsByTagName('parsererror').length) d = new DOMParser().parseFromString(s, 'text/html');
+  return d;
+}
+function joinPath(base, href){
+  const parts = (base + decodeURIComponent(href.split('#')[0])).split('/'), out = [];
+  for (const x of parts) { if (x === '..') out.pop(); else if (x !== '.' && x !== '') out.push(x); }
+  return out.join('/');
+}
+const dirOf = p => p.includes('/') ? p.replace(/[^/]*$/, '') : '';
+const BLOCK = new Set(['p','h1','h2','h3','h4','h5','h6','li','blockquote','dd','dt','pre','div','td','th','figcaption','section','article','tr','ul','ol','table','tbody','aside','header','footer','nav','figure','hr','main']);
+// los párrafos de un capítulo: cada bloque de texto que no contiene otros bloques
+function blocksOf(doc){
+  const body = doc.body || doc.getElementsByTagName('body')[0] || doc.documentElement;
+  for (const t of ['rt', 'rp', 'script', 'style']) [...body.getElementsByTagName(t)].forEach(x => x.remove());
+  [...body.getElementsByTagName('br')].forEach(x => x.replaceWith('\n'));
+  const out = [];
+  const push = (text, h) => {
+    for (const piece of text.split(/\n\s*\n/)) {
+      const t = piece.replace(/\s+/g, ' ').trim();
+      if (t && /[\p{L}\p{N}]/u.test(t)) out.push({ t, h });
+    }
+  };
+  const walk = el => {
+    let buf = '';
+    for (const c of el.childNodes) {
+      const isBlock = c.nodeType === 1 && BLOCK.has((c.localName || '').toLowerCase());
+      if (isBlock) { if (buf.trim()) push(buf, false); buf = ''; walk(c); }
+      else if (c.nodeType === 1 || c.nodeType === 3) buf += c.textContent;
+    }
+    if (buf.trim()) push(buf, /^h[1-6]$/i.test(el.localName || ''));
+  };
+  walk(body);
+  return out;
+}
+// los párrafos muy largos se parten (en oraciones) para que el análisis sea rápido
+function splitLong(blocks, lang){
+  const out = [];
+  for (const b of blocks) {
+    if (b.t.length <= 900) { out.push(b); continue; }
+    let cur = '';
+    for (const s of splitSents(b.t, lang)) { if (cur && (cur + s).length > 700) { out.push({ t: cur.trim(), h: false }); cur = ''; } cur += s; }
+    if (cur.trim()) out.push({ t: cur.trim(), h: false });
+  }
+  return out;
+}
+function guessLang(text){
+  if (/[가-힣]/.test(text)) return 'ko';
+  if (/[぀-ヿ]/.test(text)) return 'ja';
+  if (/[一-鿿]/.test(text)) return 'zh';
+  if (/\b(le|la|les|des|est|une|que|dans)\b/i.test(text) && /[éèàç]/.test(text)) return 'fr';
+  if (/\b(der|die|das|und|nicht|ist)\b/i.test(text)) return 'de';
+  return 'en';
+}
+async function parseEpub(file){
+  const z = await unzip(await file.arrayBuffer());
+  const opfPath = parseXML(await z.text('META-INF/container.xml')).getElementsByTagName('rootfile')[0]?.getAttribute('full-path');
+  if (!opfPath) throw new Error('el EPUB no dice dónde está su índice');
+  const opf = parseXML(await z.text(opfPath)), base = dirOf(opfPath);
+  const meta = tag => opf.getElementsByTagNameNS('*', tag)[0]?.textContent.trim() || '';
+  const items = {};
+  for (const it of opf.getElementsByTagNameNS('*', 'item')) items[it.getAttribute('id')] = { href: joinPath(base, it.getAttribute('href') || ''), type: it.getAttribute('media-type') || '', props: it.getAttribute('properties') || '' };
+  const spineEl = opf.getElementsByTagNameNS('*', 'spine')[0];
+  const spine = [...opf.getElementsByTagNameNS('*', 'itemref')].map(r => items[r.getAttribute('idref')]).filter(x => x && /html|xml/.test(x.type));
+  // títulos del índice (EPUB 3: nav; EPUB 2: toc.ncx)
+  const toc = {};
+  try {
+    const nav = Object.values(items).find(x => /\bnav\b/.test(x.props));
+    if (nav) {
+      const d = parseXML(await z.text(nav.href), 'application/xhtml+xml');
+      for (const a of d.getElementsByTagName('a')) { const h = a.getAttribute('href'); if (h) { const k = joinPath(dirOf(nav.href), h); if (!toc[k]) toc[k] = a.textContent.replace(/\s+/g, ' ').trim(); } }
+    } else {
+      const ncx = items[spineEl?.getAttribute('toc')] || Object.values(items).find(x => /ncx/.test(x.type));
+      if (ncx) {
+        const d = parseXML(await z.text(ncx.href));
+        for (const np of d.getElementsByTagNameNS('*', 'navPoint')) {
+          const src = np.getElementsByTagNameNS('*', 'content')[0]?.getAttribute('src'), label = np.getElementsByTagNameNS('*', 'text')[0]?.textContent.trim();
+          if (src && label) { const k = joinPath(dirOf(ncx.href), src); if (!toc[k]) toc[k] = label; }
+        }
+      }
+    }
+  } catch (e) { console.warn('índice:', e.message); }
+  let lang = (meta('language') || '').slice(0, 2).toLowerCase();
+  const chapters = [];
+  for (const it of spine) {
+    let blocks;
+    try { blocks = blocksOf(parseXML(await z.text(it.href), 'application/xhtml+xml')); } catch (e) { console.warn(it.href, e.message); continue; }
+    if (!blocks.length) continue;
+    if (!LANGS[lang]) lang = guessLang(blocks.map(b => b.t).join(' ').slice(0, 3000));
+    blocks = splitLong(blocks, lang);
+    const head = blocks.find(b => b.h)?.t;
+    chapters.push({ title: toc[it.href] || head || blocks[0].t.slice(0, 40), blocks });
+  }
+  if (!chapters.length) throw new Error('no encontré texto en el EPUB');
+  return { title: meta('title') || file.name.replace(/\.epub$/i, ''), author: meta('creator'), lang: LANGS[lang] ? lang : 'en', chapters };
+}
+// texto pegado o .txt: párrafos separados por líneas en blanco; capítulos si hay líneas como «Capítulo 3», «Chapter 3» o «제3장»
+function parseText(text, title){
+  const lines = text.replace(/\r/g, '').split(/\n\s*\n|\n(?=\s*(?:(?:chapter|cap[ií]tulo|part|parte)\s+\S|제\s*\d+\s*[장화부]))/i).map(s => s.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  const lang = guessLang(text.slice(0, 3000));
+  const isHead = s => s.length < 80 && (/^(chapter|cap[ií]tulo|part|parte)\s+([\dIVXLC]+|one|two|three|uno|dos|tres)\b/i.test(s) || /^제\s*\d+\s*[장화부]/.test(s) || /^(\d+|[IVXLC]+)\.?$/.test(s));
+  const chapters = []; let cur = null;
+  for (const t of lines) {
+    if (isHead(t) || !cur || cur.blocks.length >= 80) { cur = { title: isHead(t) ? t : `Parte ${chapters.length + 1}`, blocks: [] }; chapters.push(cur); if (isHead(t)) { cur.blocks.push({ t, h: true }); continue; } }
+    cur.blocks.push({ t, h: false });
+  }
+  chapters.forEach(c => c.blocks = splitLong(c.blocks, lang));
+  return { title: title || (lines[0] || 'Texto').slice(0, 50), author: '', lang, chapters };
+}
+async function saveNewBook(b){
+  const id = uid();
+  const meta = { id, title: b.title, author: b.author, lang: b.lang, added: Date.now(), last: Date.now(), level: null, versions: {},
+    chapters: b.chapters.map(c => ({ title: c.title, n: c.blocks.length, chars: c.blocks.reduce((a, x) => a + x.t.length, 0) })), pos: { ver: 'o', ch: 0, p: 0, s: 0 } };
+  for (let i = 0; i < b.chapters.length; i++) {
+    const c = b.chapters[i];
+    await dbPut('text', { k: `${id}|${i}`, paras: c.blocks.map(x => x.t), heads: c.blocks.map((x, j) => x.h ? j : -1).filter(j => j >= 0) });
+  }
+  await dbPut('books', meta);
+  return meta;
+}
+const bookChars = b => b.chapters.reduce((a, c) => a + c.chars, 0);
+
+/* ---------- oraciones ---------- */
+function splitSents(t, lang){
+  const END = '.!?。！？…', CLOSE = '"\'”’»」』)]）', out = []; let start = 0;
+  for (let i = 0; i < t.length; i++) {
+    if (!END.includes(t[i])) continue;
+    let j = i + 1; while (j < t.length && (END.includes(t[j]) || CLOSE.includes(t[j]))) j++;
+    if (j < t.length && !/\s/.test(t[j]) && !'。！？'.includes(t[i])) { i = j - 1; continue; }
+    if (t[i] === '.' && lang !== 'ko' && /(?:\b(?:Mr|Mrs|Ms|Dr|St|Sr|Jr|Prof|vs|etc|Mme|Mlle|Sra|Srta)|\b\p{Lu})$/u.test(t.slice(start, i))) { i = j - 1; continue; }
+    while (j < t.length && /\s/.test(t[j])) j++;
+    out.push(t.slice(start, j)); start = j; i = j - 1;
+  }
+  if (start < t.length) out.push(t.slice(start));
+  // lo que no tiene letras se pega a la oración anterior
+  const res = [];
+  for (const s of out) { if (res.length && !/[\p{L}\p{N}]/u.test(s)) res[res.length - 1] += s; else res.push(s); }
+  return res.length ? res : [t];
+}
+
+/* ---------- la IA (misma clave que «Hablemos») ---------- */
+const MODELS = {
+  'claude-haiku-5-5': { name: 'Claude Haiku 5.5', prov: 'anthropic' },
+  'claude-sonnet-5-5': { name: 'Claude Sonnet 5.5', prov: 'anthropic' },
+  'claude-opus-5-5': { name: 'Claude Opus 5.5', prov: 'anthropic' },
+  'claude-fable-5-1': { name: 'Claude Fable 5.1', prov: 'anthropic' },
+  'gpt-5.4-mini': { name: 'GPT-5.4 mini', prov: 'openai' }
+};
+const READ_MODELS = [['claude-haiku-5-5','Claude Haiku 5.5 · el más barato (recomendado)'],['gpt-5.4-mini','GPT-5.4 mini · OpenAI'],['claude-sonnet-5-5','Claude Sonnet 5.5 · mejor, más caro']];
+const DEF_MODELS = [['claude-opus-5-5','Claude Opus 5.5 · preciso (recomendado)'],['claude-sonnet-5-5','Claude Sonnet 5.5 · más barato'],['claude-fable-5-1','Claude Fable 5.1 · el más capaz y el más caro'],['gpt-5.4-mini','GPT-5.4 mini · OpenAI, barato']];
+const SIMP_MODELS = [['claude-haiku-5-5','Claude Haiku 5.5 · barato'],['claude-sonnet-5-5','Claude Sonnet 5.5 · más natural'],['claude-opus-5-5','Claude Opus 5.5 · el mejor, caro'],['gpt-5.4-mini','GPT-5.4 mini · OpenAI']];
+const mname = m => MODELS[m]?.name || m;
+const provOf = m => MODELS[m]?.prov || (m.startsWith('gpt') ? 'openai' : 'anthropic');
+class NoKey extends Error {}
+const errText = e => e instanceof NoKey ? 'falta la clave de la API (⚙ Ajustes)' : e.message;
+
+async function post(url, headers, body, ms){
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), ms);
+  let res;
+  try { res = await fetch(url, { method: 'POST', headers, body: JSON.stringify(body), signal: ctl.signal }); }
+  catch (e) { throw new Error(e.name === 'AbortError' ? 'la IA tardó demasiado' : 'sin conexión'); }
+  finally { clearTimeout(timer); }
+  return { res, data: await res.json().catch(() => ({})) };
+}
+const httpError = (res, data) => new Error({ 401: 'la clave no es válida', 403: 'la clave no tiene permiso', 429: 'demasiados pedidos seguidos (o sin saldo); espera un poco', 529: 'el servicio está saturado' }[res.status] || ('error ' + res.status + (data.error?.message ? ': ' + data.error.message : '')));
+function parseJSON(txt){ try { const o = JSON.parse(txt); if (o && typeof o === 'object') return o; } catch (e) {} throw new Error('la respuesta llegó incompleta'); }
+async function ask(model, system, user, schema, { effort = 'low', maxTokens = 8000, ms = 90000, kind = 'read' } = {}){
+  const prov = provOf(model);
+  if (!KEYS[prov]) throw new NoKey(prov);
+  const r = prov === 'openai' ? await openaiAsk(model, system, user, schema, effort, maxTokens, ms) : await claudeAsk(model, system, user, schema, effort, maxTokens, ms);
+  recordUsage(kind, model, r.served, r.usage);
+  return r.out;
+}
+async function claudeAsk(model, system, user, schema, effort, maxTokens, ms, fallback = true, fast = true){
+  const body = { model, max_tokens: maxTokens, system: [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }], messages: [{ role: 'user', content: user }], output_config: { format: { type: 'json_schema', schema }, effort } };
+  const headers = { 'content-type': 'application/json', 'x-api-key': KEYS.anthropic, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' };
+  if (KEYS.workspace) headers['anthropic-workspace-id'] = KEYS.workspace;
+  if (fallback && model !== 'claude-haiku-5-5') { body.fallbacks = 'default'; headers['anthropic-beta'] = 'server-side-fallback-2026-07-01'; }
+  // el análisis de párrafos es mecánico: Haiku responde sin razonar antes (más rápido)
+  if (fast && model === 'claude-haiku-5-5') body.thinking = { type: 'disabled' };
+  const { res, data } = await post('https://api.anthropic.com/v1/messages', headers, body, ms);
+  if (!res.ok) {
+    if (res.status === 400 && fallback && /fallback/i.test(data.error?.message || '')) return claudeAsk(model, system, user, schema, effort, maxTokens, ms, false, fast);
+    if (res.status === 400 && fast && /thinking/i.test(data.error?.message || '')) return claudeAsk(model, system, user, schema, effort, maxTokens, ms, fallback, false);
+    throw httpError(res, data);
+  }
+  if (data.stop_reason === 'refusal') throw new Error('el modelo no quiso responder eso');
+  if (data.stop_reason === 'max_tokens') throw new Error('la respuesta quedó cortada');
+  const u = data.usage || {};
+  return { out: parseJSON((data.content || []).filter(b => b.type === 'text').map(b => b.text).join('')), served: data.model,
+    usage: { in: u.input_tokens || 0, cacheW: u.cache_creation_input_tokens || 0, cacheR: u.cache_read_input_tokens || 0, out: u.output_tokens || 0 } };
+}
+async function openaiAsk(model, system, user, schema, effort, maxTokens, ms, strict = true){
+  const body = { model, max_completion_tokens: maxTokens, messages: [{ role: 'system', content: system + (strict ? '' : '\n\nResponde solo con un objeto JSON que siga este esquema: ' + JSON.stringify(schema)) }, { role: 'user', content: user }] };
+  if (strict) { body.response_format = { type: 'json_schema', json_schema: { name: 'respuesta', strict: true, schema } }; body.reasoning_effort = effort; }
+  else body.response_format = { type: 'json_object' };
+  const { res, data } = await post('https://api.openai.com/v1/chat/completions', { 'content-type': 'application/json', authorization: 'Bearer ' + KEYS.openai }, body, ms);
+  if (!res.ok) { if (res.status === 400 && strict) return openaiAsk(model, system, user, schema, effort, maxTokens, ms, false); throw httpError(res, data); }
+  const msg = data.choices?.[0]?.message || {};
+  if (msg.refusal) throw new Error('el modelo no quiso responder eso');
+  const u = data.usage || {}, cached = u.prompt_tokens_details?.cached_tokens || 0;
+  return { out: parseJSON(msg.content || ''), served: data.model, usage: { in: (u.prompt_tokens || 0) - cached, cacheW: 0, cacheR: cached, out: u.completion_tokens || 0 } };
+}
+
+/* ---------- gasto estimado ---------- */
+const PRICES = { 'claude-haiku-5-5': [0.10, 0.50, 0.01, 0.125], 'claude-sonnet-5-5': [2, 10, 0.20, 2.5], 'claude-opus-5-5': [4, 20, 0.20, 5], 'claude-fable-5-1': [10, 50, 0.25, 12.5] };
+const KINDS = [['read', 'Lectura (traducir palabras)'], ['explain', 'Explicaciones'], ['simplify', 'Simplificar']];
+const today = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+function recordUsage(kind, model, served, u){
+  if (!u) return;
+  const pr = PRICES[served] || PRICES[model];
+  const day = USAGE[today()] || (USAGE[today()] = {});
+  const k = day[kind] || (day[kind] = { n: 0, tin: 0, tout: 0, cost: 0, unpriced: 0 });
+  k.n++; k.tin += u.in + u.cacheW + u.cacheR; k.tout += u.out;
+  if (pr) k.cost += (u.in * pr[0] + u.out * pr[1] + u.cacheR * pr[2] + u.cacheW * pr[3]) / 1e6; else k.unpriced++;
+  save('lec-usage', USAGE);
+}
+const money = c => c === 0 ? '$0' : c < 0.001 ? '< $0,001' : '$' + c.toFixed(c < 0.01 ? 3 : 2).replace('.', ',');
+function usageHTML(){
+  const d = today(), month = d.slice(0, 7);
+  const sum = f => { const t = {}; for (const [k] of KINDS) t[k] = { n: 0, cost: 0 }; for (const [day, v] of Object.entries(USAGE)) if (f(day)) for (const [k] of KINDS) if (v[k]) { t[k].n += v[k].n; t[k].cost += v[k].cost; } return t; };
+  const rows = [['Hoy', sum(x => x === d)], ['Este mes', sum(x => x.startsWith(month))], ['Total', sum(() => true)]];
+  return `<div class="conj" style="grid-template-columns:auto repeat(3,1fr);gap:6px 12px"><span></span>${KINDS.map(k => `<b class="small">${k[1]}</b>`).join('')}
+    ${rows.map(([l, t]) => `<b>${l}</b>${KINDS.map(([k]) => `<span>${t[k].n} · ${money(t[k].cost)}</span>`).join('')}`).join('')}</div>
+    <div class="small" style="margin-top:6px">Estimación con los tokens que informa la API y los precios publicados (el gasto de las conversaciones está en «Hablemos»).</div>`;
+}
+// costo aproximado de simplificar un texto
+function simpCost(chars, lang, model){
+  const pr = PRICES[model]; if (!pr) return null;
+  const tin = chars / (lang === 'ko' || CJK(lang) ? 1.4 : 3.8), chunks = Math.ceil(chars / 2500);
+  return ((tin + chunks * 900) * pr[0] + tin * 1.0 * pr[1]) / 1e6;
+}
+
+/* ---------- esquemas ---------- */
+const POS = ['sustantivo','verbo','adjetivo','adverbio','pronombre','número','partícula','preposición','conjunción','artículo','determinante','expresión','nombre propio','puntuación','otro'];
+const obj = props => ({ type: 'object', additionalProperties: false, required: Object.keys(props), properties: props });
+const STR = { type: 'string' };
+const TOK = obj({ t: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, form: STR, cefr: { type: 'string', enum: [...CEFR, '-'] } });
+const ANA_SCHEMA = obj({ sentences: { type: 'array', items: obj({ es: STR, tokens: { type: 'array', items: TOK } }) } });
+const ENTRY = obj({ query: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, meaning: STR, explanation: STR, hanja: STR, irregular: STR,
+  conjugations: { type: 'array', items: obj({ form: STR, label: STR }) }, examples: { type: 'array', items: obj({ text: STR, es: STR }) }, in_context: STR });
+const PHRASE_SCHEMA = obj({ translation: STR, literal: STR, explanation: STR, grammar: { type: 'array', items: obj({ point: STR, explanation: STR }) },
+  words: { type: 'array', items: obj({ t: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, explanation: STR }) }, tip: STR });
+const LEVEL_SCHEMA = obj({ cefr: { type: 'string', enum: CEFR }, range: STR, summary: STR, vocabulary: STR, grammar: STR, advice: STR });
+const SIMP_SCHEMA = obj({ paras: { type: 'array', items: STR } });
+
+/* ---------- instrucciones ---------- */
+function lemmaRule(lang){
+  if (lang === 'ko') return '- lemma: la forma de diccionario. Verbos y adjetivos terminan en -다 (먹었어요 → 먹다, 추워요 → 춥다, 공부했다 → 공부하다). Un sustantivo con partícula o con la cópula: el sustantivo (학교에 → 학교, 학생이었다 → 학생). Expresiones fijas tal cual.';
+  if (lang === 'ja') return '- lemma: la forma de diccionario (verbos y adjetivos en forma básica: 食べました → 食べる), escrita como en el diccionario.';
+  if (lang === 'zh') return '- lemma: la palabra tal cual (en chino no hay conjugación).';
+  return '- lemma: la forma de diccionario: verbos en infinitivo' + (lang === 'en' ? ' (sin "to")' : '') + ', sustantivos en singular, adjetivos en su forma básica (masculino singular), en minúsculas salvo nombres propios. Si la palabra es parte de una expresión o verbo con partícula (p. ej. "give up", "look forward to"), usa la expresión completa como lemma en cada palabra que la forma.';
+}
+function anaSystem(lang){
+  const L = LANGS[lang];
+  return [
+    `Eres profesor de ${L.name} para hispanohablantes. Analizas un párrafo de un libro para una app de lectura: el lector toca una palabra y ve qué significa en ese contexto.`,
+    'Recibes las oraciones del párrafo, numeradas. Devuelve en sentences un elemento por oración, en el mismo orden y la misma cantidad:',
+    '- es: traducción natural al español de la oración, en el contexto del párrafo.',
+    '- tokens: todas las palabras de la oración en orden, sin omitir ninguna. t es el texto EXACTO de la palabra tal como aparece (mismas letras, mayúsculas y tildes), sin signos de puntuación; no incluyas los signos como tokens.' +
+      (lang === 'ko' ? ' En coreano, cada token es una palabra separada por espacios, con sus partículas y terminaciones pegadas (학교에서, 먹었다).' : '') +
+      (CJK(lang) ? ' Separa el texto en palabras (no en caracteres sueltos, salvo que la palabra sea de un carácter).' : ''),
+    lemmaRule(lang),
+    '- gloss: el significado en español EN ESTE CONTEXTO, en 1 a 4 palabras.',
+    '- form: si la palabra no está en su forma básica, qué forma es, muy breve' + (lang === 'ko' ? ' (p. ej. "-았다: pasado", "에서: partícula de lugar (en)", "-고 싶다: querer hacer")' : ' (p. ej. "pasado de go", "plural", "3.ª persona del presente", "participio")') + '; "" si es la forma básica.',
+    '- cefr: el nivel del MCER (A1 a C2) en que normalmente se aprende esa palabra con ese sentido; "-" para nombres propios y números.',
+    'Sé exacto y no inventes.'
+  ].join('\n');
+}
+function defSystem(lang){
+  const L = LANGS[lang];
+  const extra = { ko: 'los caracteres chinos (hanja) si es una palabra sino-coreana', ja: 'la lectura en hiragana', zh: 'el pinyin con tonos', en: 'la pronunciación en AFI', fr: 'la pronunciación en AFI', de: 'la pronunciación en AFI', it: 'la pronunciación en AFI', pt: 'la pronunciación en AFI' }[lang];
+  return [
+    `Eres un profesor experto de ${L.name} para hispanohablantes y escribes un diccionario de aprendizaje preciso. El estudiante está leyendo un libro y tocó dos veces una palabra porque quiere entenderla bien.`,
+    'Recibes la palabra, la oración donde aparece y, a veces, las oraciones anteriores. Devuelve una entrada:',
+    '- query: la palabra tal como la recibiste.',
+    lemmaRule(lang),
+    '- pos: la categoría.' + (lang === 'ko' ? ' En coreano los «adjetivos» son verbos descriptivos: usa "adjetivo" para ellos.' : ''),
+    '- gloss: el significado en 1 a 4 palabras en español.',
+    '- meaning: definición clara en español, con los sentidos principales.',
+    '- explanation: 2 a 4 frases en español para un estudiante: cuándo se usa, registro, matices, confusiones frecuentes y, si es un verbo, cómo se conjuga.',
+    `- hanja: ${extra}, o "".`,
+    '- irregular: si es un verbo o adjetivo irregular, de qué tipo y cómo cambia, o "".',
+    '- conjugations: para verbos y adjetivos, 6 a 8 formas comunes con su etiqueta en español; para otras categorías, [].',
+    `- examples: 2 oraciones de ejemplo cortas y naturales en ${L.name} (text) con su traducción (es).`,
+    '- in_context: explica con detalle (2 a 4 frases) qué significa la palabra EN ESA oración del libro, qué forma tiene y qué aporta (conjugación, partícula, matiz, registro), usando las oraciones anteriores si vienen.',
+    'Sé exacto: no inventes formas ni significados.'
+  ].join('\n');
+}
+function phraseSystem(lang){
+  const L = LANGS[lang];
+  return [
+    `Eres un profesor experto y cercano de ${L.name} para hispanohablantes. El estudiante está leyendo un libro y seleccionó un trozo porque necesita entenderlo de verdad: no te limites a traducir.`,
+    'Recibes las oraciones anteriores (contexto), la oración completa y el trozo seleccionado. Explica el trozo seleccionado dentro de esa oración. Escribe en español:',
+    '- translation: traducción natural del trozo (y, si es solo parte de una oración, de qué manera encaja en ella).',
+    `- literal: traducción literal que muestre la estructura del ${L.name}.`,
+    '- explanation: la explicación principal, detallada y en prosa (2 a 4 párrafos cortos separados por una línea en blanco): qué quiere decir aquí, cómo se construye, las formas gramaticales importantes y por qué se usan, registro, matices, expresiones idiomáticas, lo que en español se diría distinto y cualquier dato cultural útil. Adáptate al nivel del lector.',
+    '- grammar: los 1 a 3 puntos gramaticales clave, cada uno con cómo se forma y otro ejemplo distinto.',
+    '- words: cada palabra del trozo en orden (sin signos): t tal como aparece; lemma, su forma de diccionario; pos; gloss, el significado aquí (1 a 4 palabras); explanation, en una frase, qué forma tiene y qué aporta.',
+    '- tip: un consejo práctico breve (o "").',
+    'Sé exacto y no inventes.'
+  ].join('\n');
+}
+function levelSystem(lang){
+  return [
+    `Eres un experto en evaluación de textos en ${LANGS[lang].name} para estudiantes de idiomas (MCER${lang === 'ko' ? ' y TOPIK' : ''}). Recibes fragmentos de un libro y estimas el nivel de lector que lo puede leer con comodidad (entendiendo casi todo con poca ayuda).`,
+    'Escribe en español:',
+    '- cefr: el nivel MCER (A1 a C2).',
+    '- range: el rango, p. ej. "B1–B2"' + (lang === 'ko' ? ' y el TOPIK equivalente, p. ej. "B1–B2 (TOPIK 3–4)"' : '') + '.',
+    '- summary: 2 o 3 frases sobre la dificultad general del libro.',
+    '- vocabulary: cómo es el vocabulario (frecuente, literario, técnico, arcaico, coloquial…), con 3 a 5 ejemplos de palabras difíciles del texto.',
+    '- grammar: qué estructuras gramaticales destacan, con ejemplos del texto.',
+    '- advice: un consejo para leerlo según el nivel (p. ej. si conviene simplificarlo y a qué nivel).'
+  ].join('\n');
+}
+function simpSystem(lang, lvl){
+  const L = LANGS[lang];
+  return [
+    `Eres editor de lecturas graduadas en ${L.name} (libros adaptados para estudiantes). Reescribes un fragmento de un libro para un lector de nivel ${lvLabel(lang, lvl)} del MCER.`,
+    `Devuelve en paras exactamente un párrafo reescrito por cada párrafo recibido, en el mismo orden y la misma cantidad, escrito en ${L.name}.`,
+    '- Conserva la historia, los hechos, los diálogos (quién dice qué), los nombres y el tono. No resumas de más ni agregues cosas: cada párrafo dice lo mismo que el original, solo que más fácil.',
+    `- Vocabulario: usa palabras frecuentes de nivel ${lvl} o inferior. Reemplaza las palabras raras, literarias o arcaicas por otras comunes, o explícalas con palabras simples. Puedes conservar alguna palabra clave del libro si se repite y es importante.`,
+    `- Gramática: oraciones más cortas y estructuras propias del nivel ${lvl}; divide las oraciones largas; evita las construcciones literarias complejas.`,
+    lang === 'ko' ? '- Mantén de forma coherente el estilo de narración del original (por ejemplo, -았다/었다 en la narración) y el registro de cada personaje en los diálogos.' : '- Mantén el tiempo de la narración del original de forma coherente.',
+    '- Si un párrafo es un título, déjalo como título corto. Si un párrafo ya es fácil para ese nivel, déjalo casi igual.',
+    '- Si vienen PALABRAS QUE EL LECTOR YA CONOCE, prefiérelas cuando sirvan.'
+  ].join('\n');
+}
+
+/* ---------- estado de la lectura ---------- */
+let BOOK = null;          // datos del libro abierto
+let CH = null;            // { ver, ch, paras, heads:Set, sents:[[...]], missing }
+const CUR = { p: 0, s: 0 };
+const ANA = new Map();    // análisis de párrafos: clave → { k, sents:[{text, es, tokens}], done:[], seenEs:[] }
+const PEEK = new Set();   // palabras miradas en esta lectura: clave#oración#lema (esas no suben al pasar)
+const anaKey = p => `${BOOK.id}|${CH.ver}|${CH.ch}|${p}`;
+const sentText = (p, s) => (CH.sents[p] || [])[s] || '';
+
+async function openBook(id, ver){
+  hideTip(); stop();
+  const b = await dbGet('books', id); if (!b) return;
+  BOOK = b; useDict(b.lang);
+  b.last = Date.now(); dbPut('books', b);
+  await openChapter(ver || b.pos?.ver || 'o', b.pos?.ch || 0, b.pos?.p || 0, b.pos?.s || 0);
+}
+async function openChapter(ver, ch, p = 0, s = 0){
+  if (!BOOK.versions[ver]) ver = 'o';
+  ch = Math.max(0, Math.min(BOOK.chapters.length - 1, ch));
+  let rec = ver === 'o' ? await dbGet('text', `${BOOK.id}|${ch}`) : await dbGet('simp', `${BOOK.id}|${ver}|${ch}`);
+  const missing = !rec;
+  if (missing) rec = await dbGet('text', `${BOOK.id}|${ch}`);
+  CH = { ver, ch, paras: rec?.paras || [], heads: new Set(rec?.heads || []), missing };
+  CH.sents = CH.paras.map(t => splitSents(t, BOOK.lang));
+  CUR.p = Math.min(p, Math.max(0, CH.paras.length - 1)); CUR.s = Math.min(s, (CH.sents[CUR.p] || ['']).length - 1);
+  if (!missing) for (const r of await dbPrefix('ana', `${BOOK.id}|${ver}|${ch}|`)) ANA.set(r.k, r);
+  // en una versión simplificada, se simplifican solos este capítulo y el siguiente
+  if (ver !== 'o') {
+    const v = BOOK.versions[ver], need = [ch, ch + 1].filter(i => i < BOOK.chapters.length && !v.done?.[i]);
+    if (need.length && KEYS[provOf(v.model || S.simpModel)]) simplifyBook(BOOK, ver, v.model || S.simpModel, need);
+  }
+  renderReader();
+  setCursor(CUR.p, CUR.s, { scroll: 'instant' });
+}
+
+/* ---------- analizar párrafos (modelo barato), con una cola ---------- */
+const INFLIGHT = new Map(), QUEUE = []; let running = 0;
+function ensureAna(p, urgent = false){
+  if (!CH || CH.missing || p < 0 || p >= CH.paras.length) return Promise.resolve(null);
+  const k = anaKey(p);
+  if (ANA.has(k)) return Promise.resolve(ANA.get(k));
+  if (INFLIGHT.has(k)) { if (urgent) { const i = QUEUE.findIndex(j => j.k === k); if (i > 0) QUEUE.unshift(...QUEUE.splice(i, 1)); } return INFLIGHT.get(k).promise; }
+  let resolve; const promise = new Promise(r => resolve = r);
+  const job = { k, p, text: CH.paras[p], sents: CH.sents[p].map(x => x.trim()), prev: CH.paras[p - 1] || '', book: BOOK, ver: CH.ver, ch: CH.ch, resolve, promise };
+  INFLIGHT.set(k, job);
+  if (urgent) QUEUE.unshift(job); else QUEUE.push(job);
+  pump(); markBusy(p, true);
+  return promise;
+}
+async function pump(){
+  while (running < 3 && QUEUE.length) {
+    const job = QUEUE.shift(); running++;
+    analyze(job).then(rec => job.resolve(rec), e => { console.warn('análisis:', e.message); job.resolve(null); if (e instanceof NoKey || /clave|saldo|permiso/.test(e.message)) toast('No se pudo traducir: ' + errText(e)); })
+      .finally(() => { running--; INFLIGHT.delete(job.k); onAnalyzed(job); pump(); });
+  }
+}
+async function analyze(job){
+  const stored = await dbGet('ana', job.k);
+  if (stored) { ANA.set(job.k, stored); return stored; }
+  const lang = job.book.lang;
+  const user = `LIBRO: «${job.book.title}»${job.book.author ? ' de ' + job.book.author : ''}\nNIVEL DEL LECTOR: ${myLevel(lang)}\n` +
+    (job.prev ? `PÁRRAFO ANTERIOR (solo contexto): ${job.prev.slice(-500)}\n` : '') + `\nORACIONES:\n` + job.sents.map((s, i) => `${i + 1}. ${s}`).join('\n');
+  const out = await ask(S.chatModel, anaSystem(lang), user, ANA_SCHEMA, { effort: 'low', maxTokens: 12000, ms: 90000, kind: 'read' });
+  const rec = { k: job.k, sents: job.sents.map((text, i) => ({ text, es: out.sentences?.[i]?.es || '', tokens: (out.sentences?.[i]?.tokens || []).filter(t => t.t) })), done: [], seenEs: [] };
+  await dbPut('ana', rec); ANA.set(job.k, rec);
+  return rec;
+}
+function onAnalyzed(job){
+  if (!CH || job.book.id !== BOOK?.id || job.ver !== CH.ver || job.ch !== CH.ch) return;
+  rerenderPara(job.p);
+  if (job.p === CUR.p) showTr();
+}
+function prefetch(){
+  if (!S.autoAnalyze || !CH || CH.missing) return;
+  for (let p = CUR.p; p < Math.min(CH.paras.length, CUR.p + 3); p++) ensureAna(p);
+}
+
+/* ---------- dibujar el libro ---------- */
+function renderReader(){
+  hideTip();
+  $('player').hidden = false;
+  renderHeader();
+  const v = $('view'); v.innerHTML = '';
+  const bk = document.createElement('div'); bk.id = 'book'; bk.lang = BOOK.lang;
+  const title = BOOK.chapters[CH.ch]?.title || '';
+  bk.innerHTML = `<div class="chtitle">${CH.heads.has(0) && !CH.missing ? '' : esc(title)}${CH.ver !== 'o' ? ` <span class="badge lv">${esc(lvLabel(BOOK.lang, CH.ver))} · simplificado</span>` : ''}</div>`;
+  if (CH.missing) {
+    const ph = document.createElement('div'); ph.className = 'placeholder';
+    const job = SIMP_JOBS.get(`${BOOK.id}|${CH.ver}`);
+    ph.innerHTML = job ? `<p>Simplificando el libro a ${esc(CH.ver)}… (${job.doneCh}/${job.totalCh} capítulos)</p><p class="small">Este capítulo aparecerá cuando esté listo.</p>` :
+      `<p>Este capítulo todavía no está simplificado a ${esc(lvLabel(BOOK.lang, CH.ver))}.</p><div class="row" style="justify-content:center"><button class="btn" id="simpNow">Simplificar este capítulo</button><button class="btn sec" id="seeOrig">Leer el original</button></div>`;
+    bk.appendChild(ph);
+    v.appendChild(bk);
+    if ($('simpNow')) $('simpNow').onclick = () => simplifyBook(BOOK, CH.ver, S.simpModel, [CH.ch]);
+    if ($('seeOrig')) $('seeOrig').onclick = () => openChapter('o', CH.ch, CUR.p, 0);
+    updateInfo(); return;
+  }
+  CH.paras.forEach((_, p) => bk.appendChild(paraEl(p)));
+  const end = document.createElement('div'); end.className = 'chend';
+  end.innerHTML = CH.ch < BOOK.chapters.length - 1 ? `— fin del capítulo —<div class="row" style="justify-content:center"><button class="btn" id="nextCh">Siguiente capítulo →</button></div>` : '— fin del libro —';
+  bk.appendChild(end);
+  v.appendChild(bk);
+  if ($('nextCh')) $('nextCh').onclick = () => openChapter(CH.ver, CH.ch + 1);
+  updateInfo();
+}
+function paraEl(p){
+  const el = document.createElement(CH.heads.has(p) ? 'h3' : 'p'); el.className = 'para'; el.dataset.p = p;
+  const rec = ANA.get(anaKey(p));
+  CH.sents[p].forEach((st, si) => {
+    const sp = document.createElement('span'); sp.className = 's'; sp.dataset.s = si;
+    if (p === CUR.p && si === CUR.s) sp.classList.add('cur');
+    renderSentence(sp, st, rec?.sents?.[si], p, si);
+    el.appendChild(sp);
+  });
+  return el;
+}
+function rerenderPara(p){
+  const old = document.querySelector(`#book .para[data-p="${p}"]`); if (!old) return;
+  old.replaceWith(paraEl(p));
+}
+function markBusy(p, on){ document.querySelector(`#book .para[data-p="${p}"]`)?.classList.toggle('busy', on); }
+const TOKS = new WeakMap();
+const WORD_RE = /[\p{L}\p{M}\p{N}]+(?:['’\-][\p{L}\p{M}\p{N}]+)*/gu;
+function renderSentence(el, text, ana, p, si){
+  const add = (tok, off) => {
+    const w = document.createElement('span'); w.className = 'w'; w.textContent = tok.t; w.dataset.o = off;
+    const c = tok.lemma ? wordClass(tok) : ''; if (c) w.classList.add(c);
+    if (tok.lemma && PEEK.has(`${anaKey(p)}#${si}#${lemmaOf(tok)}`)) w.classList.add('peeked');
+    TOKS.set(w, { tok, p, si }); el.appendChild(w);
+  };
+  const plain = (s, base) => {
+    let last = 0;
+    for (const m of s.matchAll(WORD_RE)) {
+      if (m.index > last) el.appendChild(document.createTextNode(s.slice(last, m.index)));
+      add({ t: m[0], lemma: '', pos: '', gloss: '', form: '' }, base + m.index); last = m.index + m[0].length;
+    }
+    if (last < s.length) el.appendChild(document.createTextNode(s.slice(last)));
+  };
+  let cur = 0;
+  const low = text.toLowerCase();
+  for (const t of ana?.tokens || []) {
+    let i = text.indexOf(t.t, cur); if (i < 0) i = low.indexOf(t.t.toLowerCase(), cur);
+    if (i < 0) continue;
+    if (i > cur) plain(text.slice(cur, i), cur);
+    add({ ...t, t: text.slice(i, i + t.t.length) }, i); cur = i + t.t.length;
+  }
+  if (cur < text.length) plain(text.slice(cur), cur);
+}
+function sentEl(p, s){ return document.querySelector(`#book .para[data-p="${p}"] .s[data-s="${s}"]`); }
+
+/* ---------- la oración actual ---------- */
+function setCursor(p, s, { scroll = 'smooth' } = {}){
+  document.querySelectorAll('#book .s.cur').forEach(x => x.classList.remove('cur'));
+  document.querySelectorAll('#book .w.speaking').forEach(x => x.classList.remove('speaking'));
+  CUR.p = p; CUR.s = s;
+  const el = sentEl(p, s);
+  if (el) {
+    el.classList.add('cur');
+    const r = el.getBoundingClientRect(), v = $('view').getBoundingClientRect();
+    if (scroll && (r.top < v.top + v.height * 0.15 || r.bottom > v.top + v.height * 0.6)) {
+      $('view').scrollBy({ top: r.top - v.top - v.height * 0.3, behavior: scroll === 'instant' ? 'instant' : 'smooth' });
+    }
+  }
+  BOOK.pos = { ver: CH.ver, ch: CH.ch, p, s }; savePos();
+  prefetch(); showTr(); updateInfo();
+}
+let posTimer = 0;
+function savePos(){ clearTimeout(posTimer); posTimer = setTimeout(savePosNow, 800); }
+function savePosNow(){ clearTimeout(posTimer); if (BOOK) dbPut('books', BOOK); }
+// pasar a la siguiente oración: la que se deja cuenta como leída (las palabras que no miraste suben)
+async function next(credit = true){
+  if (!CH || CH.missing) return false;
+  if (credit) creditSentence(CUR.p, CUR.s);
+  if (CUR.s + 1 < CH.sents[CUR.p].length) { setCursor(CUR.p, CUR.s + 1); return true; }
+  if (CUR.p + 1 < CH.paras.length) { setCursor(CUR.p + 1, 0); return true; }
+  if (CH.ch + 1 < BOOK.chapters.length) { await openChapter(CH.ver, CH.ch + 1); return true; }
+  return false;
+}
+function prev(){
+  if (!CH) return;
+  if (CUR.s > 0) setCursor(CUR.p, CUR.s - 1);
+  else if (CUR.p > 0) setCursor(CUR.p - 1, CH.sents[CUR.p - 1].length - 1);
+}
+function creditSentence(p, s){
+  const k = anaKey(p), rec = ANA.get(k);
+  if (!rec || rec.done[s] || rec.seenEs[s]) return;
+  const st = rec.sents[s]; if (!st) return;
+  const seen = new Set(); let changed = false;
+  for (const tok of st.tokens) {
+    const l = lemmaOf(tok); if (!l || SKIP_POS.has(tok.pos) || seen.has(l)) continue; seen.add(l);
+    if (PEEK.has(`${k}#${s}#${l}`)) continue;
+    let e = DICT[l];
+    // las palabras que no conoces todavía (de tu nivel o más) entran al diccionario la primera vez que las lees
+    if (!e) { if (!tok.cefr || lvIdx(tok.cefr) < lvIdx(myLevel(BOOK.lang))) continue; e = ensureEntry(tok, st.text); }
+    if (srsGood(e)) changed = true;
+  }
+  rec.done[s] = true; dbPut('ana', rec);
+  if (changed) rerenderPara(p);
+}
+
+/* ---------- leer en voz alta ---------- */
+let VOICES = [];
+function loadVoices(){ VOICES = window.speechSynthesis?.getVoices() || []; }
+if ('speechSynthesis' in window) { loadVoices(); speechSynthesis.onvoiceschanged = loadVoices; }
+const voicesFor = lang => VOICES.filter(v => v.lang.toLowerCase().replace('_', '-').startsWith(lang));
+function utter(text, lang, rate = S.rate){
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = LANGS[lang]?.tts || lang; u.rate = rate;
+  const vs = voicesFor(lang), v = vs.find(v => v.name === S.voices[lang]) || vs.find(v => v.lang === u.lang) || vs[0];
+  if (v) u.voice = v;
+  return u;
+}
+function speakWord(text){
+  if (!('speechSynthesis' in window) || PLAY) return;
+  speechSynthesis.cancel(); speechSynthesis.speak(utter(text, BOOK?.lang || DLANG));
+}
+let PLAY = false, UTT = null, WAKE = null;
+async function play(){
+  if (!('speechSynthesis' in window)) { toast('Este navegador no puede leer en voz alta.'); return; }
+  if (!CH || CH.missing) return;
+  if (!voicesFor(BOOK.lang).length) toast(`No encontré una voz en ${LANGS[BOOK.lang].name}; se usará la voz por defecto (puedes instalar una en el sistema).`);
+  PLAY = true; updatePlay();
+  try { WAKE = await navigator.wakeLock?.request('screen'); } catch (e) {}
+  speakCurrent();
+}
+function stop(){
+  PLAY = false; UTT = null; updatePlay();
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  WAKE?.release?.().catch(() => {}); WAKE = null;
+  document.querySelectorAll('#book .w.speaking').forEach(x => x.classList.remove('speaking'));
+}
+function speakCurrent(){
+  if (!PLAY) return;
+  if (!CH || CH.missing) { stop(); return; }
+  const text = sentText(CUR.p, CUR.s).trim();
+  if (!/[\p{L}\p{N}]/u.test(text)) { advanceAfter(null); return; }
+  const u = utter(text, BOOK.lang);
+  u._t = Date.now();
+  u.onstart = () => { u._s = Date.now(); };
+  u.onend = () => advanceAfter(u);
+  u.onerror = ev => { if (ev.error === 'interrupted' || ev.error === 'canceled') return; advanceAfter(u); };
+  u.onboundary = ev => {
+    if (UTT !== u) return;
+    const el = sentEl(CUR.p, CUR.s); if (!el) return;
+    let best = null;
+    for (const w of el.querySelectorAll('.w')) { if (+w.dataset.o <= ev.charIndex) best = w; else break; }
+    el.querySelectorAll('.w.speaking').forEach(x => x.classList.remove('speaking'));
+    best?.classList.add('speaking');
+  };
+  if (speechSynthesis.speaking || speechSynthesis.pending) speechSynthesis.cancel();
+  UTT = u; speechSynthesis.speak(u);
+}
+async function advanceAfter(u){
+  if (u && (UTT !== u || u._done)) return;
+  if (u) u._done = true;
+  if (!PLAY) return;
+  const sameP = CUR.s + 1 < (CH.sents[CUR.p] || []).length;
+  const ok = await next(true);
+  if (!ok) { stop(); toast('Fin del libro 🎉'); return; }
+  if (sameP) speakCurrent(); else setTimeout(speakCurrent, 350);   // una pausa breve entre párrafos
+}
+// algunos navegadores (Android) a veces no avisan cuando terminan de leer
+setInterval(() => {
+  const u = UTT; if (!PLAY || !u || u._done || speechSynthesis.speaking || speechSynthesis.pending) return;
+  if (u._s && Date.now() - u._s > 1000) advanceAfter(u);
+  else if (!u._s && Date.now() - u._t > 5000) { if (u._retried) advanceAfter(u); else { u._retried = true; u._t = Date.now(); speechSynthesis.cancel(); speechSynthesis.speak(u); } }
+}, 1000);
+function updatePlay(){ $('pPlay').textContent = PLAY ? '⏸' : '▶'; }
+
+/* ---------- traducción y párrafo original de la oración actual ---------- */
+let SHOW_ORIG = false;
+async function showTr(){
+  const box = $('trbox');
+  if (!CH || CH.missing || (!S.showTr && !SHOW_ORIG)) { box.hidden = true; return; }
+  let h = '';
+  if (S.showTr) {
+    const rec = ANA.get(anaKey(CUR.p));
+    if (rec) { rec.seenEs[CUR.s] = true; dbPut('ana', rec); }
+    h += `<div class="lab">Traducción</div><p>${rec ? esc(rec.sents[CUR.s]?.es || '—') : '<span class="busy">traduciendo…</span>'}</p>`;
+    if (!rec) ensureAna(CUR.p, true);
+  }
+  if (SHOW_ORIG && CH.ver !== 'o') {
+    const o = await dbGet('text', `${BOOK.id}|${CH.ch}`);
+    h += `<div class="lab">Párrafo original</div><p lang="${BOOK.lang}">${esc(o?.paras?.[CUR.p] || '—')}</p>`;
+  }
+  box.innerHTML = h; box.hidden = !h;
+}
+
+/* ---------- tocar una palabra: significado; dos veces: explicación detallada ---------- */
+let TAP = { el: null, t: 0 }, TIP_EL = null, LAST_DBL = 0;
+document.addEventListener('click', ev => {
+  const w = ev.target.closest?.('#book .w');
+  if (!w) { if (!ev.target.closest?.('#selbtn')) hideTip(); return; }
+  const sel = getSelection(); if (sel && !sel.isCollapsed && sel.toString().trim().length > 1 && Date.now() - TAP.t > 600) return;
+  ev.stopPropagation();
+  const now = Date.now();
+  if (TAP.el === w && now - TAP.t < 450) { TAP = { el: null, t: 0 }; LAST_DBL = now; getSelection()?.removeAllRanges(); hideTip(); openWord(w); return; }
+  TAP = { el: w, t: now };
+  showTip(w);
+});
+function peek(info){
+  const { tok, p, si } = info; const l = lemmaOf(tok); if (!l) return;
+  const key = `${anaKey(p)}#${si}#${l}`;
+  if (!PEEK.has(key)) { PEEK.add(key); const e = ensureEntry(tok, sentText(p, si)); if (e) srsAgain(e); }
+}
+function findWord(p, si, off){ return document.querySelector(`#book .para[data-p="${p}"] .s[data-s="${si}"] .w[data-o="${off}"]`); }
+function showTip(w){
+  const info = TOKS.get(w); if (!info) return;
+  const { tok, p, si } = info;
+  let tip = $('tip'); if (!tip) { tip = document.createElement('div'); tip.id = 'tip'; document.body.appendChild(tip); }
+  TIP_EL = w;
+  if (!tok.lemma) {
+    tip.innerHTML = `<span class="busy" style="color:inherit">traduciendo…</span>`;
+    const off = w.dataset.o;
+    ensureAna(p, true).then(rec => {
+      if (TIP_EL !== w) return;
+      const nw = findWord(p, si, off);
+      if (rec && nw && TOKS.get(nw)?.tok.lemma) showTip(nw); else { tip.innerHTML = rec ? 'sin traducción' : 'no se pudo traducir'; }
+    });
+  } else {
+    peek(info);
+    w.classList.add('peeked');
+    const l = lemmaOf(tok), e = DICT[l];
+    const romo = BOOK.lang === 'ko' ? `<small>${esc(romanize(tok.t))}</small>` : '';
+    tip.innerHTML = `<b>${esc(tok.gloss || e?.gloss || '—')}</b>${l && l !== tok.t.toLowerCase() && l !== tok.t ? ` · <span lang="${BOOK.lang}">${esc(l)}</span>` : ''}${tok.form ? `<small>${esc(tok.form)}</small>` : ''}${romo}<small>toca dos veces para la explicación</small>`;
+    if (S.autoSpeakWord) speakWord(tok.t);
+  }
+  placeTip(tip, w);
+}
+function placeTip(tip, w){
+  const r = w.getBoundingClientRect();
+  tip.style.left = Math.max(90, Math.min(innerWidth - 90, r.left + r.width / 2)) + 'px';
+  if (r.top > 100) { tip.classList.remove('below'); tip.style.top = (r.top - 6) + 'px'; } else { tip.classList.add('below'); tip.style.top = (r.bottom + 6) + 'px'; }
+  tip.hidden = false;
+}
+function hideTip(){ TIP_EL = null; const t = $('tip'); if (t) t.hidden = true; }
+$('view').addEventListener('scroll', () => { hideTip(); hideSelBtn(); }, { passive: true });
+
+/* ---------- ficha de la palabra ---------- */
+let SHEET = null;
+function prevSentences(p, s, n = 3){
+  const out = [];
+  for (let pp = p, ss = s - 1; out.length < n && pp >= 0;) {
+    if (ss < 0) { pp--; if (pp < 0) break; ss = CH.sents[pp].length - 1; continue; }
+    out.unshift(CH.sents[pp][ss].trim()); ss--;
+  }
+  return out.join(' ');
+}
+async function openWord(w){
+  const info = TOKS.get(w); if (!info) return;
+  let { tok, p, si } = info;
+  peek(info);
+  SHEET = { kind: 'word', tok, p, si, off: w.dataset.o, busy: false, err: '', ctx: '' };
+  showSheet();
+  if (!tok.lemma) {   // primero el análisis del párrafo (rápido), después la explicación
+    SHEET.busy = 'ana'; refreshSheet();
+    const rec = await ensureAna(p, true); if (SHEET?.off !== w.dataset.o) return;
+    const nw = findWord(p, si, SHEET.off), t2 = nw && TOKS.get(nw)?.tok;
+    if (t2?.lemma) { SHEET.tok = tok = t2; peek({ tok: t2, p, si }); }
+    SHEET.busy = false;
+    if (!rec) { SHEET.err = 'No se pudo analizar el párrafo.'; refreshSheet(); return; }
+  }
+  if (S.autoSpeakWord) speakWord(tok.t);
+  const e = DICT[lemmaOf(tok)];
+  // la explicación detallada: se pide sola si la palabra no la tiene
+  if (!e?.detailed) explainWord(); else refreshSheet();
+}
+async function explainWord(){
+  const sh = SHEET; if (!sh) return;
+  sh.busy = 'def'; sh.err = ''; refreshSheet();
+  try {
+    const lang = BOOK.lang, sent = sentText(sh.p, sh.si).trim();
+    const user = `LIBRO: «${BOOK.title}»\nNIVEL DEL LECTOR: ${myLevel(lang)}\n` + (prevSentences(sh.p, sh.si) ? `ORACIONES ANTERIORES: ${prevSentences(sh.p, sh.si)}\n` : '') +
+      `ORACIÓN: «${sent}»\nPALABRA: «${sh.tok.t}»` + (sh.tok.lemma ? ` (forma de diccionario probable: ${sh.tok.lemma})` : '');
+    const x = await ask(S.defModel, defSystem(lang), user, ENTRY, { effort: 'low', maxTokens: 12000, ms: 150000, kind: 'explain' });
+    const l = lemmaOf({ lemma: x.lemma || sh.tok.lemma, pos: x.pos }) || lemmaOf(sh.tok);
+    const e = DICT[l] || ensureEntry({ ...sh.tok, lemma: l, pos: x.pos, gloss: x.gloss }, sent);
+    Object.assign(e, { pos: x.pos || e.pos, gloss: e.gloss || x.gloss, meaning: x.meaning, explanation: x.explanation, hanja: x.hanja, irregular: x.irregular,
+      conjugations: x.conjugations || [], examples: (x.examples || []).map(ex => ({ ko: ex.text, es: ex.es })), detailed: true });
+    touch(l);
+    if (SHEET === sh) { sh.ctx = x.in_context || ''; if (l !== lemmaOf(sh.tok)) sh.tok = { ...sh.tok, lemma: l, pos: x.pos || sh.tok.pos }; }
+  } catch (err) { if (SHEET === sh) sh.err = 'No se pudo explicar: ' + errText(err); }
+  if (SHEET === sh) { sh.busy = false; refreshSheet(); }
+}
+function showSheet(){ $('veil').hidden = false; $('sheet').hidden = false; $('sheet').scrollTop = 0; }
+function closeSheet(){ SHEET = null; $('veil').hidden = true; $('sheet').hidden = true; if (CH && !CH.missing) document.querySelectorAll('#book .para').forEach(el => { const p = +el.dataset.p; if (Math.abs(p - CUR.p) < 40) rerenderPara(p); }); }
+$('veil').onclick = closeSheet;
+function entryHTML(e, lang){
+  let h = '';
+  if (e.meaning) h += `<div class="sec-t">Significado</div><div>${esc(e.meaning)}</div>`;
+  if (e.explanation) h += `<div class="sec-t">Explicación</div><div>${esc(e.explanation)}</div>`;
+  if (e.hanja) h += `<div class="small" style="margin-top:6px">${esc(LANGS[lang]?.extra || 'Nota')}: ${esc(e.hanja)}</div>`;
+  if (e.irregular) h += `<div class="form">⚠ ${esc(e.irregular)}</div>`;
+  if (e.conjugations?.length) h += `<div class="sec-t">Conjugación</div><div class="conj">${e.conjugations.map(c => `<span lang="${lang}" data-say="${esc(c.form)}" style="cursor:pointer">${esc(c.form)}</span><span>${esc(c.label)}</span>`).join('')}</div>`;
+  const forms = Object.entries(e.forms || {});
+  if (forms.length) h += `<div class="sec-t">Formas que has visto</div><div class="conj">${forms.slice(0, 12).map(([f, l]) => `<span lang="${lang}" data-say="${esc(f)}" style="cursor:pointer">${esc(f)}</span><span>${esc(l || '—')}</span>`).join('')}</div>`;
+  if (e.examples?.length) h += `<div class="sec-t">Ejemplos</div>${e.examples.map(x => `<div class="ex"><span lang="${lang}" data-say="${esc(x.ko)}" style="cursor:pointer">🔊 ${esc(x.ko)}</span><br><span class="small">${esc(x.es)}</span></div>`).join('')}`;
+  if (e.sentence) h += `<div class="sec-t">Donde la viste</div><div class="small" lang="${lang}">${esc(e.sentence)}</div>`;
+  return h;
+}
+function srsHTML(e){
+  if (!e) return '';
+  const sc = scoreOf(e), s = e.srs;
+  const due = s?.due ? (s.due <= Date.now() ? 'le toca repaso: la próxima vez que la leas sin mirarla, sube' : 'próximo repaso ' + new Date(s.due).toLocaleDateString('es', { day: 'numeric', month: 'short' })) : '';
+  return `<div class="small" style="margin-top:8px">Dominio: <b>${sc} %</b>${e.status === 'conocida' ? ' · ya la sabes' : ''}${s ? ` · leída sin mirar ${s.reps} ${s.reps === 1 ? 'vez' : 'veces'}, consultada ${e.lookups || 0}` : ''}${due ? ' · ' + due : ''}</div><div class="bar"><i style="width:${sc}%"></i></div>`;
+}
+function refreshSheet(){
+  if (!SHEET) return;
+  const sh = $('sheet'), lang = BOOK?.lang || DLANG;
+  let h = '';
+  if (SHEET.kind === 'word' || SHEET.kind === 'dict') {
+    const tok = SHEET.tok, l = lemmaOf(tok, lang), e = DICT[l];
+    h += `<div class="big"><span lang="${lang}">${esc(tok.t)}</span><button class="spk" data-say="${esc(tok.t)}">🔊</button></div>`;
+    if (lang === 'ko') h += `<div class="rom">${esc(romanize(tok.t))}</div>`;
+    if (l && l !== tok.t && l !== tok.t.toLowerCase()) h += `<div style="margin-top:6px">Forma de diccionario: <b lang="${lang}" style="font-size:20px">${esc(l)}</b> <button class="spk" data-say="${esc(l)}">🔊</button></div>`;
+    const pos = tok.pos || e?.pos, gloss = tok.gloss || e?.gloss;
+    if (pos || gloss) h += `<div class="gloss">${pos ? `<span class="pos">${esc(pos)}</span>` : ''}${esc(gloss || '')}${tok.cefr && tok.cefr !== '-' ? ` <span class="badge lv">${esc(tok.cefr)}</span>` : ''}</div>`;
+    if (tok.form) h += `<div class="form">${esc(tok.form)}</div>`;
+    h += srsHTML(e);
+    if (SHEET.ctx) h += `<div class="sec-t">En esta oración</div><div class="form">${esc(SHEET.ctx)}</div>`;
+    if (e) h += entryHTML(e, lang);
+    if (SHEET.busy === 'ana') h += `<div class="busy" style="margin-top:8px">Analizando el párrafo…</div>`;
+    if (SHEET.busy === 'def') h += `<div class="busy" style="margin-top:8px">El profesor (${esc(mname(S.defModel))}) está explicando…</div>`;
+    if (SHEET.err) h += `<div class="fix">${esc(SHEET.err)}</div>`;
+    h += `<div class="row">`;
+    if (SHEET.kind === 'word') h += `<button class="btn" id="sExplain" ${SHEET.busy ? 'disabled' : ''}>${SHEET.ctx ? 'Explicar de nuevo' : 'Explicar en esta oración'}</button>`;
+    if (e) h += `<button class="btn sec" id="sKnown">${scoreOf(e) >= 70 ? 'Marcar como nueva' : 'Ya la sé ✓'}</button>`;
+    if (SHEET.kind === 'word') h += `<button class="btn sec" id="sFrom">▶ Leer desde aquí</button>`;
+    h += `<button class="btn sec" id="sClose">Cerrar</button></div>`;
+  } else if (SHEET.kind === 'phrase') {
+    const x = SHEET.x;
+    h += `<div class="phrase" lang="${lang}">${esc(SHEET.text)} <button class="spk" data-say="${esc(SHEET.text)}">🔊</button></div>`;
+    if (SHEET.busy) h += `<div class="busy" style="margin-top:8px">El profesor (${esc(mname(S.defModel))}) está explicando…</div>`;
+    if (SHEET.err) h += `<div class="fix">${esc(SHEET.err)}</div>`;
+    if (x) {
+      h += `<div class="gloss"><b>${esc(x.translation)}</b></div>${x.literal ? `<div class="small">Literal: ${esc(x.literal)}</div>` : ''}`;
+      if (x.explanation) h += `<div class="sec-t">Explicación</div>${paras(x.explanation)}`;
+      if (x.grammar?.length) h += `<div class="sec-t">Gramática</div>${x.grammar.map(g => `<div class="gram"><b lang="${lang}">${esc(g.point)}</b><div>${esc(g.explanation)}</div></div>`).join('')}`;
+      if (x.words?.length) h += `<details style="margin-top:8px"><summary class="sec-t" style="cursor:pointer;display:list-item">Palabra por palabra</summary><div class="conj">${x.words.map(w => `<span lang="${lang}" data-say="${esc(w.t)}" style="cursor:pointer">${esc(w.t)}</span><span><b>${esc(w.gloss)}</b>${w.lemma && w.lemma !== w.t ? ` <span lang="${lang}">(${esc(w.lemma)})</span>` : ''} · ${esc(w.explanation)}</span>`).join('')}</div></details>`;
+      if (x.tip) h += `<div class="form">💡 ${esc(x.tip)}</div>`;
+    }
+    h += `<div class="row"><button class="btn sec" id="sClose">Cerrar</button></div>`;
+  }
+  sh.innerHTML = h;
+  sh.querySelectorAll('[data-say]').forEach(b => b.onclick = () => { if ('speechSynthesis' in window) { speechSynthesis.cancel(); speechSynthesis.speak(utter(b.dataset.say, lang, 0.85)); } });
+  $('sClose').onclick = closeSheet;
+  if ($('sExplain')) $('sExplain').onclick = explainWord;
+  if ($('sKnown')) $('sKnown').onclick = () => { const e = DICT[lemmaOf(SHEET.tok, lang)]; setKnown(e, scoreOf(e) < 70); refreshSheet(); if (PANEL === 'words') drawWords(); };
+  if ($('sFrom')) $('sFrom').onclick = () => { const { p, si } = SHEET; closeSheet(); stop(); setCursor(p, si); play(); };
+}
+
+/* ---------- seleccionar un trozo: explicación detallada ---------- */
+let selTimer = 0;
+document.addEventListener('selectionchange', () => { clearTimeout(selTimer); selTimer = setTimeout(checkSel, 250); });
+function checkSel(){
+  const sel = getSelection(), b = $('selbtn');
+  if (!sel || sel.isCollapsed) { hideSelBtn(); return; }
+  if (SHEET || Date.now() - LAST_DBL < 900) return;
+  const text = sel.toString().replace(/\s+/g, ' ').trim();
+  const up = n => (n?.nodeType === 1 ? n : n?.parentElement)?.closest?.('#book .s');
+  const a = up(sel.anchorNode), f = up(sel.focusNode);
+  if (!a || !f || text.length < 2) { hideSelBtn(); return; }
+  const r = sel.getRangeAt(0).getBoundingClientRect();
+  b.style.left = Math.max(70, Math.min(innerWidth - 70, r.left + r.width / 2)) + 'px';
+  b.style.top = Math.max(50, r.top - 8) + 'px';
+  b.hidden = false;
+  b._sel = { text, p: +a.closest('.para').dataset.p, si: +a.dataset.s, p2: +f.closest('.para').dataset.p, si2: +f.dataset.s };
+}
+function hideSelBtn(){ $('selbtn').hidden = true; }
+$('selbtn').addEventListener('pointerdown', e => e.preventDefault());
+$('selbtn').onclick = () => { const s = $('selbtn')._sel; hideSelBtn(); getSelection()?.removeAllRanges(); if (s) explainPhrase(s); };
+async function explainPhrase({ text, p, si, p2, si2 }){
+  hideTip();
+  // las oraciones seleccionadas no suben al pasar (pediste ayuda con ellas)
+  const [a, b] = p < p2 || (p === p2 && si <= si2) ? [[p, si], [p2, si2]] : [[p2, si2], [p, si]];
+  const whole = [];
+  for (let pp = a[0]; pp <= b[0]; pp++) for (let ss = pp === a[0] ? a[1] : 0; ss <= (pp === b[0] ? b[1] : CH.sents[pp].length - 1); ss++) {
+    whole.push(sentText(pp, ss).trim());
+    const rec = ANA.get(anaKey(pp)); if (rec) { rec.seenEs[ss] = true; dbPut('ana', rec); }
+  }
+  SHEET = { kind: 'phrase', text, busy: true, err: '', x: null };
+  showSheet(); refreshSheet();
+  const sh = SHEET;
+  try {
+    const lang = BOOK.lang;
+    const user = `LIBRO: «${BOOK.title}»\nNIVEL DEL LECTOR: ${myLevel(lang)}\n` + (prevSentences(a[0], a[1]) ? `ORACIONES ANTERIORES: ${prevSentences(a[0], a[1])}\n` : '') + `ORACIÓN COMPLETA: «${whole.join(' ')}»\nTROZO SELECCIONADO: «${text}»`;
+    sh.x = await ask(S.defModel, phraseSystem(lang), user, PHRASE_SCHEMA, { effort: 'low', maxTokens: 14000, ms: 150000, kind: 'explain' });
+  } catch (e) { sh.err = 'No se pudo explicar: ' + errText(e); }
+  sh.busy = false; if (SHEET === sh) refreshSheet();
+}
+
+/* ---------- estimar el nivel del libro ---------- */
+async function sampleText(b, chars = 1500){
+  const out = [], total = b.chapters.length;
+  for (const ch of new Set([0.1, 0.45, 0.8].map(f => Math.min(total - 1, Math.floor(total * f))))) {
+    const rec = await dbGet('text', `${b.id}|${ch}`); if (!rec) continue;
+    const mid = Math.floor(rec.paras.length * 0.3); let t = '';
+    for (let i = mid; i < rec.paras.length && t.length < chars; i++) if (!rec.heads.includes(i)) t += rec.paras[i] + '\n';
+    if (t) out.push(t.slice(0, chars + 300));
+  }
+  return out;
+}
+async function estimateLevel(b){
+  const parts = await sampleText(b);
+  const user = `LIBRO: «${b.title}»${b.author ? ' de ' + b.author : ''}\n\n` + parts.map((t, i) => `FRAGMENTO ${i + 1}:\n${t}`).join('\n\n');
+  const x = await ask(S.defModel, levelSystem(b.lang), user, LEVEL_SCHEMA, { effort: 'low', maxTokens: 6000, ms: 120000, kind: 'explain' });
+  b.level = { ...x, model: S.defModel, date: Date.now() };
+  await dbPut('books', b);
+  return b.level;
+}
+
+/* ---------- simplificar el libro a un nivel ---------- */
+const SIMP_JOBS = new Map();
+function knownWordsHint(lang){
+  const d = lang === DLANG ? DICT : load(dictKey(lang), {});
+  return Object.values(d).filter(e => scoreOf(e) >= 50 && !SKIP_POS.has(e.pos)).sort((a, b) => (b.last || 0) - (a.last || 0)).slice(0, 250).map(e => e.lemma).join(', ');
+}
+async function simplifyChunk(b, lvl, model, chunk, known){
+  const user = `LIBRO: «${b.title}»${b.author ? ' de ' + b.author : ''}\nNIVEL: ${lvLabel(b.lang, lvl)}\n` + (known ? `PALABRAS QUE EL LECTOR YA CONOCE: ${known}\n` : '') +
+    `\nPÁRRAFOS (${chunk.length}):\n` + chunk.map((t, i) => `[${i + 1}] ${t}`).join('\n\n');
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const out = await ask(model, simpSystem(b.lang, lvl), user, SIMP_SCHEMA, { effort: 'low', maxTokens: 20000, ms: 180000, kind: 'simplify' });
+    const ps = (out.paras || []).map(s => String(s).trim());
+    if (ps.length === chunk.length || attempt === 1) return chunk.map((orig, i) => ps[i] || orig);
+  }
+}
+async function simplifyBook(b, lvl, model, only = null){
+  const key = `${b.id}|${lvl}`;
+  if (SIMP_JOBS.has(key)) return;
+  b.versions[lvl] = b.versions[lvl] || { model, done: [], date: Date.now() };
+  b.versions[lvl].done = b.versions[lvl].done || [];
+  const chs = (only || b.chapters.map((_, i) => i)).filter(i => !b.versions[lvl].done[i]);
+  if (!chs.length) return;
+  const job = { doneCh: 0, totalCh: chs.length, err: '' };
+  SIMP_JOBS.set(key, job);
+  await dbPut('books', b); refreshViews();
+  const known = knownWordsHint(b.lang);
+  try {
+    for (const ch of chs) {
+      const rec = await dbGet('text', `${b.id}|${ch}`);
+      const chunks = []; let cur = [], len = 0;
+      rec.paras.forEach(t => { if (cur.length && (len + t.length > 2500 || cur.length >= 40)) { chunks.push(cur); cur = []; len = 0; } cur.push(t); len += t.length; });
+      if (cur.length) chunks.push(cur);
+      const results = new Array(chunks.length); let idx = 0;
+      await Promise.all([0, 1, 2].map(async () => { while (idx < chunks.length) { const i = idx++; results[i] = await simplifyChunk(b, lvl, model, chunks[i], known); } }));
+      await dbPut('simp', { k: `${b.id}|${lvl}|${ch}`, paras: results.flat(), heads: rec.heads });
+      const fresh = await dbGet('books', b.id) || b; fresh.versions[lvl] = fresh.versions[lvl] || { model, done: [] }; fresh.versions[lvl].done[ch] = true; await dbPut('books', fresh);
+      if (BOOK?.id === b.id) BOOK.versions = fresh.versions;
+      Object.assign(b, { versions: fresh.versions });
+      job.doneCh++; refreshViews();
+      if (BOOK?.id === b.id && CH?.ver === lvl && CH.ch === ch && CH.missing) await openChapter(lvl, ch, CUR.p, 0);
+    }
+  } catch (e) { job.err = errText(e); toast('Se detuvo la simplificación: ' + job.err); }
+  SIMP_JOBS.delete(key); refreshViews();
+}
+function refreshViews(){
+  if (PANEL === 'book' && PANEL_BOOK) drawBook(PANEL_BOOK.id);
+  if (!BOOK) drawLibrary();
+  else if (CH?.missing) renderReader();
+  else renderHeader();
+}
+
+/* ---------- avisos ---------- */
+let toastTimer = 0;
+function toast(msg){
+  let t = $('toast'); if (!t) { t = document.createElement('div'); t.id = 'toast'; t.style.cssText = 'position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:var(--fg);color:var(--bg);padding:8px 14px;border-radius:10px;z-index:40;max-width:90vw;font-size:14px;box-shadow:var(--shadow)'; document.body.appendChild(t); }
+  t.textContent = msg; t.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => t.hidden = true, 4500);
+}
+
+/* ---------- cabecera ---------- */
+function renderHeader(){
+  const h = $('hdr');
+  if (!BOOK) {
+    h.innerHTML = `<h1>📚 Leamos <small>lector para aprender idiomas</small></h1>
+      <a class="ib" href="index.html" title="Hablemos: conversar con 지수">💬<span class="lbl">Hablemos</span></a>
+      <button class="ib" id="hWords" title="Mis palabras">📖<span class="lbl">Palabras</span></button>
+      <button class="ib" id="hSet" title="Ajustes">⚙</button>`;
+  } else {
+    const vers = Object.keys(BOOK.versions || {}).sort((a, b) => lvIdx(a) - lvIdx(b));
+    h.innerHTML = `<button class="ib" id="hBack" title="Biblioteca">←</button>
+      <select id="hCh" title="Capítulo">${BOOK.chapters.map((c, i) => `<option value="${i}" ${i === CH?.ch ? 'selected' : ''}>${esc((i + 1) + '. ' + c.title).slice(0, 60)}</option>`).join('')}</select>
+      <select id="hVer" title="Versión">${[['o', 'Original'], ...vers.map(v => { const d = (BOOK.versions[v].done || []).filter(Boolean).length; return [v, `${v} simplificado${d < BOOK.chapters.length ? ` (${d}/${BOOK.chapters.length})` : ''}`]; })].map(([v, l]) => `<option value="${v}" ${v === CH?.ver ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
+      <span style="flex:1"></span>
+      <button class="ib" id="hInfo" title="Nivel y versiones del libro">ℹ</button>
+      <button class="ib" id="hWords" title="Mis palabras">📖</button>
+      <button class="ib" id="hSet" title="Ajustes">⚙</button>`;
+    $('hBack').onclick = closeBook;
+    $('hCh').onchange = e => { stop(); openChapter(CH.ver, +e.target.value); };
+    $('hVer').onchange = e => { stop(); openChapter(e.target.value, CH.ch, CUR.p, 0); };
+    $('hInfo').onclick = () => openBookPanel(BOOK.id);
+  }
+  $('hWords').onclick = () => openWords();
+  $('hSet').onclick = openSettings;
+}
+function updateInfo(){
+  if (!BOOK || !CH) return;
+  const total = bookChars(BOOK); let before = 0;
+  for (let i = 0; i < CH.ch; i++) before += BOOK.chapters[i].chars;
+  const inCh = CH.paras.slice(0, CUR.p).reduce((a, t) => a + t.length, 0) * (BOOK.chapters[CH.ch]?.chars || 1) / Math.max(1, CH.paras.reduce((a, t) => a + t.length, 0));
+  $('pInfo').textContent = `${Math.round(100 * (before + inCh) / Math.max(1, total))} % · cap. ${CH.ch + 1}/${BOOK.chapters.length}`;
+  $('pOrig').hidden = CH.ver === 'o';
+  $('pTr').classList.toggle('on', !!S.showTr); $('pOrig').classList.toggle('on', SHOW_ORIG);
+  $('pRate').textContent = (Math.round(S.rate * 100) / 100).toString().replace('.', ',') + '×';
+}
+function closeBook(){ stop(); savePosNow(); flushDict(); BOOK = null; CH = null; ANA.clear(); $('player').hidden = true; $('trbox').hidden = true; drawLibrary(); }
+
+/* ---------- biblioteca ---------- */
+const SAMPLES = {
+  ko: { title: '작은 서점 (cuento de ejemplo)', text: `제1장 비 오는 날\n\n비가 오는 월요일이었다. 민지는 우산을 잊어버려서 작은 서점 안으로 뛰어 들어갔다.\n\n서점은 조용하고 따뜻했다. 오래된 책 냄새가 났다. 창가에는 회색 고양이 한 마리가 자고 있었다.\n\n"어서 오세요." 할머니 한 분이 웃으면서 말했다. "비가 많이 오지요? 차 한 잔 드릴까요?"\n\n민지는 고개를 끄덕였다. "네, 감사합니다. 사실 저는 책을 별로 안 읽어요. 그냥 비를 피하고 싶었어요."\n\n할머니는 천천히 차를 따랐다. "괜찮아요. 책은 기다릴 줄 알아요. 오늘은 한 권만 골라 보세요."\n\n제2장 파란 책\n\n민지는 선반 사이를 걸었다. 그때 파란 표지의 얇은 책 한 권이 바닥에 떨어져 있었다.\n\n책에는 제목이 없었다. 첫 페이지에는 손으로 쓴 글이 있었다. "이 책을 찾은 사람에게: 매일 한 페이지씩만 읽으세요."\n\n민지는 이상하다고 생각했지만, 왠지 그 책이 마음에 들었다. 그녀는 책을 사서 가방에 넣었다.\n\n밖으로 나왔을 때 비는 벌써 그쳐 있었다. 하늘에는 작은 무지개가 떠 있었다.` },
+  en: { title: 'The Lighthouse Keeper (sample story)', text: `Chapter 1\n\nEvery evening, just before the sun sank into the sea, old Thomas climbed the hundred and twelve steps of the lighthouse.\n\nHe had done it for forty years. His knees complained, but he never once considered giving up. "Somebody has to keep the light burning," he would mutter to the gulls.\n\nOne stormy night in October, as the wind howled against the glass, he noticed a small boat struggling between the waves.\n\nThomas grabbed his lantern and hurried down the stairs, far faster than his knees would have liked.\n\nChapter 2\n\nOn the rocky shore, a soaked and shivering girl was dragging the boat onto the sand. She could not have been older than twelve.\n\n"What on earth are you doing out here?" Thomas shouted over the roar of the storm.\n\nShe looked up at him with stubborn eyes. "I'm looking for my grandfather," she said. "He told me to follow the light."\n\nThomas froze. For a long moment, he could only stare at her, because she had his late wife's eyes.` }
+};
+async function drawLibrary(){
+  renderHeader();
+  const v = $('view');
+  const books = (await dbAll('books').catch(() => [])).sort((a, b) => (b.last || 0) - (a.last || 0));
+  if (BOOK) return;
+  const noKey = !KEYS.anthropic && !KEYS.openai;
+  v.innerHTML = `<div class="lib">
+    <div class="welcome"><h2>Leer para aprender</h2>
+      <p>Abre un libro en <b>EPUB</b> (o pega un texto) en coreano, inglés u otro idioma. La app lo lee en voz alta marcando la oración actual.</p>
+      <p><b>Toca</b> una palabra para ver qué significa ahí; <b>tócala dos veces</b> para la explicación detallada; <b>selecciona</b> un trozo para que te lo expliquen. Las palabras nuevas aparecen subrayadas: si las lees sin pedir ayuda, suben; si pides la traducción, bajan (como en Anki).</p>
+      <p>También puede <b>estimar el nivel</b> del libro y <b>simplificarlo</b> al tuyo.</p>
+      ${noKey ? `<p class="fix">Para traducir hace falta tu clave de la API (la misma de «Hablemos»): ⚙ Ajustes.</p>` : ''}
+      <div class="row"><button class="btn" id="lOpen">📂 Abrir EPUB o .txt</button><button class="btn sec" id="lPaste">📋 Pegar texto</button>
+      <button class="btn sec" id="lSampleKo">Probar en coreano</button><button class="btn sec" id="lSampleEn">Probar en inglés</button></div>
+    </div>
+    <div id="lBooks">${books.length ? '' : '<p class="small" style="text-align:center">Todavía no hay libros.</p>'}</div></div>`;
+  const list = $('lBooks');
+  for (const b of books) {
+    const total = bookChars(b); let before = 0; for (let i = 0; i < (b.pos?.ch || 0); i++) before += b.chapters[i]?.chars || 0;
+    const pct = Math.round(100 * before / Math.max(1, total));
+    const jobs = [...SIMP_JOBS.entries()].filter(([k]) => k.startsWith(b.id + '|'));
+    const d = document.createElement('div'); d.className = 'book';
+    d.innerHTML = `<div class="cov">${b.lang === 'ko' ? '한' : b.lang === 'ja' ? '日' : b.lang === 'zh' ? '中' : '📖'}</div>
+      <div class="info"><h3>${esc(b.title)}</h3><div class="meta">${esc(b.author || '')}</div>
+      <div><span class="badge">${esc(LANGS[b.lang]?.name || b.lang)}</span>${b.level ? `<span class="badge lv">nivel ${esc(b.level.cefr)}</span>` : ''}${Object.keys(b.versions || {}).map(v => `<span class="badge">${esc(v)} simplificado</span>`).join('')}
+      ${jobs.map(([k, j]) => `<span class="small">simplificando ${j.doneCh}/${j.totalCh}…</span>`).join('')}</div>
+      <div class="bar"><i style="width:${pct}%"></i></div></div>
+      <div style="display:flex;flex-direction:column;gap:6px"><button class="btn" data-read>Leer</button><button class="btn sec" data-info>Nivel…</button></div>`;
+    d.querySelector('[data-read]').onclick = () => openBook(b.id);
+    d.querySelector('[data-info]').onclick = () => openBookPanel(b.id);
+    list.appendChild(d);
+  }
+  $('lOpen').onclick = () => $('file').click();
+  $('lPaste').onclick = openPaste;
+  $('lSampleKo').onclick = () => importText(SAMPLES.ko.text, SAMPLES.ko.title);
+  $('lSampleEn').onclick = () => importText(SAMPLES.en.text, SAMPLES.en.title);
+}
+$('file').onchange = async e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  toast('Abriendo «' + f.name + '»…');
+  try {
+    const parsed = /\.txt$/i.test(f.name) || f.type === 'text/plain' ? parseText(await f.text(), f.name.replace(/\.txt$/i, '')) : await parseEpub(f);
+    const b = await saveNewBook(parsed);
+    toast(`Listo: ${b.chapters.length} capítulos.`);
+    openBookPanel(b.id, true);
+  } catch (err) { console.error(err); toast('No se pudo abrir: ' + err.message); }
+};
+async function importText(text, title){
+  const b = await saveNewBook(parseText(text, title));
+  openBookPanel(b.id, true);
+}
+function openPaste(){
+  openPanel('Pegar texto', 'paste');
+  $('pbody').innerHTML = `<div class="box"><div class="field"><label>Título</label><input type="text" id="ptTitle" placeholder="Mi texto"></div>
+    <div class="field"><label>Texto (los párrafos separados por una línea en blanco; «Chapter 1», «Capítulo 1» o «제1장» empiezan un capítulo)</label><textarea id="ptText"></textarea></div>
+    <button class="btn" id="ptGo">Agregar a la biblioteca</button></div>`;
+  $('ptGo').onclick = () => { const t = $('ptText').value.trim(); if (!t) return; importText(t, $('ptTitle').value.trim()); };
+}
+
+/* ---------- paneles ---------- */
+let PANEL = '', PANEL_BOOK = null;
+function openPanel(title, kind){ PANEL = kind; $('ptitle').textContent = title; $('panel').hidden = false; $('pbody').scrollTop = 0; }
+function closePanel(){ PANEL = ''; PANEL_BOOK = null; $('panel').hidden = true; if (!BOOK) drawLibrary(); else if (CH?.missing) renderReader(); else { renderHeader(); renderReaderKeep(); } }
+$('pclose').onclick = closePanel;
+function renderReaderKeep(){ const top = $('view').scrollTop; renderReader(); $('view').scrollTop = top; }
+
+// el libro: nivel estimado, versiones simplificadas
+async function openBookPanel(id, fresh = false){
+  const b = await dbGet('books', id); if (!b) return;
+  PANEL_BOOK = b; openPanel(b.title, 'book'); drawBook(id);
+  if (fresh && !b.level && (KEYS[provOf(S.defModel)])) runEstimate(b);
+}
+let ESTIMATING = null;
+async function runEstimate(b){
+  ESTIMATING = b.id; drawBook(b.id);
+  try { await estimateLevel(b); } catch (e) { toast('No se pudo estimar el nivel: ' + errText(e)); }
+  ESTIMATING = null; if (BOOK?.id === b.id) BOOK.level = b.level; drawBook(b.id); if (!BOOK) drawLibrary();
+}
+async function drawBook(id){
+  if (PANEL !== 'book') return;
+  const b = await dbGet('books', id); if (!b) return; PANEL_BOOK = b;
+  const lang = b.lang, my = myLevel(lang), chars = bookChars(b);
+  const words = Math.round(chars / (lang === 'ko' ? 3.3 : CJK(lang) ? 1.6 : 5.7));
+  const tgt = S.simpTarget && lvIdx(S.simpTarget) >= 0 ? S.simpTarget : my;
+  const cost = m => { const c = simpCost(chars, lang, m); return c === null ? 'sin precio' : '~' + money(c); };
+  const vers = Object.entries(b.versions || {}).sort((x, y) => lvIdx(x[0]) - lvIdx(y[0]));
+  let h = `<div class="box"><div class="meta small">${esc(b.author || '')} · ${b.chapters.length} capítulos · ~${words.toLocaleString('es')} palabras</div>
+    <div class="field"><label>Idioma del libro</label><select id="bLang">${Object.entries(LANGS).map(([k, L]) => `<option value="${k}" ${k === lang ? 'selected' : ''}>${L.native} · ${L.name}</option>`).join('')}</select></div>
+    <div class="field"><label>Mi nivel en ${esc(LANGS[lang].name)}</label><select id="bMy">${CEFR.map(c => `<option ${c === my ? 'selected' : ''}>${c}</option>`).join('')}</select>
+    <div class="small">Se usa para subrayar las palabras que probablemente no conoces y para simplificar.</div></div>
+    <div class="row"><button class="btn" id="bRead">Leer${b.pos?.ver && b.pos.ver !== 'o' ? ' (' + esc(b.pos.ver) + ')' : ''}</button>${vers.length ? `<button class="btn sec" id="bReadO">Leer el original</button>` : ''}</div></div>`;
+  h += `<div class="box"><h3>Nivel del libro</h3>`;
+  if (ESTIMATING === id) h += `<div class="busy">Estimando el nivel con ${esc(mname(S.defModel))}…</div>`;
+  else if (b.level) {
+    const x = b.level, diff = lvIdx(x.cefr) - lvIdx(my);
+    h += `<div class="gloss"><span class="badge lv" style="font-size:16px">${esc(lvLabel(lang, x.cefr))}</span> ${esc(x.range)}</div><div>${esc(x.summary)}</div>
+      <div class="sec-t">Vocabulario</div><div>${esc(x.vocabulary)}</div><div class="sec-t">Gramática</div><div>${esc(x.grammar)}</div>
+      ${x.advice ? `<div class="form">💡 ${esc(x.advice)}</div>` : ''}
+      <div class="small">${diff > 0 ? `Está ${diff} nivel${diff > 1 ? 'es' : ''} sobre el tuyo (${my}): conviene simplificarlo.` : diff < 0 ? `Está bajo tu nivel (${my}).` : `Está en tu nivel (${my}).`}</div>
+      <div class="row"><button class="btn sec" id="bEst">Volver a estimar</button></div>`;
+  } else h += `<div class="small">Se toman tres fragmentos del libro y el modelo de explicaciones (${esc(mname(S.defModel))}) estima su nivel MCER${lang === 'ko' ? ' (y TOPIK)' : ''}.</div><div class="row"><button class="btn" id="bEst">Estimar nivel</button></div>`;
+  h += `</div><div class="box"><h3>Versión simplificada</h3>`;
+  for (const [lvl, v] of vers) {
+    const d = (v.done || []).filter(Boolean).length, job = SIMP_JOBS.get(`${id}|${lvl}`);
+    h += `<div class="prog"><b>${esc(lvLabel(lang, lvl))}</b> · ${d}/${b.chapters.length} capítulos · ${esc(mname(v.model))}${job ? ` · <span class="busy">simplificando (${job.doneCh}/${job.totalCh})…</span>` : ''}
+      <div class="bar"><i style="width:${100 * d / b.chapters.length}%"></i></div>
+      <div class="row" style="margin-top:6px"><button class="btn sec" data-readv="${lvl}">Leer ${esc(lvl)}</button>${d < b.chapters.length && !job ? `<button class="btn sec" data-cont="${lvl}">Completar</button>` : ''}<button class="btn sec" data-del="${lvl}">Borrar</button></div></div>`;
+  }
+  h += `<p class="small">Reescribe cada párrafo con vocabulario y gramática del nivel elegido, sin cambiar la historia. Los párrafos quedan alineados con el original (en la lectura, ¶ muestra el original). Puedes simplificar todo el libro o ir capítulo por capítulo mientras lees.</p>
+    <div class="field"><label>Nivel</label><select id="bTgt">${CEFR.map(c => `<option value="${c}" ${c === tgt ? 'selected' : ''}>${esc(lvLabel(lang, c))}</option>`).join('')}</select></div>
+    <div class="field"><label>Modelo</label><select id="bModel">${SIMP_MODELS.map(([m, l]) => `<option value="${m}" ${m === S.simpModel ? 'selected' : ''}>${esc(l)} · todo el libro ${cost(m)}</option>`).join('')}</select></div>
+    <div class="row"><button class="btn" id="bSimpAll">Simplificar todo el libro</button><button class="btn sec" id="bSimpRead">Simplificar mientras leo</button></div></div>
+    <div class="box"><button class="btn sec" id="bDelete">🗑 Borrar el libro</button></div>`;
+  $('pbody').innerHTML = h;
+  $('bLang').onchange = async e => { b.lang = e.target.value; await dbPut('books', b); await dbDelPrefix('ana', b.id + '|'); if (BOOK?.id === id) { BOOK.lang = b.lang; useDict(b.lang); ANA.clear(); } drawBook(id); };
+  $('bMy').onchange = e => { S.myLevel[lang] = e.target.value; saveSet(); drawBook(id); };
+  $('bRead').onclick = () => { closePanel(); openBook(id); };
+  if ($('bReadO')) $('bReadO').onclick = () => { closePanel(); openBook(id, 'o'); };
+  if ($('bEst')) $('bEst').onclick = () => runEstimate(b);
+  $('bTgt').onchange = e => { S.simpTarget = e.target.value; saveSet(); };
+  $('bModel').onchange = e => { S.simpModel = e.target.value; saveSet(); };
+  $('bSimpAll').onclick = () => { if (!KEYS[provOf(S.simpModel)]) { toast('Falta la clave de la API (⚙ Ajustes).'); return; } simplifyBook(b, $('bTgt').value, S.simpModel); };
+  $('bSimpRead').onclick = async () => { const lvl = $('bTgt').value; b.versions[lvl] = b.versions[lvl] || { model: S.simpModel, done: [], date: Date.now() }; await dbPut('books', b); closePanel(); await openBook(id, lvl); };
+  $('pbody').querySelectorAll('[data-readv]').forEach(x => x.onclick = () => { closePanel(); openBook(id, x.dataset.readv); });
+  $('pbody').querySelectorAll('[data-cont]').forEach(x => x.onclick = () => simplifyBook(b, x.dataset.cont, b.versions[x.dataset.cont].model || S.simpModel));
+  $('pbody').querySelectorAll('[data-del]').forEach(x => x.onclick = async () => {
+    if (!confirm(`¿Borrar la versión ${x.dataset.del}?`)) return;
+    delete b.versions[x.dataset.del]; await dbPut('books', b); await dbDelPrefix('simp', `${id}|${x.dataset.del}|`); await dbDelPrefix('ana', `${id}|${x.dataset.del}|`);
+    if (BOOK?.id === id) { BOOK.versions = b.versions; if (CH.ver === x.dataset.del) await openChapter('o', CH.ch, CUR.p, 0); }
+    drawBook(id);
+  });
+  $('bDelete').onclick = async () => {
+    if (!confirm(`¿Borrar «${b.title}»? (tus palabras quedan en el diccionario)`)) return;
+    if (BOOK?.id === id) closeBook();
+    for (const s of ['text', 'simp', 'ana']) await dbDelPrefix(s, id + '|');
+    await dbDel('books', id); closePanel();
+  };
+}
+
+// mis palabras (del idioma del libro abierto, o el que se elija)
+let WFILTER = 'todas', WQ = '';
+function openWords(){ openPanel('Mis palabras', 'words'); drawWords(); }
+function drawWords(){
+  const lang = DLANG, all = Object.values(DICT).filter(e => e.lemma && !SKIP_POS.has(e.pos));
+  const cls = e => { const s = scoreOf(e); return s < 30 ? 'nuevas' : s < 70 ? 'aprendiendo' : 'sabidas'; };
+  const counts = { nuevas: 0, aprendiendo: 0, sabidas: 0 }; all.forEach(e => counts[cls(e)]++);
+  let list = all.filter(e => WFILTER === 'todas' || cls(e) === WFILTER);
+  if (WQ) { const q = WQ.toLowerCase(); list = list.filter(e => e.lemma.toLowerCase().includes(q) || (e.gloss || '').toLowerCase().includes(q) || Object.keys(e.forms || {}).some(f => f.toLowerCase().includes(q))); }
+  list.sort((a, b) => scoreOf(a) - scoreOf(b) || (b.last || b.added || 0) - (a.last || a.added || 0));
+  $('pbody').innerHTML = `<div class="field"><label>Idioma</label><select id="wLang">${Object.entries(LANGS).map(([k, L]) => `<option value="${k}" ${k === lang ? 'selected' : ''}>${L.native} · ${L.name}</option>`).join('')}</select>
+    ${lang === 'ko' ? '<div class="small">El diccionario de coreano es el mismo de «Hablemos».</div>' : ''}</div>
+    <div class="stats"><div><b>${all.length}</b>palabras</div><div><b>${counts.nuevas}</b>nuevas</div><div><b>${counts.aprendiendo}</b>aprendiendo</div><div><b>${counts.sabidas}</b>sabidas</div></div>
+    <input class="search" id="wQ" placeholder="Buscar…" value="${esc(WQ)}">
+    <div class="filters">${['todas', 'nuevas', 'aprendiendo', 'sabidas'].map(f => `<button class="chip ${f === WFILTER ? 'on' : ''}" data-f="${f}">${f}</button>`).join('')}</div>
+    <div id="wList"></div>`;
+  const wl = $('wList');
+  wl.innerHTML = list.slice(0, 400).map((e, i) => `<div class="ent" data-i="${i}"><div class="top"><span class="lem" lang="${lang}">${esc(e.lemma)}</span><span class="g">${esc(e.gloss || '')}</span><span class="small">${scoreOf(e)} %</span></div><div class="bar"><i style="width:${scoreOf(e)}%"></i></div></div>`).join('') + (list.length > 400 ? `<p class="small">… y ${list.length - 400} más (usa el buscador).</p>` : '') + (!list.length ? '<p class="small">Nada por aquí.</p>' : '');
+  wl.querySelectorAll('.ent').forEach(el => el.onclick = () => { const e = list[+el.dataset.i]; SHEET = { kind: 'dict', tok: { t: e.lemma, lemma: e.lemma, pos: e.pos, gloss: e.gloss, form: '' } }; showSheet(); refreshSheet(); });
+  $('wLang').onchange = e => { if (BOOK && e.target.value !== BOOK.lang) { toast('Mientras lees se muestran las palabras del idioma del libro.'); e.target.value = DLANG; return; } useDict(e.target.value); drawWords(); };
+  $('wQ').oninput = e => { WQ = e.target.value; const pos = e.target.selectionStart; drawWords(); $('wQ').focus(); $('wQ').setSelectionRange(pos, pos); };
+  $('pbody').querySelectorAll('[data-f]').forEach(b => b.onclick = () => { WFILTER = b.dataset.f; drawWords(); });
+}
+
+// ajustes
+function openSettings(){
+  openPanel('Ajustes', 'settings');
+  const lang = BOOK?.lang || DLANG, vs = voicesFor(lang);
+  const sel = (id, opts, cur) => `<select id="${id}">${opts.map(([v, l]) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+  $('pbody').innerHTML = `
+    <div class="box"><h3>Clave de la API</h3><p class="small">Es la misma de «Hablemos» (se guarda solo en este navegador y se envía directo a la API).</p>
+      <div class="field"><label>Anthropic</label><input type="password" id="kA" value="${esc(KEYS.anthropic)}" placeholder="sk-ant-…"></div>
+      <div class="field"><label>OpenAI (opcional)</label><input type="password" id="kO" value="${esc(KEYS.openai)}" placeholder="sk-…"></div>
+      <div class="field"><label>Workspace de Anthropic (solo para claves de organización)</label><input type="text" id="kW" value="${esc(KEYS.workspace)}"></div></div>
+    <div class="box"><h3>Modelos</h3>
+      <div class="field"><label>Traducir palabras al leer (cada párrafo)</label>${sel('mRead', READ_MODELS, S.chatModel)}</div>
+      <div class="field"><label>Explicaciones (doble toque, selección, nivel del libro)</label>${sel('mDef', DEF_MODELS, S.defModel)}</div>
+      <label class="check"><input type="checkbox" id="cAuto" ${S.autoAnalyze ? 'checked' : ''}><span>Traducir por adelantado los párrafos que vas a leer (la palabra que toques ya estará lista). Si no, se traduce el párrafo al tocar una palabra.</span></label></div>
+    <div class="box"><h3>Mi nivel</h3><div class="conj" style="align-items:center">${Object.entries(LANGS).map(([k, L]) => `<span>${L.native}</span>${sel('lv_' + k, CEFR.map(c => [c, lvLabel(k, c)]), myLevel(k))}`).join('')}</div></div>
+    <div class="box"><h3>Voz (${esc(LANGS[lang].name)})</h3>
+      <div class="field"><label>Voz</label>${vs.length ? sel('vVoice', [['', 'La primera disponible'], ...vs.map(v => [v.name, v.name + ' · ' + v.lang])], S.voices[lang] || '') : '<div class="small">No hay voces de este idioma en el sistema; se usará la voz por defecto.</div>'}</div>
+      <div class="field"><label>Velocidad: <b id="rateV">${S.rate}</b></label><input type="range" id="rRate" min="0.5" max="1.4" step="0.05" value="${S.rate}" style="width:100%"></div>
+      <label class="check"><input type="checkbox" id="cSay" ${S.autoSpeakWord ? 'checked' : ''}><span>Decir la palabra al tocarla (si no está leyendo)</span></label>
+      <button class="btn sec" id="vTest">🔊 Probar</button></div>
+    <div class="box"><h3>Lectura</h3>
+      <div class="field"><label>Tamaño de la letra: <b id="fsV">${S.fs}</b> px</label><input type="range" id="rFs" min="15" max="30" step="1" value="${S.fs}" style="width:100%"></div>
+      <div class="field"><label>Tema</label>${sel('sTheme', [['', 'Automático'], ['light', 'Claro'], ['dark', 'Oscuro']], S.theme)}</div></div>
+    <div class="box"><h3>Cómo suben y bajan las palabras</h3><p class="small">Al pasar a la siguiente oración (leyendo en voz alta o con ⏭), las palabras de la oración que dejaste y que no miraste cuentan como «bien»: si les tocaba repaso, su intervalo crece (1 día, luego ×2,5…). Tocar una palabra para ver su traducción es «otra vez»: vuelve a cero. Con la traducción de la oración visible o al pedir la explicación de un trozo, esa oración no suma. Las palabras de tu nivel o superior que nunca has visto aparecen subrayadas; las que estás aprendiendo, con línea punteada.</p></div>
+    <div class="box"><h3>Gasto (estimado)</h3>${usageHTML()}</div>
+    <p class="small" style="text-align:center">Leamos · versión ${APP_VERSION}</p>`;
+  const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
+  on('kA', 'change', e => { KEYS.anthropic = e.target.value.trim(); saveKeys(); });
+  on('kO', 'change', e => { KEYS.openai = e.target.value.trim(); saveKeys(); });
+  on('kW', 'change', e => { KEYS.workspace = e.target.value.trim(); saveKeys(); });
+  on('mRead', 'change', e => { S.chatModel = e.target.value; saveSet(); });
+  on('mDef', 'change', e => { S.defModel = e.target.value; saveSet(); });
+  on('cAuto', 'change', e => { S.autoAnalyze = e.target.checked; saveSet(); });
+  for (const k of Object.keys(LANGS)) on('lv_' + k, 'change', e => { S.myLevel[k] = e.target.value; saveSet(); });
+  on('vVoice', 'change', e => { S.voices[lang] = e.target.value; saveSet(); });
+  on('rRate', 'input', e => { S.rate = +e.target.value; $('rateV').textContent = S.rate; saveSet(); });
+  on('cSay', 'change', e => { S.autoSpeakWord = e.target.checked; saveSet(); });
+  on('vTest', 'click', () => { speechSynthesis.cancel(); speechSynthesis.speak(utter(lang === 'ko' ? '안녕하세요. 오늘은 무슨 책을 읽을까요?' : lang === 'en' ? 'Hello! What shall we read today?' : LANGS[lang].native, lang)); });
+  on('rFs', 'input', e => { S.fs = +e.target.value; $('fsV').textContent = S.fs; applyLook(); saveSet(); });
+  on('sTheme', 'change', e => { S.theme = e.target.value; applyLook(); saveSet(); });
+}
+
+/* ---------- botones y teclado ---------- */
+$('pPlay').onclick = () => PLAY ? stop() : play();
+$('pNext').onclick = () => { const was = PLAY; stop(); next(true).then(() => { if (was) play(); }); };
+$('pPrev').onclick = () => { const was = PLAY; stop(); prev(); if (was) play(); };
+const RATES = [0.6, 0.75, 0.9, 1, 1.15];
+$('pRate').onclick = () => { const i = RATES.findIndex(r => r >= S.rate - 0.001); S.rate = RATES[(i + 1) % RATES.length]; saveSet(); updateInfo(); if (PLAY) { stop(); play(); } };
+$('pTr').onclick = () => { S.showTr = !S.showTr; saveSet(); updateInfo(); showTr(); };
+$('pOrig').onclick = () => { SHOW_ORIG = !SHOW_ORIG; updateInfo(); showTr(); };
+document.addEventListener('keydown', e => {
+  if (!BOOK || PANEL || SHEET || /input|textarea|select/i.test(e.target.tagName)) { if (e.key === 'Escape') { if (SHEET) closeSheet(); else if (PANEL) closePanel(); } return; }
+  if (e.key === ' ') { e.preventDefault(); $('pPlay').click(); }
+  else if (e.key === 'ArrowRight' || e.key === 'ArrowDown' || e.key === 'j') { e.preventDefault(); $('pNext').click(); }
+  else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp' || e.key === 'k') { e.preventDefault(); $('pPrev').click(); }
+  else if (e.key === 't') $('pTr').click();
+});
+document.addEventListener('visibilitychange', () => { if (document.hidden) { savePosNow(); flushDict(); } else if (PLAY) navigator.wakeLock?.request('screen').then(w => WAKE = w).catch(() => {}); });
+
+drawLibrary();
+</script>
+</body>
+</html>
