@@ -102,7 +102,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-07 · 15';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-07 · 16';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -490,8 +490,10 @@ function partialSentences(raw){
 }
 const ENTRY = obj({ query: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, meaning: STR, explanation: STR, hanja: STR, irregular: STR,
   conjugations: { type: 'array', items: obj({ form: STR, label: STR }) }, examples: { type: 'array', items: obj({ text: STR, es: STR }) }, in_context: STR });
-const PHRASE_SCHEMA = obj({ translation: STR, literal: STR, explanation: STR, grammar: { type: 'array', items: obj({ point: STR, explanation: STR }) },
-  words: { type: 'array', items: obj({ t: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, explanation: STR }) }, tip: STR });
+// explicar un trozo, en dos pedidos a la vez: la traducción (modelo barato, rápida) y la explicación (modelo caro);
+// el palabra por palabra sale del análisis del párrafo, que ya está
+const PHRASE_TR_SCHEMA = obj({ translation: STR, literal: STR });
+const PHRASE_EX_SCHEMA = obj({ explanation: STR, grammar: { type: 'array', items: obj({ point: STR, explanation: STR }) }, tip: STR });
 const LEVEL_SCHEMA = obj({ cefr: { type: 'string', enum: CEFR }, range: STR, summary: STR, vocabulary: STR, grammar: STR, advice: STR });
 const SIMP_SCHEMA = obj({ paras: { type: 'array', items: STR } });
 
@@ -541,16 +543,22 @@ function defSystem(lang){
     'Sé exacto: no inventes formas ni significados.'
   ].join('\n');
 }
-function phraseSystem(lang){
+function phraseTrSystem(lang){
   const L = LANGS[lang];
   return [
-    `Eres un profesor experto y cercano de ${L.name} para hispanohablantes. El estudiante está leyendo un libro y seleccionó un trozo porque necesita entenderlo de verdad: no te limites a traducir.`,
-    'Recibes las oraciones anteriores (contexto), la oración completa y el trozo seleccionado. Explica el trozo seleccionado dentro de esa oración. Escribe en español:',
-    '- translation: traducción natural del trozo (y, si es solo parte de una oración, de qué manera encaja en ella).',
-    `- literal: traducción literal que muestre la estructura del ${L.name}.`,
+    `Eres traductor de ${L.name} al español. Un estudiante que lee un libro seleccionó un trozo. Recibes las oraciones anteriores (contexto), la oración completa y el trozo.`,
+    '- translation: traducción natural al español del trozo, en ese contexto (si es solo parte de una oración, que se entienda cómo encaja).',
+    `- literal: traducción literal, palabra por palabra, que muestre la estructura del ${L.name}.`,
+    'Sé exacto.'
+  ].join('\n');
+}
+function phraseExSystem(lang){
+  const L = LANGS[lang];
+  return [
+    `Eres un profesor experto y cercano de ${L.name} para hispanohablantes. El estudiante está leyendo un libro y seleccionó un trozo porque necesita entenderlo de verdad. La traducción ya la ve aparte: no la repitas; explica.`,
+    'Recibes las oraciones anteriores (contexto), la oración completa y el trozo seleccionado. Escribe en español:',
     '- explanation: la explicación principal, detallada y en prosa (2 a 4 párrafos cortos separados por una línea en blanco): qué quiere decir aquí, cómo se construye, las formas gramaticales importantes y por qué se usan, registro, matices, expresiones idiomáticas, lo que en español se diría distinto y cualquier dato cultural útil. Adáptate al nivel del lector.',
     '- grammar: los 1 a 3 puntos gramaticales clave, cada uno con cómo se forma y otro ejemplo distinto.',
-    '- words: cada palabra del trozo en orden (sin signos): t tal como aparece; lemma, su forma de diccionario; pos; gloss, el significado aquí (1 a 4 palabras); explanation, en una frase, qué forma tiene y qué aporta.',
     '- tip: un consejo práctico breve (o "").',
     'Sé exacto y no inventes.'
   ].join('\n');
@@ -1037,7 +1045,7 @@ async function openWord(w){
   let { tok, p, si } = info;
   peek(info);
   SHEET = { kind: 'word', tok, p, si, off: w.dataset.o, busy: false, err: '', ctx: '' };
-  showSheet();
+  showSheet(); refreshSheet();
   if (!tok.lemma) {   // primero el análisis del párrafo (rápido), después la explicación
     SHEET.busy = 'ana'; refreshSheet();
     const rec = await ensureAna(p, true); if (SHEET?.off !== w.dataset.o) return;
@@ -1106,19 +1114,16 @@ function refreshSheet(){
     if (SHEET.kind === 'word') h += `<button class="btn sec" id="sFrom">▶ Leer desde aquí</button>`;
     h += `<button class="btn sec" id="sClose">Cerrar</button></div>`;
   } else if (SHEET.kind === 'phrase') {
-    const x = SHEET.x;
+    const x = SHEET.x || {}, words = x.words?.length ? x.words : phraseWords(SHEET);
     h += `<div class="phrase" lang="${lang}">${esc(SHEET.text)} <button class="spk" data-say="${esc(SHEET.text)}">🔊</button></div>`;
-    if (SHEET.busy) h += `<div class="busy" style="margin-top:8px">El profesor (${esc(mname(S.defModel))}) está explicando…</div>`;
     if (SHEET.err) h += `<div class="fix">${esc(SHEET.err)}</div>`;
-    if (x) {
-      h += `<div class="gloss"><b>${esc(x.translation)}</b></div>${x.literal ? `<div class="small">Literal: ${esc(x.literal)}</div>` : ''}`;
-      if (x.explanation) h += `<div class="sec-t">Explicación</div>${paras(x.explanation)}`;
-      if (x.grammar?.length) h += `<div class="sec-t">Gramática</div>${x.grammar.map(g => `<div class="gram"><b lang="${lang}">${esc(g.point)}</b><div>${esc(g.explanation)}</div></div>`).join('')}`;
-      if (x.words?.length) h += `<details style="margin-top:8px"><summary class="sec-t" style="cursor:pointer;display:list-item">Palabra por palabra</summary><div class="conj">${x.words.map(w => `<span lang="${lang}" data-say="${esc(w.t)}" style="cursor:pointer">${esc(w.t)}</span><span><b>${esc(w.gloss)}</b>${w.lemma && w.lemma !== w.t ? ` <span lang="${lang}">(${esc(w.lemma)})</span>` : ''} · ${esc(w.explanation)}</span>`).join('')}</div></details>`;
-      if (x.tip) h += `<div class="form">💡 ${esc(x.tip)}</div>`;
-    }
+    h += x.translation ? `<div class="gloss"><b>${esc(x.translation)}</b></div>${x.literal ? `<div class="small">Literal: ${esc(x.literal)}</div>` : ''}` : SHEET.busyTr ? '<div class="busy" style="margin-top:8px">Traduciendo…</div>' : '';
+    if (x.explanation || SHEET.busyEx) h += `<div class="sec-t">Explicación</div>${paras(x.explanation || '')}${SHEET.busyEx ? `<div class="busy">El profesor (${esc(mname(S.defModel))}) está explicando…</div>` : ''}`;
+    if (x.grammar?.length) h += `<div class="sec-t">Gramática</div>${x.grammar.map(g => `<div class="gram"><b lang="${lang}">${esc(g.point)}</b><div>${esc(g.explanation)}</div></div>`).join('')}`;
+    if (x.tip) h += `<div class="form">💡 ${esc(x.tip)}</div>`;
+    if (words.length) h += `<details style="margin-top:8px"><summary class="sec-t" style="cursor:pointer;display:list-item">Palabra por palabra</summary><div class="conj">${words.map(w => `<span lang="${lang}" data-say="${esc(w.t)}" style="cursor:pointer">${esc(w.t)}</span><span><b>${esc(w.gloss)}</b>${w.lemma && w.lemma.toLowerCase() !== w.t.toLowerCase() ? ` <span lang="${lang}">(${esc(w.lemma)})</span>` : ''}${w.form || w.explanation ? ' · ' + esc(w.form || w.explanation) : ''}</span>`).join('')}</div></details>`;
     if (SHEET.saved) h += `<div class="small" style="margin-top:8px">Explicación guardada (no se volvió a pedir).</div>`;
-    h += `<div class="row">${x && !SHEET.busy ? '<button class="btn sec" id="sAgain">Explicar de nuevo</button>' : ''}<button class="btn sec" id="sClose">Cerrar</button></div>`;
+    h += `<div class="row">${!SHEET.busyTr && !SHEET.busyEx ? '<button class="btn sec" id="sAgain">Explicar de nuevo</button>' : ''}<button class="btn sec" id="sClose">Cerrar</button></div>`;
   }
   sh.innerHTML = h;
   sh.querySelectorAll('[data-say]').forEach(b => b.onclick = () => { if ('speechSynthesis' in window) { speechSynthesis.cancel(); speechSynthesis.speak(utter(b.dataset.say, lang, 0.85)); } });
@@ -1154,23 +1159,45 @@ async function explainPhrase(sel, again = false){
   hideTip();
   // las oraciones seleccionadas no suben al pasar (pediste ayuda con ellas)
   const [a, b] = p < p2 || (p === p2 && si <= si2) ? [[p, si], [p2, si2]] : [[p2, si2], [p, si]];
-  const whole = [];
+  const whole = [], range = [];
   for (let pp = a[0]; pp <= b[0]; pp++) for (let ss = pp === a[0] ? a[1] : 0; ss <= (pp === b[0] ? b[1] : CH.sents[pp].length - 1); ss++) {
-    whole.push(sentText(pp, ss).trim());
+    whole.push(sentText(pp, ss).trim()); range.push([pp, ss]);
     const rec = ANA.get(anaKey(pp)); if (rec) { rec.seenEs[ss] = true; dbPut('ana', rec); }
   }
-  SHEET = { kind: 'phrase', text, busy: false, err: '', x: null, key: `${anaKey(a[0])}|f|${a[1]}|${text}`, args: sel };
-  showSheet();
+  SHEET = { kind: 'phrase', text, err: '', x: {}, key: `${anaKey(a[0])}|f|${a[1]}|${text}`, args: sel, range, busyTr: false, busyEx: false };
+  showSheet(); refreshSheet();
   const sh = SHEET, saved = !again && await dbGet('expl', sh.key).catch(() => null);
+  // el palabra por palabra sale del análisis de los párrafos (si falta, se pide; es el modelo barato)
+  for (const pp of new Set(range.map(r => r[0]))) if (!ANA.has(anaKey(pp))) ensureAna(pp, true).then(() => { if (SHEET === sh) refreshSheet(); });
   if (saved) { sh.x = saved.x; sh.saved = saved.date; refreshSheet(); return; }
-  sh.busy = true; refreshSheet();
-  try {
-    const lang = BOOK.lang;
-    const user = `LIBRO: «${BOOK.title}»\nNIVEL DEL LECTOR: ${myLevel(lang)}\n` + (prevSentences(a[0], a[1]) ? `ORACIONES ANTERIORES: ${prevSentences(a[0], a[1])}\n` : '') + `ORACIÓN COMPLETA: «${whole.join(' ')}»\nTROZO SELECCIONADO: «${text}»`;
-    sh.x = await ask(S.defModel, phraseSystem(lang), user, PHRASE_SCHEMA, { effort: 'low', maxTokens: 14000, ms: 150000, kind: 'explain' });
-    dbPut('expl', { k: sh.key, x: sh.x, date: Date.now() });
-  } catch (e) { sh.err = 'No se pudo explicar: ' + errText(e); }
-  sh.busy = false; if (SHEET === sh) refreshSheet();
+  sh.busyTr = sh.busyEx = true; refreshSheet();
+  const lang = BOOK.lang;
+  const user = `LIBRO: «${BOOK.title}»\nNIVEL DEL LECTOR: ${myLevel(lang)}\n` + (prevSentences(a[0], a[1]) ? `ORACIONES ANTERIORES: ${prevSentences(a[0], a[1])}\n` : '') + `ORACIÓN COMPLETA: «${whole.join(' ')}»\nTROZO SELECCIONADO: «${text}»`;
+  let last = 0;
+  const redraw = (force) => { if (SHEET !== sh) return; if (!force && Date.now() - last < 200) return; last = Date.now(); refreshSheet(); };
+  const errs = [];
+  await Promise.all([
+    // la traducción: rápida, con el modelo barato
+    askRetry(S.chatModel, phraseTrSystem(lang), user, PHRASE_TR_SCHEMA, { effort: 'low', maxTokens: 3000, ms: 60000, kind: 'read', fast: true,
+      onText: raw => { sh.x.translation = partialString(raw, 'translation'); sh.x.literal = partialString(raw, 'literal'); redraw(); } })
+      .then(o => Object.assign(sh.x, o), e => errs.push('traducción: ' + errText(e))).finally(() => { sh.busyTr = false; redraw(true); }),
+    // la explicación: el modelo caro, y se va mostrando mientras la escribe
+    askRetry(S.defModel, phraseExSystem(lang), user, PHRASE_EX_SCHEMA, { effort: 'low', maxTokens: 12000, ms: 150000, kind: 'explain',
+      onText: raw => { sh.x.explanation = partialString(raw, 'explanation'); redraw(); } })
+      .then(o => Object.assign(sh.x, o), e => errs.push('explicación: ' + errText(e))).finally(() => { sh.busyEx = false; redraw(true); })
+  ]);
+  if (errs.length) sh.err = 'No se pudo: ' + errs.join(' · ');
+  else dbPut('expl', { k: sh.key, x: { translation: sh.x.translation, literal: sh.x.literal, explanation: sh.x.explanation, grammar: sh.x.grammar || [], tip: sh.x.tip || '' }, date: Date.now() });
+  redraw(true);
+}
+// las palabras del trozo, con lo que ya dice el análisis de cada párrafo
+function phraseWords(sh){
+  const sel = sh.text.toLowerCase(), out = []; let from = 0;
+  for (const [pp, ss] of sh.range) {
+    const st = ANA.get(anaKey(pp))?.sents?.[ss]; if (!st) continue;
+    for (const t of st.tokens) { const i = sel.indexOf(t.t.toLowerCase(), from); if (i >= 0) { out.push(t); from = i + t.t.length; } }
+  }
+  return out;
 }
 
 /* ---------- estimar el nivel del libro ---------- */
