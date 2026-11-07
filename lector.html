@@ -101,7 +101,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-07 · 2';
+const APP_VERSION = '2026-11-07 · 3';
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -371,7 +371,18 @@ function parseText(text, title){
   chapters.forEach(c => c.blocks = splitLong(c.blocks, lang));
   return { title: title || (lines[0] || 'Texto').slice(0, 50), author: '', lang, chapters };
 }
+// los libros de Project Gutenberg traen la licencia al principio y al final: se deja solo el texto del libro
+function cleanGutenberg(chapters){
+  const all = chapters.flatMap((c, ci) => c.blocks.map((b, bi) => ({ ci, bi, t: b.t })));
+  const st = all.findIndex(x => /\*{3}\s*START OF (THE|THIS) PROJECT GUTENBERG/i.test(x.t));
+  const en = all.findIndex(x => /\*{3}\s*END OF (THE|THIS) PROJECT GUTENBERG/i.test(x.t));
+  if (st < 0 && en < 0) return chapters;
+  const keep = new Set(all.filter((x, i) => (st < 0 || i > st) && (en < 0 || i < en)).map(x => x.ci + ':' + x.bi));
+  const out = chapters.map((c, ci) => ({ ...c, blocks: c.blocks.filter((b, bi) => keep.has(ci + ':' + bi)) })).filter(c => c.blocks.length);
+  return out.length ? out : chapters;
+}
 async function saveNewBook(b){
+  b.chapters = cleanGutenberg(b.chapters);
   const id = uid();
   const meta = { id, title: b.title, author: b.author, lang: b.lang, added: Date.now(), last: Date.now(), level: null, versions: {},
     chapters: b.chapters.map(c => ({ title: c.title, n: c.blocks.length, chars: c.blocks.reduce((a, x) => a + x.t.length, 0) })), pos: { ver: 'o', ch: 0, p: 0, s: 0 } };
@@ -1114,7 +1125,7 @@ async function drawLibrary(){
       <p><b>Toca</b> una palabra para ver qué significa ahí; <b>tócala dos veces</b> para la explicación detallada; <b>selecciona</b> un trozo para que te lo expliquen. Las palabras nuevas aparecen subrayadas: si las lees sin pedir ayuda, suben; si pides la traducción, bajan (como en Anki).</p>
       <p>También puede <b>estimar el nivel</b> del libro y <b>simplificarlo</b> al tuyo.</p>
       ${noKey ? `<p class="fix">Para traducir hace falta tu clave de la API (la misma de «Hablemos»): ⚙ Ajustes.</p>` : ''}
-      <div class="row"><button class="btn" id="lOpen">📂 Abrir EPUB o .txt</button><button class="btn sec" id="lPaste">📋 Pegar texto</button>
+      <div class="row"><button class="btn" id="lOpen">📂 Abrir EPUB o .txt</button><button class="btn sec" id="lPaste">📋 Pegar texto</button><button class="btn sec" id="lGut">🔎 Buscar en Gutenberg</button>
       <button class="btn sec" id="lSampleKo">Probar en coreano</button><button class="btn sec" id="lSampleEn">Probar en inglés</button></div>
     </div>
     <div id="lBooks">${books.length ? '' : '<p class="small" style="text-align:center">Todavía no hay libros.</p>'}</div></div>`;
@@ -1136,6 +1147,7 @@ async function drawLibrary(){
   }
   $('lOpen').onclick = () => $('file').click();
   $('lPaste').onclick = openPaste;
+  $('lGut').onclick = openGutenberg;
   $('lSampleKo').onclick = () => importText(SAMPLES.ko.text, SAMPLES.ko.title);
   $('lSampleEn').onclick = () => importText(SAMPLES.en.text, SAMPLES.en.title);
 }
@@ -1159,6 +1171,90 @@ function openPaste(){
     <div class="field"><label>Texto (los párrafos separados por una línea en blanco; «Chapter 1», «Capítulo 1» o «제1장» empiezan un capítulo)</label><textarea id="ptText"></textarea></div>
     <button class="btn" id="ptGo">Agregar a la biblioteca</button></div>`;
   $('ptGo').onclick = () => { const t = $('ptText').value.trim(); if (!t) return; importText(t, $('ptTitle').value.trim()); };
+}
+
+/* ---------- Project Gutenberg: buscar con Gutendex y descargar el EPUB ----------
+   Si el navegador no deja descargar directo (CORS), se intenta a través de un intermediario público:
+   los libros son de dominio público y no se envía ninguna clave. */
+const PROXIES = [u => u, u => 'https://corsproxy.io/?url=' + encodeURIComponent(u), u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u)];
+const PROXY_OK = {};   // por sitio, el camino que funcionó la última vez
+async function fetchOpen(url, ms = 45000){
+  const host = new URL(url).host, first = PROXY_OK[host] || 0;
+  for (let k = 0; k < PROXIES.length; k++) {
+    const i = (first + k) % PROXIES.length, ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), ms);
+    try {
+      const r = await fetch(PROXIES[i](url), { signal: ctl.signal });
+      if (!r.ok) throw new Error('error ' + r.status);
+      const buf = await r.arrayBuffer();
+      PROXY_OK[host] = i; return buf;
+    } catch (e) { console.warn('descarga', i ? 'por intermediario ' + i : 'directa', e.message); }
+    finally { clearTimeout(timer); }
+  }
+  throw new Error('no se pudo descargar');
+}
+const GUT = { q: '', lang: '', results: [], next: null, busy: false, err: '', add: {} };
+function openGutenberg(){
+  if (!GUT.lang) GUT.lang = BOOK?.lang || (S.lastGutLang || 'en');
+  openPanel('Libros de Project Gutenberg', 'gut'); drawGut();
+  if (!GUT.results.length && !GUT.busy) gutSearch();
+}
+async function gutSearch(more = false){
+  GUT.busy = true; GUT.err = ''; if (!more) { GUT.results = []; GUT.next = null; } drawGut();
+  try {
+    const url = more && GUT.next ? GUT.next : `https://gutendex.com/books/?languages=${GUT.lang}` + (GUT.q ? '&search=' + encodeURIComponent(GUT.q) : '');
+    const data = JSON.parse(new TextDecoder().decode(await fetchOpen(url, 30000)));
+    GUT.results.push(...(data.results || [])); GUT.next = data.next || null;
+  } catch (e) { GUT.err = 'No se pudo buscar en Gutenberg (' + e.message + '). Revisa la conexión o intenta más tarde.'; }
+  GUT.busy = false; drawGut();
+}
+const gutAuthor = b => (b.authors || []).map(a => a.name.replace(/^([^,]+),\s*(.+)$/, '$2 $1')).join(', ');
+async function gutAdd(b){
+  GUT.add[b.id] = 'busy'; drawGut();
+  const f = b.formats || {};
+  const epub = f['application/epub+zip'], txt = Object.entries(f).find(([k]) => k.startsWith('text/plain'))?.[1];
+  let parsed = null, err = '';
+  for (const [url, kind] of [[epub, 'epub'], [txt, 'txt']]) {
+    if (!url || parsed) continue;
+    try {
+      const buf = await fetchOpen(url);
+      parsed = kind === 'epub' ? await parseEpub(new File([buf], b.title + '.epub')) : parseText(new TextDecoder().decode(buf), b.title);
+    } catch (e) { err = e.message; }
+  }
+  if (!parsed) { GUT.add[b.id] = 'err'; console.warn('Gutenberg', b.id, err); drawGut(); return; }
+  parsed.title = b.title; parsed.author = gutAuthor(b) || parsed.author;
+  const l = (b.languages || [])[0]; if (LANGS[l]) parsed.lang = l;
+  const meta = await saveNewBook(parsed);
+  GUT.add[b.id] = meta.id; toast(`«${b.title}» está en tu biblioteca.`);
+  if (PANEL === 'gut') drawGut();
+}
+function drawGut(){
+  if (PANEL !== 'gut') return;
+  const pb = $('pbody');
+  pb.innerHTML = `<div class="box"><p class="small" style="margin-top:0">Más de 70 000 libros de dominio público (clásicos). Hay muchísimos en inglés, francés, alemán, italiano y portugués; en coreano, japonés y chino hay muy pocos.</p>
+    <div class="field"><label>Idioma</label><select id="gLang">${Object.entries(LANGS).map(([k, L]) => `<option value="${k}" ${k === GUT.lang ? 'selected' : ''}>${L.native} · ${L.name}</option>`).join('')}</select></div>
+    <div class="row" style="margin-top:0"><input class="search" id="gQ" placeholder="Título o autor (vacío: los más leídos)" value="${esc(GUT.q)}" style="flex:1;min-width:0"><button class="btn" id="gGo">Buscar</button></div></div>
+    <div id="gList"></div>`;
+  const list = $('gList');
+  for (const b of GUT.results) {
+    const st = GUT.add[b.id], cover = b.formats?.['image/jpeg'];
+    const d = document.createElement('div'); d.className = 'book';
+    d.innerHTML = `<div class="cov" style="overflow:hidden">${cover ? `<img src="${esc(cover)}" alt="" style="width:100%;height:100%;object-fit:cover" loading="lazy">` : '📖'}</div>
+      <div class="info"><h3 style="white-space:normal">${esc(b.title)}</h3><div class="meta">${esc(gutAuthor(b))}</div>
+      <div class="meta">${(b.languages || []).map(l => esc(LANGS[l]?.name || l)).join(', ')} · ${(b.download_count || 0).toLocaleString('es')} descargas</div>
+      ${st === 'err' ? `<div class="fix">El navegador no pudo descargarlo. <a href="https://www.gutenberg.org/ebooks/${b.id}" target="_blank" rel="noopener">Ábrelo en Gutenberg</a>, descarga el «EPUB3» y ábrelo con 📂 en la biblioteca.</div>` : ''}</div>
+      <div style="display:flex;flex-direction:column;gap:6px">${st === 'busy' ? '<span class="busy">descargando…</span>' : st && st !== 'err' ? '<button class="btn" data-open>Leer</button>' : `<button class="btn" data-add>${st === 'err' ? 'Reintentar' : 'Agregar'}</button>`}</div>`;
+    d.querySelector('[data-add]')?.addEventListener('click', () => gutAdd(b));
+    d.querySelector('[data-open]')?.addEventListener('click', () => openBookPanel(st, true));
+    list.appendChild(d);
+  }
+  if (GUT.busy) list.insertAdjacentHTML('beforeend', '<p class="busy" style="text-align:center">Buscando…</p>');
+  else if (GUT.err) list.insertAdjacentHTML('beforeend', `<p class="fix">${esc(GUT.err)}</p>`);
+  else if (!GUT.results.length) list.insertAdjacentHTML('beforeend', '<p class="small" style="text-align:center">No se encontraron libros.</p>');
+  else if (GUT.next) { list.insertAdjacentHTML('beforeend', '<div class="row" style="justify-content:center"><button class="btn sec" id="gMore">Más resultados</button></div>'); $('gMore').onclick = () => gutSearch(true); }
+  const go = () => { GUT.q = $('gQ').value.trim(); gutSearch(); };
+  $('gGo').onclick = go;
+  $('gQ').onkeydown = e => { if (e.key === 'Enter') go(); };
+  $('gLang').onchange = e => { GUT.lang = e.target.value; S.lastGutLang = GUT.lang; saveSet(); gutSearch(); };
 }
 
 /* ---------- paneles ---------- */
