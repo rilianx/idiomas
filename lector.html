@@ -103,7 +103,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-07 · 21';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-07 · 22';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -457,7 +457,8 @@ function splitSents(t, lang){
 }
 
 /* ---------- la IA (misma clave que «Hablemos») ---------- */
-const SIMP_MODELS = [['claude-haiku-5-5','Claude Haiku 5.5 · barato'],['claude-sonnet-5-5','Claude Sonnet 5.5 · más natural'],['claude-opus-5-5','Claude Opus 5.5 · el mejor, caro'],['gpt-5.4-mini','GPT-5.4 mini · OpenAI']];
+const SIMP_MODELS = [['claude-sonnet-5-5','Claude Sonnet 5.5 · natural; recomendado para A1–A2'],['claude-haiku-5-5','Claude Haiku 5.5 · el más barato'],['claude-opus-5-5','Claude Opus 5.5 · muy bueno, caro'],['claude-fable-5-1','Claude Fable 5.1 · el más capaz y el más caro'],['gpt-5.4-mini','GPT-5.4 mini · OpenAI']];
+const CHECK_MODEL = () => S.checkModel || S.chatModel;   // el que revisa si la simplificación quedó en el nivel
 const mname = m => MODELS[m]?.name || m;
 const errText = e => e instanceof NoKey ? 'falta la clave de la API (⚙ Ajustes)' : e.message;
 
@@ -1354,7 +1355,7 @@ async function simplifyChunk(b, ver, model, chunk, known, terms, stats){
   // revisión del nivel (modelo barato) y, si hay algo difícil, se reescriben solo esos párrafos (hasta 2 vueltas)
   if (S.simpCheck === false || lvIdx(lvl) >= 4) return ps;
   for (let round = 0; round < 2; round++) {
-    const chk = await askRetry(S.chatModel, checkSystem(lang, lvl), (terms?.length ? `TÉRMINOS PERMITIDOS: ${terms.map(t => t.dst).join(', ')}\n\n` : '') + 'PÁRRAFOS:\n' + ps.map((t, i) => `[${i + 1}] ${t}`).join('\n\n'),
+    const chk = await askRetry(CHECK_MODEL(), checkSystem(lang, lvl), (terms?.length ? `TÉRMINOS PERMITIDOS: ${terms.map(t => t.dst).join(', ')}\n\n` : '') + 'PÁRRAFOS:\n' + ps.map((t, i) => `[${i + 1}] ${t}`).join('\n\n'),
       CHECK_SCHEMA, { effort: 'low', maxTokens: 4000, ms: 90000, kind: 'simplify', fast: true, retries: 6 }).catch(() => null);
     const probs = (chk?.problems || []).filter(p => p.para >= 1 && p.para <= ps.length && (p.words?.length || p.grammar?.length));
     if (!probs.length) break;
@@ -1829,7 +1830,7 @@ async function drawBook(id){
   h += `<p class="small">Reescribe cada párrafo con vocabulario y gramática del nivel elegido, sin cambiar la historia: en el mismo idioma (simplificar) o en otro (traducir y adaptar). Los párrafos quedan alineados con el original (en la lectura, ¶ muestra el original). Puedes hacerlo con todo el libro o ir capítulo por capítulo mientras lees.</p>
     <div class="field"><label>Idioma</label><select id="bTl">${Object.entries(LANGS).map(([k, L]) => `<option value="${k}" ${k === tl ? 'selected' : ''}>${L.native} · ${L.name}${k === lang ? ' (el del libro)' : ''}</option>`).join('')}</select></div>
     <div class="field"><label>Nivel</label><select id="bTgt">${CEFR.map(c => `<option value="${c}" ${c === tgt ? 'selected' : ''}>${esc(lvLabel(tl, c))}</option>`).join('')}</select></div>
-    <div class="field"><label>Modelo</label><select id="bModel">${SIMP_MODELS.map(([m, l]) => `<option value="${m}" ${m === S.simpModel ? 'selected' : ''}>${esc(l)} · todo el libro ${cost(m)}</option>`).join('')}</select></div>
+    <div class="field"><label>Modelo para ${trn ? 'traducir' : 'simplificar'}</label><select id="bModel">${SIMP_MODELS.map(([m, l]) => `<option value="${m}" ${m === S.simpModel ? 'selected' : ''}>${esc(l)} · todo el libro ${cost(m)}</option>`).join('')}</select></div>
     ${lvIdx(tgt) <= 1 && S.simpModel === 'claude-haiku-5-5' ? `<div class="form">💡 Para ${esc(lvLabel(tl, tgt))} conviene <b>Claude Sonnet 5.5</b>: bajar tanto el nivel sin perder la historia es difícil, y Haiku tiende a dejar palabras y gramática más altas.</div>` : ''}
     <div class="small">${S.simpCheck === false ? 'Revisión del nivel desactivada (⚙ Ajustes).' : 'Después de cada parte, el modelo barato revisa si quedó algo sobre el nivel y, si es así, esos párrafos se reescriben (hasta 2 vueltas). Antes de empezar se arma una lista de nombres y términos para que no cambien.'}</div>
     <div class="row"><button class="btn" id="bSimpAll">${trn ? 'Traducir' : 'Simplificar'} todo el libro</button><button class="btn sec" id="bSimpRead">${trn ? 'Traducir' : 'Simplificar'} mientras leo</button></div></div>
@@ -1910,6 +1911,8 @@ function openSettings(){
     <div class="box"><h3>Modelos</h3>
       <div class="field"><label>Traducir palabras al leer (cada párrafo)</label>${sel('mRead', CHAT_MODELS, S.chatModel)}</div>
       <div class="field"><label>Explicaciones (doble toque, selección, nivel del libro)</label>${sel('mDef', DEF_MODELS, S.defModel)}</div>
+      <div class="field"><label>Simplificar y traducir libros</label>${sel('mSimp', SIMP_MODELS, S.simpModel)}<div class="small">También se elige en la ficha de cada libro (ℹ). Se usa también para la lista de nombres y para reescribir lo que quedó sobre el nivel.</div></div>
+      <div class="field"><label>Revisar el nivel de la simplificación</label>${sel('mCheck', [...CHAT_MODELS, ...DEF_MODELS.filter(([m]) => !CHAT_MODELS.some(c => c[0] === m))], CHECK_MODEL())}<div class="small">Busca palabras y gramática sobre el nivel en cada parte. Uno barato suele bastar; uno mejor detecta más.</div></div>
       <label class="check"><input type="checkbox" id="cAuto" ${S.autoAnalyze ? 'checked' : ''}><span>Traducir por adelantado los párrafos que vas a leer (la palabra que toques ya estará lista). Si no, se traduce el párrafo al tocar una palabra.</span></label>
       <label class="check"><input type="checkbox" id="cSilent" ${S.silentRead !== false ? 'checked' : ''}><span>Contar la lectura sin voz: al bajar la página, el párrafo que pasaste (y que estuvo a la vista el tiempo para leerlo) cuenta como leído, y la marca te sigue.</span></label></div>
     <div class="box"><h3>Mi nivel</h3><div class="conj" style="align-items:center">${Object.entries(LANGS).map(([k, L]) => `<span>${L.native}</span>${sel('lv_' + k, CEFR.map(c => [c, lvLabel(k, c)]), myLevel(k))}`).join('')}</div></div>
@@ -1944,6 +1947,8 @@ function openSettings(){
   on('kW', 'change', e => { KEYS.workspace = e.target.value.trim(); saveKeys(); });
   on('mRead', 'change', e => { S.chatModel = e.target.value; saveSet(); });
   on('mDef', 'change', e => { S.defModel = e.target.value; saveSet(); });
+  on('mSimp', 'change', e => { S.simpModel = e.target.value; saveSet(); });
+  on('mCheck', 'change', e => { S.checkModel = e.target.value; saveSet(); });
   on('cAuto', 'change', e => { S.autoAnalyze = e.target.checked; saveSet(); });
   on('cSilent', 'change', e => { S.silentRead = e.target.checked; saveSet(); });
   on('sPar', 'change', e => { S.simpPar = +e.target.value; saveSet(); });
