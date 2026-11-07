@@ -101,7 +101,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-07 · 5';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-07 · 6';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -1224,19 +1224,26 @@ async function gutSearch(more = false){
   GUT.busy = false; drawGut();
 }
 const gutAuthor = b => (b.authors || []).map(a => a.name.replace(/^([^,]+),\s*(.+)$/, '$2 $1')).join(', ');
-async function gutAdd(b){
-  GUT.add[b.id] = 'busy'; drawGut();
-  const f = b.formats || {};
+// las direcciones que da Gutendex (…/ebooks/1342.epub3.images) redirigen al archivo en /cache/, y los intermediarios
+// devuelven el redireccionamiento sin seguirlo (el navegador lo bloquea): se piden primero las direcciones finales
+function gutUrls(b){
+  const id = b.id, f = b.formats || {}, c = `https://www.gutenberg.org/cache/epub/${id}/pg${id}`;
   const epub = f['application/epub+zip'], txt = Object.entries(f).find(([k]) => k.startsWith('text/plain'))?.[1];
+  return [[c + '-images-3.epub', 'epub'], [c + '-images.epub', 'epub'], [c + '.epub', 'epub'], ...(epub ? [[epub, 'epub']] : []), [c + '.txt', 'txt'], ...(txt ? [[txt, 'txt']] : [])];
+}
+async function gutAdd(b){
+  GUT.add[b.id] = 'busy'; GUT.addErr = GUT.addErr || {}; drawGut();
   let parsed = null, err = '';
-  for (const [url, kind] of [[epub, 'epub'], [txt, 'txt']]) {
-    if (!url || parsed) continue;
+  const urls = gutUrls(b);
+  for (let i = 0; i < urls.length && !parsed; i++) {
+    const [url, kind] = urls[i];
+    GUT.addStep = GUT.addStep || {}; GUT.addStep[b.id] = `${i + 1}/${urls.length}`; drawGut();
     try {
-      const buf = await fetchOpen(url, { check: kind === 'epub' ? isZip : isText });
+      const buf = await fetchOpen(url, { ms: 40000, check: kind === 'epub' ? isZip : isText });
       parsed = kind === 'epub' ? await parseEpub(new File([buf], b.title + '.epub')) : parseText(new TextDecoder().decode(buf), b.title);
-    } catch (e) { err = e.message; }
+    } catch (e) { err = e.message; console.warn('Gutenberg', url, e.message); }
   }
-  if (!parsed) { GUT.add[b.id] = 'err'; GUT.addErr = GUT.addErr || {}; GUT.addErr[b.id] = err; drawGut(); return; }
+  if (!parsed) { GUT.add[b.id] = 'err'; GUT.addErr[b.id] = err; drawGut(); return; }
   parsed.title = b.title; parsed.author = gutAuthor(b) || parsed.author;
   const l = (b.languages || [])[0]; if (LANGS[l]) parsed.lang = l;
   const meta = await saveNewBook(parsed);
@@ -1257,8 +1264,9 @@ function drawGut(){
     d.innerHTML = `<div class="cov" style="overflow:hidden">${cover ? `<img src="${esc(cover)}" alt="" style="width:100%;height:100%;object-fit:cover" loading="lazy">` : '📖'}</div>
       <div class="info"><h3 style="white-space:normal">${esc(b.title)}</h3><div class="meta">${esc(gutAuthor(b))}</div>
       <div class="meta">${(b.languages || []).map(l => esc(LANGS[l]?.name || l)).join(', ')} · ${(b.download_count || 0).toLocaleString('es')} descargas</div>
-      ${st === 'err' ? `<div class="fix">El navegador no pudo descargarlo (${esc(GUT.addErr?.[b.id] || '')}). <a href="https://www.gutenberg.org/ebooks/${b.id}" target="_blank" rel="noopener">Ábrelo en Gutenberg</a>, descarga el «EPUB3» y ábrelo con 📂 en la biblioteca.</div>` : ''}</div>
-      <div style="display:flex;flex-direction:column;gap:6px">${st === 'busy' ? '<span class="busy">descargando…</span>' : st && st !== 'err' ? '<button class="btn" data-open>Leer</button>' : `<button class="btn" data-add>${st === 'err' ? 'Reintentar' : 'Agregar'}</button>`}</div>`;
+      ${st === 'err' ? `<div class="fix">El navegador no pudo descargarlo (${esc(GUT.addErr?.[b.id] || '')}).
+        <p style="margin:6px 0"><a href="https://www.gutenberg.org/cache/epub/${b.id}/pg${b.id}-images-3.epub" target="_blank" rel="noopener">Descarga el EPUB</a> y ábrelo con 📂 en la biblioteca${S.proxy ? '.' : ', o crea tu propio intermediario (⚙ Ajustes → Gutenberg) para que se agregue solo.'}</p></div>` : ''}</div>
+      <div style="display:flex;flex-direction:column;gap:6px">${st === 'busy' ? `<span class="busy">descargando… ${esc(GUT.addStep?.[b.id] || '')}</span>` : st && st !== 'err' ? '<button class="btn" data-open>Leer</button>' : `<button class="btn" data-add>${st === 'err' ? 'Reintentar' : 'Agregar'}</button>`}</div>`;
     d.querySelector('[data-add]')?.addEventListener('click', () => gutAdd(b));
     d.querySelector('[data-open]')?.addEventListener('click', () => openBookPanel(st, true));
     list.appendChild(d);
