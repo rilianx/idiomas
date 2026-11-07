@@ -262,3 +262,25 @@ function entryHTML(e, { lang = 'ko', extra = 'Hanja', sentence = false, maxForms
   if (sentence && e.sentence) h += `<div class="sec-t">Donde la viste</div><div class="small" lang="${lang}">${esc(e.sentence)}</div>`;
   return h;
 }
+
+/* ---------- voz natural con OpenAI (texto a voz) ----------
+   POST /v1/audio/speech con la clave de OpenAI; devuelve el audio (mp3). gpt-4o-mini-tts acepta además
+   indicaciones de cómo leer. El costo se estima por caracteres (OpenAI no informa uso en esta respuesta). */
+const TTS_MODELS = [['gpt-4o-mini-tts', 'GPT-4o mini TTS · natural, sigue indicaciones (recomendado)'], ['tts-1-hd', 'TTS-1 HD · buena calidad'], ['tts-1', 'TTS-1 · el más rápido']];
+const TTS_VOICES = ['marin', 'cedar', 'coral', 'nova', 'shimmer', 'sage', 'alloy', 'ash', 'ballad', 'echo', 'fable', 'onyx', 'verse'];
+const TTS_PRICE_PER_MCHAR = { 'gpt-4o-mini-tts': 16, 'tts-1': 15, 'tts-1-hd': 30 };   // dólares por millón de caracteres (aprox.)
+const TTS_DEFAULT_INSTR = 'Lee con voz clara y natural, a un ritmo tranquilo, como un narrador de audiolibros para estudiantes de idiomas. Pronuncia bien cada palabra.';
+async function openaiSpeech(text, { model = 'gpt-4o-mini-tts', voice = 'marin', instructions = '' } = {}){
+  if (!KEYS.openai) throw new NoKey('openai');
+  const body = { model, voice, input: text, response_format: 'mp3' };
+  if (instructions && model.startsWith('gpt-')) body.instructions = instructions;
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 60000);
+  let res;
+  try { res = await fetch('https://api.openai.com/v1/audio/speech', { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer ' + KEYS.openai }, body: JSON.stringify(body), signal: ctl.signal }); }
+  catch (e) { throw new Error(e.name === 'AbortError' ? 'la voz tardó demasiado' : 'sin conexión'); }
+  finally { clearTimeout(timer); }
+  if (!res.ok) { const data = await res.json().catch(() => ({})); throw httpError(res, data); }
+  return res.blob();
+}
+// un número corto para identificar un texto (caché del audio)
+function textHash(s){ let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return (h >>> 0).toString(36) + s.length.toString(36); }
