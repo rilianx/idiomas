@@ -103,7 +103,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-07 · 19';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-07 · 20';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -155,7 +155,7 @@ function flushDict(){
 }
 addEventListener('pagehide', () => { flushDict(); savePosNow(); });
 const SKIP_POS = new Set(['puntuación', 'nombre propio', 'número', 'partícula', 'artículo']);
-function lemmaOf(tok, lang = BOOK?.lang){
+function lemmaOf(tok, lang = LANG()){
   let l = (tok.lemma || '').trim(); if (!l) return '';
   if (lang !== 'ko' && tok.pos !== 'nombre propio') l = l.toLowerCase();
   return l;
@@ -192,6 +192,14 @@ function srsGood(e){
   if (scoreOf(e) >= 50 && e.status !== 'conocida') { e.status = 'conocida'; e.knownAt = now; }
   touch(e.lemma); return true;
 }
+// la leíste sin consultarla nunca: queda como sabida (intervalo de un mes, ~83 %)
+function learnNow(e){
+  const s = srsOf(e), now = Date.now();
+  s.ivl = Math.max(s.ivl, 30); s.reps++; s.last = now; s.due = now + s.ivl * DAY;
+  e.heard = Math.max((e.heard || 0) + 1, 5); e.seen = (e.seen || 0) + 1; e.last = now;
+  if (e.status !== 'conocida') { e.status = 'conocida'; e.knownAt = now; }
+  touch(e.lemma);
+}
 function srsAgain(e){
   const s = srsOf(e), now = Date.now();
   if (s.lapsedAt && now - s.lapsedAt < 10 * 60e3) return;    // mirarla varias veces seguidas cuenta como un solo olvido
@@ -209,7 +217,7 @@ function setKnown(e, known){
 function wordClass(tok){
   if (!tok.lemma || SKIP_POS.has(tok.pos)) return '';
   const e = DICT[lemmaOf(tok)];
-  if (!e) return tok.cefr && lvIdx(tok.cefr) >= lvIdx(myLevel(BOOK.lang)) ? 'new' : '';
+  if (!e) return tok.cefr && lvIdx(tok.cefr) >= lvIdx(myLevel(LANG())) ? 'new' : '';
   if (!e.srs && e.status === 'conocida') return '';
   const sc = scoreOf(e);
   return sc < 30 ? 'new' : sc < 70 ? 'learn' : '';
@@ -599,19 +607,30 @@ function levelSystem(lang){
     '- advice: un consejo para leerlo según el nivel (p. ej. si conviene simplificarlo y a qué nivel).'
   ].join('\n');
 }
-function simpSystem(lang, lvl){
-  const L = LANGS[lang];
+function simpSystem(src, lang, lvl){
+  const L = LANGS[lang], S2 = LANGS[src], tr = src !== lang;
   return [
-    `Eres editor de lecturas graduadas en ${L.name} (libros adaptados para estudiantes). Reescribes un fragmento de un libro para un lector de nivel ${lvLabel(lang, lvl)} del MCER.`,
-    `Devuelve en paras exactamente un párrafo reescrito por cada párrafo recibido, en el mismo orden y la misma cantidad, escrito en ${L.name}.`,
-    '- Conserva la historia, los hechos, los diálogos (quién dice qué), los nombres y el tono. No resumas de más ni agregues cosas: cada párrafo dice lo mismo que el original, solo que más fácil.',
+    tr ? `Eres traductor y editor de lecturas graduadas (libros adaptados para estudiantes). Traduces un fragmento de un libro escrito en ${S2.name} al ${L.name}, adaptado para un lector de nivel ${lvLabel(lang, lvl)} del MCER que aprende ${L.name}.`
+       : `Eres editor de lecturas graduadas en ${L.name} (libros adaptados para estudiantes). Reescribes un fragmento de un libro para un lector de nivel ${lvLabel(lang, lvl)} del MCER.`,
+    `Devuelve en paras exactamente un párrafo ${tr ? 'traducido' : 'reescrito'} por cada párrafo recibido, en el mismo orden y la misma cantidad, escrito en ${L.name}.`,
+    '- Conserva la historia, los hechos, los diálogos (quién dice qué), los nombres y el tono. No resumas de más ni agregues cosas: cada párrafo dice lo mismo que el original' + (tr ? ', en ' + L.name + ' natural.' : ', solo que más fácil.'),
     `- Vocabulario: usa palabras frecuentes de nivel ${lvl} o inferior. Reemplaza las palabras raras, literarias o arcaicas por otras comunes, o explícalas con palabras simples. Puedes conservar alguna palabra clave del libro si se repite y es importante.`,
     `- Gramática: oraciones más cortas y estructuras propias del nivel ${lvl}; divide las oraciones largas; evita las construcciones literarias complejas.`,
-    lang === 'ko' ? '- Mantén de forma coherente el estilo de narración del original (por ejemplo, -았다/었다 en la narración) y el registro de cada personaje en los diálogos.' : '- Mantén el tiempo de la narración del original de forma coherente.',
-    '- Si un párrafo es un título, déjalo como título corto. Si un párrafo ya es fácil para ese nivel, déjalo casi igual.',
+    lang === 'ko' ? '- Usa de forma coherente un estilo de narración (por ejemplo, -았다/었다 en la narración) y un registro adecuado para cada personaje en los diálogos.' : '- Mantén el tiempo de la narración de forma coherente.',
+    tr ? '- Los nombres propios se dejan como en el original (en coreano, japonés o chino, transcritos de la forma habitual).' : '',
+    '- Si un párrafo es un título, déjalo como título corto. ' + (tr ? '' : 'Si un párrafo ya es fácil para ese nivel, déjalo casi igual.'),
     '- Si vienen PALABRAS QUE EL LECTOR YA CONOCE, prefiérelas cuando sirvan.'
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 }
+
+/* ---------- versiones: «A2» (simplificada, mismo idioma) o «ko:A2» (traducida y adaptada a otro idioma) ---------- */
+const verLang = (b, ver) => (ver && ver !== 'o' && (b?.versions?.[ver]?.lang || (ver.includes(':') ? ver.split(':')[0] : ''))) || b?.lang;
+const verLvl = ver => String(ver).split(':').pop();
+const verKey = (b, lang, lvl) => lang === b.lang ? lvl : `${lang}:${lvl}`;
+const verName = (b, ver) => { if (ver === 'o') return 'Original'; const l = verLang(b, ver); return (l !== b.lang ? LANGS[l]?.name + ' ' : '') + lvLabel(l, verLvl(ver)); };
+const verKind = (b, ver) => verLang(b, ver) !== b.lang ? 'traducido' : 'simplificado';
+// el idioma de lo que se está leyendo (el del libro o el de su versión traducida)
+const LANG = () => (BOOK && CH ? verLang(BOOK, CH.ver) : BOOK?.lang) || DLANG;
 
 /* ---------- estado de la lectura ---------- */
 let BOOK = null;          // datos del libro abierto
@@ -636,7 +655,8 @@ async function openChapter(ver, ch, p = 0, s = 0){
   const missing = !rec;
   if (missing) rec = await dbGet('text', `${BOOK.id}|${ch}`);
   CH = { ver, ch, paras: rec?.paras || [], heads: new Set(rec?.heads || []), missing };
-  CH.sents = CH.paras.map(t => splitSents(t, BOOK.lang));
+  useDict(verLang(BOOK, ver));
+  CH.sents = CH.paras.map(t => splitSents(t, verLang(BOOK, ver)));
   CUR.p = Math.min(p, Math.max(0, CH.paras.length - 1)); CUR.s = Math.min(s, (CH.sents[CUR.p] || ['']).length - 1);
   if (!missing) for (const r of await dbPrefix('ana', `${BOOK.id}|${ver}|${ch}|`)) ANA.set(r.k, r);
   // en una versión simplificada, se simplifican solos este capítulo y el siguiente
@@ -658,7 +678,7 @@ function ensureAna(p, urgent = false){
   const old = INFLIGHT.get(k);
   if (old) { if (urgent && !old.started) { QUEUE.splice(QUEUE.indexOf(old), 1); startJob(old); } return old.promise; }
   let resolve; const promise = new Promise(r => resolve = r);
-  const job = { k, p, text: CH.paras[p], sents: CH.sents[p].map(x => x.trim()), prev: CH.paras[p - 1] || '', book: BOOK, ver: CH.ver, ch: CH.ch, resolve, promise };
+  const job = { k, p, text: CH.paras[p], sents: CH.sents[p].map(x => x.trim()), prev: CH.paras[p - 1] || '', book: BOOK, lang: LANG(), ver: CH.ver, ch: CH.ch, resolve, promise };
   INFLIGHT.set(k, job); markBusy(p, true);
   // lo que pide el lector (una palabra tocada) parte de inmediato, aunque ya haya 3 en curso
   if (urgent) startJob(job); else { QUEUE.push(job); pump(); }
@@ -698,7 +718,7 @@ function sentGroups(sents){
 async function analyze(job){
   const stored = await dbGet('ana', job.k);
   if (stored) { ANA.set(job.k, stored); return stored; }
-  const lang = job.book.lang, withEs = !!S.showTr, parts = [];
+  const lang = job.lang, withEs = !!S.showTr, parts = [];
   let last = 0;
   const update = () => {   // lo que ya llegó de todos los grupos se dibuja (como mucho cada 250 ms)
     if (Date.now() - last < 250) return; last = Date.now();
@@ -744,7 +764,7 @@ async function ensureTr(p){
   if (!rec || TR_INFLIGHT.has(k)) return;
   TR_INFLIGHT.add(k);
   try {
-    const out = await askRetry(S.chatModel, `Traduce al español, de forma natural, cada oración numerada de un libro en ${LANGS[BOOK.lang].name}, en el contexto del párrafo. Devuelve en es una traducción por oración, en el mismo orden y la misma cantidad.`,
+    const out = await askRetry(S.chatModel, `Traduce al español, de forma natural, cada oración numerada de un libro en ${LANGS[LANG()].name}, en el contexto del párrafo. Devuelve en es una traducción por oración, en el mismo orden y la misma cantidad.`,
       rec.sents.map((x, i) => `${i + 1}. ${x.text}`).join('\n'), TR_SCHEMA, { effort: 'low', maxTokens: 4000, ms: 60000, kind: 'read', fast: true });
     rec.sents.forEach((x, i) => { x.es = out.es?.[i] || ''; });
     await dbPut('ana', rec);
@@ -780,7 +800,7 @@ function prefetchVisible(){
    mínimo para leerlo, cuenta como leído: sus palabras que no miraste suben, igual que al avanzar con ▶ o ⏭.
    La marca de la oración actual también te sigue, para que ▶ y la posición guardada queden donde vas. */
 const VIS = new Map();   // clave del párrafo → segundos a la vista
-const needSecs = p => { const t = CH.paras[p] || ''; const words = CJK(BOOK.lang) ? t.length / 2 : t.split(/\s+/).length; return Math.max(2, words * 0.3); };
+const needSecs = p => { const t = CH.paras[p] || ''; const words = CJK(LANG()) ? t.length / 2 : t.split(/\s+/).length; return Math.max(2, words * 0.3); };
 setInterval(() => {
   if (!BOOK || !CH || CH.missing || PLAY || PANEL || SHEET || document.hidden || S.silentRead === false) return;
   const v = $('view').getBoundingClientRect();
@@ -810,14 +830,14 @@ function renderReader(){
   $('player').hidden = false;
   renderHeader();
   const v = $('view'); v.innerHTML = '';
-  const bk = document.createElement('div'); bk.id = 'book'; bk.lang = BOOK.lang;
+  const bk = document.createElement('div'); bk.id = 'book'; bk.lang = LANG();
   const title = BOOK.chapters[CH.ch]?.title || '';
-  bk.innerHTML = `<div class="chtitle">${CH.heads.has(0) && !CH.missing ? '' : esc(title)}${CH.ver !== 'o' ? ` <span class="badge lv">${esc(lvLabel(BOOK.lang, CH.ver))} · simplificado</span>` : ''}</div>`;
+  bk.innerHTML = `<div class="chtitle">${CH.heads.has(0) && !CH.missing ? '' : esc(title)}${CH.ver !== 'o' ? ` <span class="badge lv">${esc(verName(BOOK, CH.ver))} · ${verKind(BOOK, CH.ver)}</span>` : ''}</div>`;
   if (CH.missing) {
     const ph = document.createElement('div'); ph.className = 'placeholder';
     const job = SIMP_JOBS.get(`${BOOK.id}|${CH.ver}`);
-    ph.innerHTML = job ? `<p>Simplificando el libro a ${esc(CH.ver)}… (${job.doneCh}/${job.totalCh} capítulos · ${job.doneParts}/${job.totalParts} partes)</p><p class="small">Este capítulo aparecerá cuando esté listo.</p>` :
-      `<p>Este capítulo todavía no está simplificado a ${esc(lvLabel(BOOK.lang, CH.ver))}.</p><div class="row" style="justify-content:center"><button class="btn" id="simpNow">Simplificar este capítulo</button><button class="btn sec" id="seeOrig">Leer el original</button></div>`;
+    ph.innerHTML = job ? `<p>Preparando la versión ${esc(verName(BOOK, CH.ver))}… (${job.doneCh}/${job.totalCh} capítulos · ${job.doneParts}/${job.totalParts} partes)</p><p class="small">Este capítulo aparecerá cuando esté listo.</p>` :
+      `<p>Este capítulo todavía no está listo en la versión ${esc(verName(BOOK, CH.ver))}.</p><div class="row" style="justify-content:center"><button class="btn" id="simpNow">Simplificar este capítulo</button><button class="btn sec" id="seeOrig">Leer el original</button></div>`;
     bk.appendChild(ph);
     v.appendChild(bk);
     if ($('simpNow')) $('simpNow').onclick = () => simplifyBook(BOOK, CH.ver, S.simpModel, [CH.ch]);
@@ -846,6 +866,17 @@ function paraEl(p){
 function rerenderPara(p){
   const old = document.querySelector(`#book .para[data-p="${p}"]`); if (!old) return;
   old.replaceWith(paraEl(p));
+}
+// cuando cambia el estado de palabras, se redibujan los párrafos a la vista (la misma palabra puede estar en varios)
+function rerenderVisible(p){
+  if (p !== undefined) rerenderPara(p);
+  const v = $('view').getBoundingClientRect();
+  for (const el of [...document.querySelectorAll('#book .para')]) {
+    const r = el.getBoundingClientRect();
+    if (r.bottom < v.top - v.height) continue;
+    if (r.top > v.bottom + v.height) break;
+    if (+el.dataset.p !== p) rerenderPara(+el.dataset.p);
+  }
 }
 function markBusy(p, on){ document.querySelector(`#book .para[data-p="${p}"]`)?.classList.toggle('busy', on); }
 const TOKS = new WeakMap();
@@ -922,18 +953,20 @@ function creditSentence(p, s){
     if (PEEK.has(`${k}#${s}#${l}`)) continue;
     let e = DICT[l];
     // las palabras que no conoces todavía (de tu nivel o más) entran al diccionario la primera vez que las lees
-    if (!e) { if (!tok.cefr || lvIdx(tok.cefr) < lvIdx(myLevel(BOOK.lang))) continue; e = ensureEntry(tok, st.text); }
-    if (srsGood(e)) changed = true;
+    if (!e) { if (!tok.cefr || lvIdx(tok.cefr) < lvIdx(myLevel(LANG()))) continue; e = ensureEntry(tok, st.text); }
+    // nunca la consultaste: se da por aprendida (deja de subrayarse); si alguna vez la consultaste, sube de a poco
+    if (!e.lookups && !e.srs?.lapses) { if (scoreOf(e) < 70) { learnNow(e); changed = true; } else if (srsGood(e)) changed = true; }
+    else if (srsGood(e)) changed = true;
   }
   rec.done[s] = true; dbPut('ana', rec);
-  if (changed) rerenderPara(p);
+  if (changed) rerenderVisible(p);
 }
 
 /* ---------- leer en voz alta ---------- */
 const utter = (text, lang, rate = S.rate) => makeUtterance(text, lang, rate, S.voices[lang]);
 function speakWord(text){
   if (!('speechSynthesis' in window) || PLAY) return;
-  speechSynthesis.cancel(); speechSynthesis.speak(utter(text, BOOK?.lang || DLANG));
+  speechSynthesis.cancel(); speechSynthesis.speak(utter(text, LANG()));
 }
 let PLAY = false, UTT = null, WAKE = null;
 // la última palabra tocada (sin estar leyendo): ▶ parte desde ahí
@@ -947,7 +980,7 @@ async function play(){
   if (!('speechSynthesis' in window)) { toast('Este navegador no puede leer en voz alta.'); return; }
   if (!CH || CH.missing) return;
   if (FROM) { const f = FROM; setCursor(f.p, f.si); START_OFF = f.off; }
-  if (!voicesFor(BOOK.lang).length) toast(`No encontré una voz en ${LANGS[BOOK.lang].name}; se usará la voz por defecto (puedes instalar una en el sistema).`);
+  if (!voicesFor(LANG()).length) toast(`No encontré una voz en ${LANGS[LANG()].name}; se usará la voz por defecto (puedes instalar una en el sistema).`);
   PLAY = true; updatePlay();
   try { WAKE = await navigator.wakeLock?.request('screen'); } catch (e) {}
   speakCurrent();
@@ -964,7 +997,7 @@ function speakCurrent(){
   const off = START_OFF; START_OFF = 0;    // empezar a mitad de la oración (desde la palabra tocada)
   const text = sentText(CUR.p, CUR.s).trim().slice(off);
   if (!/[\p{L}\p{N}]/u.test(text)) { advanceAfter(null); return; }
-  const u = utter(text, BOOK.lang);
+  const u = utter(text, LANG());
   u._t = Date.now();
   u.onstart = () => { u._s = Date.now(); };
   u.onend = () => advanceAfter(u);
@@ -1054,8 +1087,8 @@ function showTip(w){
     peek(info);
     w.classList.add('peeked');
     const l = lemmaOf(tok), e = DICT[l];
-    const romo = BOOK.lang === 'ko' ? `<small>${esc(romanize(tok.t))}</small>` : '';
-    tip.innerHTML = `<b>${esc(tok.gloss || e?.gloss || '—')}</b>${l && l !== tok.t.toLowerCase() && l !== tok.t ? ` · <span lang="${BOOK.lang}">${esc(l)}</span>` : ''}${tok.form ? `<small>${esc(tok.form)}</small>` : ''}${romo}<small>toca dos veces para la explicación${PLAY ? '' : ' · ▶ lee desde aquí'}</small>`;
+    const romo = LANG() === 'ko' ? `<small>${esc(romanize(tok.t))}</small>` : '';
+    tip.innerHTML = `<b>${esc(tok.gloss || e?.gloss || '—')}</b>${l && l !== tok.t.toLowerCase() && l !== tok.t ? ` · <span lang="${LANG()}">${esc(l)}</span>` : ''}${tok.form ? `<small>${esc(tok.form)}</small>` : ''}${romo}<small>toca dos veces para la explicación${PLAY ? '' : ' · ▶ lee desde aquí'}</small>`;
     if (S.autoSpeakWord) speakWord(tok.t);
   }
   placeTip(tip, w);
@@ -1100,7 +1133,7 @@ async function explainWord(){
   const sh = SHEET; if (!sh) return;
   sh.busy = 'def'; sh.err = ''; refreshSheet();
   try {
-    const lang = BOOK.lang, sent = sentText(sh.p, sh.si).trim();
+    const lang = LANG(), sent = sentText(sh.p, sh.si).trim();
     const user = `LIBRO: «${BOOK.title}»\nNIVEL DEL LECTOR: ${myLevel(lang)}\n` + (prevSentences(sh.p, sh.si) ? `ORACIONES ANTERIORES: ${prevSentences(sh.p, sh.si)}\n` : '') +
       `ORACIÓN: «${sent}»\nPALABRA: «${sh.tok.t}»` + (sh.tok.lemma ? ` (forma de diccionario probable: ${sh.tok.lemma})` : '');
     const x = await askRetry(S.defModel, defSystem(lang), user, ENTRY, { effort: 'low', maxTokens: 12000, ms: 150000, kind: 'explain' });
@@ -1125,7 +1158,7 @@ function srsHTML(e){
 }
 function refreshSheet(){
   if (!SHEET) return;
-  const sh = $('sheet'), lang = BOOK?.lang || DLANG;
+  const sh = $('sheet'), lang = LANG();
   let h = '';
   if (SHEET.kind === 'word' || SHEET.kind === 'dict') {
     const tok = SHEET.tok, l = lemmaOf(tok, lang), e = DICT[l];
@@ -1146,6 +1179,12 @@ function refreshSheet(){
     if (e) h += `<button class="btn sec" id="sKnown">${scoreOf(e) >= 70 ? 'Marcar como nueva' : 'Ya la sé ✓'}</button>`;
     if (SHEET.kind === 'word') h += `<button class="btn sec" id="sFrom">▶ Leer desde aquí</button>`;
     h += `<button class="btn sec" id="sClose">Cerrar</button></div>`;
+  } else if (SHEET.kind === 'gutpick') {
+    const b = SHEET.b;
+    h += `<div class="gloss"><b>Descargando «${esc(b.title)}»…</b></div>
+      <p>Cuando termine de bajar, toca <b>Abrir</b> y elige el archivo (suele aparecer primero, en «Recientes» o «Descargas»). Se agrega con el título, el autor y el idioma de Gutenberg.</p>
+      <div class="row"><button class="btn" id="sPick">📂 Abrir el libro descargado</button><button class="btn sec" id="sClose">Cancelar</button></div>
+      <p class="small" style="margin-top:10px">¿No empezó la descarga? <a href="${gutEpub(b)}" target="_blank" rel="noopener">Descárgalo de nuevo</a> o búscalo en <a href="https://www.gutenberg.org/ebooks/${b.id}" target="_blank" rel="noopener">gutenberg.org</a>.</p>`;
   } else if (SHEET.kind === 'phrase') {
     const x = SHEET.x || {}, words = x.words?.length ? x.words : phraseWords(SHEET);
     h += `<div class="phrase" lang="${lang}">${esc(SHEET.text)} <button class="spk" data-say="${esc(SHEET.text)}">🔊</button></div>`;
@@ -1162,6 +1201,7 @@ function refreshSheet(){
   sh.querySelectorAll('[data-say]').forEach(b => b.onclick = () => { if ('speechSynthesis' in window) { speechSynthesis.cancel(); speechSynthesis.speak(utter(b.dataset.say, lang, 0.85)); } });
   $('sClose').onclick = closeSheet;
   if ($('sExplain')) $('sExplain').onclick = explainWord;
+  if ($('sPick')) $('sPick').onclick = () => { PICK_FOR = SHEET.b; closeSheet(); $('file').click(); };
   if ($('sAgain')) $('sAgain').onclick = () => explainPhrase(SHEET.args, true);
   if ($('sKnown')) $('sKnown').onclick = () => { const e = DICT[lemmaOf(SHEET.tok, lang)]; setKnown(e, scoreOf(e) < 70); refreshSheet(); if (PANEL === 'words') drawWords(); };
   if ($('sFrom')) $('sFrom').onclick = () => { const { p, si, off } = SHEET; closeSheet(); stop(); setFrom(p, si, +off); play(); };
@@ -1204,7 +1244,7 @@ async function explainPhrase(sel, again = false){
   for (const pp of new Set(range.map(r => r[0]))) if (!ANA.has(anaKey(pp))) ensureAna(pp, true).then(() => { if (SHEET === sh) refreshSheet(); });
   if (saved) { sh.x = saved.x; sh.saved = saved.date; refreshSheet(); return; }
   sh.busyTr = sh.busyEx = true; refreshSheet();
-  const lang = BOOK.lang;
+  const lang = LANG();
   const user = `LIBRO: «${BOOK.title}»\nNIVEL DEL LECTOR: ${myLevel(lang)}\n` + (prevSentences(a[0], a[1]) ? `ORACIONES ANTERIORES: ${prevSentences(a[0], a[1])}\n` : '') + `ORACIÓN COMPLETA: «${whole.join(' ')}»\nTROZO SELECCIONADO: «${text}»`;
   let last = 0;
   const redraw = (force) => { if (SHEET !== sh) return; if (!force && Date.now() - last < 200) return; last = Date.now(); refreshSheet(); };
@@ -1259,11 +1299,12 @@ function knownWordsHint(lang){
   const d = lang === DLANG ? DICT : load(dictKey(lang), {});
   return Object.values(d).filter(e => scoreOf(e) >= 50 && !SKIP_POS.has(e.pos)).sort((a, b) => (b.last || 0) - (a.last || 0)).slice(0, 250).map(e => e.lemma).join(', ');
 }
-async function simplifyChunk(b, lvl, model, chunk, known){
-  const user = `LIBRO: «${b.title}»${b.author ? ' de ' + b.author : ''}\nNIVEL: ${lvLabel(b.lang, lvl)}\n` + (known ? `PALABRAS QUE EL LECTOR YA CONOCE: ${known}\n` : '') +
+async function simplifyChunk(b, ver, model, chunk, known){
+  const lang = verLang(b, ver), lvl = verLvl(ver);
+  const user = `LIBRO: «${b.title}»${b.author ? ' de ' + b.author : ''}\nIDIOMA DE LA VERSIÓN: ${LANGS[lang].name}\nNIVEL: ${lvLabel(lang, lvl)}\n` + (known ? `PALABRAS QUE EL LECTOR YA CONOCE: ${known}\n` : '') +
     `\nPÁRRAFOS (${chunk.length}):\n` + chunk.map((t, i) => `[${i + 1}] ${t}`).join('\n\n');
   for (let attempt = 0; attempt < 2; attempt++) {
-    const out = await askRetry(model, simpSystem(b.lang, lvl), user, SIMP_SCHEMA, { effort: 'low', maxTokens: 20000, ms: 180000, kind: 'simplify', retries: 6 });
+    const out = await askRetry(model, simpSystem(b.lang, lang, lvl), user, SIMP_SCHEMA, { effort: 'low', maxTokens: 20000, ms: 180000, kind: 'simplify', retries: 6 });
     const ps = (out.paras || []).map(s => String(s).trim());
     if (ps.length === chunk.length || attempt === 1) return chunk.map((orig, i) => ps[i] || orig);
   }
@@ -1274,14 +1315,14 @@ const SIMP_PAR = () => S.simpPar || 50;   // pedidos simultáneos al simplificar
 async function simplifyBook(b, lvl, model, only = null){
   const key = `${b.id}|${lvl}`;
   if (SIMP_JOBS.has(key)) return;
-  b.versions[lvl] = b.versions[lvl] || { model, done: [], date: Date.now() };
+  b.versions[lvl] = b.versions[lvl] || { model, lang: verLang(b, lvl), done: [], date: Date.now() };
   b.versions[lvl].done = b.versions[lvl].done || [];
   const chs = (only || b.chapters.map((_, i) => i)).filter(i => !b.versions[lvl].done[i]);
   if (!chs.length) return;
   const job = { doneCh: 0, totalCh: chs.length, doneParts: 0, totalParts: 0, failed: 0, err: '' };
   SIMP_JOBS.set(key, job);
   await dbPut('books', b); refreshViews();
-  const known = knownWordsHint(b.lang), tasks = [], chapters = new Map();
+  const known = knownWordsHint(verLang(b, lvl)), tasks = [], chapters = new Map();
   for (const ch of chs) {
     const rec = await dbGet('text', `${b.id}|${ch}`); if (!rec) continue;
     const chunks = []; let cur = [], len = 0;
@@ -1342,10 +1383,10 @@ function renderHeader(){
       <button class="ib" id="hWords" title="Mis palabras">📖<span class="lbl">Palabras</span></button>
       <button class="ib" id="hSet" title="Ajustes">⚙</button>`;
   } else {
-    const vers = Object.keys(BOOK.versions || {}).sort((a, b) => lvIdx(a) - lvIdx(b));
+    const vers = Object.keys(BOOK.versions || {}).sort((a, b) => verName(BOOK, a).localeCompare(verName(BOOK, b)));
     h.innerHTML = `<button class="ib" id="hBack" title="Biblioteca">←</button>
       <select id="hCh" title="Capítulo">${BOOK.chapters.map((c, i) => `<option value="${i}" ${i === CH?.ch ? 'selected' : ''}>${esc((i + 1) + '. ' + c.title).slice(0, 60)}</option>`).join('')}</select>
-      <select id="hVer" title="Versión">${[['o', 'Original'], ...vers.map(v => { const d = (BOOK.versions[v].done || []).filter(Boolean).length; return [v, `${v} simplificado${d < BOOK.chapters.length ? ` (${d}/${BOOK.chapters.length})` : ''}`]; })].map(([v, l]) => `<option value="${v}" ${v === CH?.ver ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
+      <select id="hVer" title="Versión">${[['o', 'Original'], ...vers.map(v => { const d = (BOOK.versions[v].done || []).filter(Boolean).length; return [v, `${verName(BOOK, v)} ${verKind(BOOK, v)}${d < BOOK.chapters.length ? ` (${d}/${BOOK.chapters.length})` : ''}`]; })].map(([v, l]) => `<option value="${v}" ${v === CH?.ver ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
       <span style="flex:1"></span>
       <button class="ib" id="hInfo" title="Nivel y versiones del libro">ℹ</button>
       <button class="ib" id="hWords" title="Mis palabras">📖</button>
@@ -1400,7 +1441,7 @@ async function drawLibrary(){
     const d = document.createElement('div'); d.className = 'book';
     d.innerHTML = `<div class="cov">${b.lang === 'ko' ? '한' : b.lang === 'ja' ? '日' : b.lang === 'zh' ? '中' : '📖'}</div>
       <div class="info"><h3>${esc(b.title)}</h3><div class="meta">${esc(b.author || '')}</div>
-      <div><span class="badge">${esc(LANGS[b.lang]?.name || b.lang)}</span>${b.level ? `<span class="badge lv">nivel ${esc(b.level.cefr)}</span>` : ''}${Object.keys(b.versions || {}).map(v => `<span class="badge">${esc(v)} simplificado</span>`).join('')}
+      <div><span class="badge">${esc(LANGS[b.lang]?.name || b.lang)}</span>${b.level ? `<span class="badge lv">nivel ${esc(b.level.cefr)}</span>` : ''}${Object.keys(b.versions || {}).map(v => `<span class="badge">${esc(verName(b, v))} ${verKind(b, v)}</span>`).join('')}
       ${jobs.map(([k, j]) => `<span class="small">simplificando ${j.doneParts}/${j.totalParts} partes…</span>`).join('')}</div>
       <div class="bar"><i style="width:${pct}%"></i></div></div>
       <div style="display:flex;flex-direction:column;gap:6px"><button class="btn" data-read>Leer</button><button class="btn sec" data-info>Nivel…</button></div>`;
@@ -1459,7 +1500,7 @@ async function exportBooks(ids, name){
       books.push(bk);
     }
     const dicts = {};
-    for (const l of new Set(books.map(b => b.meta.lang))) dicts[l] = load(dictKey(l), {});
+    for (const l of new Set(books.flatMap(b => [b.meta.lang, ...Object.keys(b.meta.versions || {}).map(v => verLang(b.meta, v))]))) dicts[l] = load(dictKey(l), {});
     let blob = new Blob([JSON.stringify({ app: 'leamos', format: 1, version: APP_VERSION, date: Date.now(), books, dicts })], { type: 'application/json' });
     if ('CompressionStream' in window) blob = await new Response(blob.stream().pipeThrough(new CompressionStream('gzip'))).blob();
     downloadBlob(blob, safeName(name) + '.leamos');
@@ -1604,11 +1645,17 @@ async function gutAdd(b){
   GUT.add[b.id] = meta.id; toast(`«${b.title}» está en tu biblioteca.`);
   if (PANEL === 'gut') drawGut();
 }
+const gutEpub = b => `https://www.gutenberg.org/cache/epub/${b.id}/pg${b.id}-images-3.epub`;
+// apenas empieza la descarga, una ficha pide abrir el archivo bajado (un toque abre el selector)
+function askOpenDownloaded(b){
+  SHEET = { kind: 'gutpick', b };
+  setTimeout(() => { showSheet(); refreshSheet(); }, 300);   // (después de que el navegador empiece la descarga)
+}
 function drawGut(){
   if (PANEL !== 'gut') return;
   const pb = $('pbody');
   pb.innerHTML = `<div class="box"><p class="small" style="margin-top:0">Más de 70 000 libros de dominio público (clásicos). Hay muchísimos en inglés, francés, alemán, italiano y portugués; en coreano, japonés y chino hay muy pocos.</p>
-    ${S.proxy ? '' : '<p class="small">Para agregar un libro: <b>⬇ Descargar</b> y después <b>📂 Abrirlo</b> (elige el archivo recién bajado). Para que se agreguen solos con un toque, crea tu propio intermediario en ⚙ Ajustes → Gutenberg.</p>'}
+    ${S.proxy ? '' : '<p class="small">Para agregar un libro: <b>⬇ Descargar y abrir</b>, y cuando termine de bajar, <b>📂 Abrir</b> (elige el archivo recién bajado). Para que se agreguen solos con un toque, crea tu propio intermediario en ⚙ Ajustes → Gutenberg.</p>'}
     <div class="field"><label>Idioma</label><select id="gLang">${Object.entries(LANGS).map(([k, L]) => `<option value="${k}" ${k === GUT.lang ? 'selected' : ''}>${L.native} · ${L.name}</option>`).join('')}</select></div>
     <div class="row" style="margin-top:0"><input class="search" id="gQ" placeholder="Título o autor (vacío: los más leídos)" value="${esc(GUT.q)}" style="flex:1;min-width:0"><button class="btn" id="gGo">Buscar</button></div></div>
     <div id="gList"></div>`;
@@ -1621,11 +1668,13 @@ function drawGut(){
       <div class="meta">${(b.languages || []).map(l => esc(LANGS[l]?.name || l)).join(', ')} · ${(b.download_count || 0).toLocaleString('es')} descargas</div>
       ${st === 'err' ? `<div class="fix">El navegador no pudo descargarlo (${esc(GUT.addErr?.[b.id] || '')}).
         <p style="margin:6px 0">Bájalo tú y ábrelo aquí (el navegador no deja que la página lo haga sola):</p>
-        <div class="row" style="margin-top:4px"><a class="btn sec" style="text-decoration:none" href="https://www.gutenberg.org/cache/epub/${b.id}/pg${b.id}-images-3.epub" target="_blank" rel="noopener">1. ⬇ Descargar</a><button class="btn" data-pick>2. 📂 Ya lo bajé: abrirlo</button></div>
+        <div class="row" style="margin-top:4px"><a class="btn sec" style="text-decoration:none" href="${gutEpub(b)}" target="_blank" rel="noopener" data-dl>1. ⬇ Descargar</a><button class="btn" data-pick>2. 📂 Ya lo bajé: abrirlo</button></div>
         ${S.proxy ? '' : '<p class="small" style="margin:6px 0 0">Para que se agregue solo, crea tu propio intermediario (⚙ Ajustes → Gutenberg).</p>'}</div>` : ''}</div>
-      <div style="display:flex;flex-direction:column;gap:6px">${!st && !S.proxy ? `<a class="btn sec" style="text-decoration:none;text-align:center" href="https://www.gutenberg.org/cache/epub/${b.id}/pg${b.id}-images-3.epub" target="_blank" rel="noopener">⬇ Descargar</a><button class="btn" data-pick>📂 Abrirlo</button><button class="chip" data-add>intentar solo</button>` : st === 'busy' ? `<span class="busy">descargando… ${esc(GUT.addStep?.[b.id] || '')}</span>` : st && st !== 'err' ? '<button class="btn" data-open>Leer</button>' : `<button class="btn" data-add>${st === 'err' ? 'Reintentar' : 'Agregar'}</button>`}</div>`;
+      <div style="display:flex;flex-direction:column;gap:6px">${!st && !S.proxy ? `<a class="btn" style="text-decoration:none;text-align:center" href="${gutEpub(b)}" target="_blank" rel="noopener" data-dl>⬇ Descargar y abrir</a><button class="chip" data-add>intentar solo</button>` : st === 'busy' ? `<span class="busy">descargando… ${esc(GUT.addStep?.[b.id] || '')}</span>` : st && st !== 'err' ? '<button class="btn" data-open>Leer</button>' : `<button class="btn" data-add>${st === 'err' ? 'Reintentar' : 'Agregar'}</button>`}</div>`;
     d.querySelector('[data-add]')?.addEventListener('click', () => gutAdd(b));
     d.querySelector('[data-pick]')?.addEventListener('click', () => { PICK_FOR = b; $('file').click(); });
+    // al descargar, de inmediato se pide abrir el archivo (la página no puede abrirlo sola)
+    d.querySelectorAll('[data-dl]').forEach(a => a.addEventListener('click', () => askOpenDownloaded(b)));
     d.querySelector('[data-open]')?.addEventListener('click', () => openBookPanel(st, true));
     list.appendChild(d);
   }
@@ -1665,14 +1714,15 @@ async function drawBook(id){
   const b = await dbGet('books', id); if (!b) return; PANEL_BOOK = b;
   const lang = b.lang, my = myLevel(lang), chars = bookChars(b);
   const words = Math.round(chars / (lang === 'ko' ? 3.3 : CJK(lang) ? 1.6 : 5.7));
-  const tgt = S.simpTarget && lvIdx(S.simpTarget) >= 0 ? S.simpTarget : my;
+  const tgt = S.simpTarget && lvIdx(S.simpTarget) >= 0 ? S.simpTarget : myLevel(S.simpLang && LANGS[S.simpLang] ? S.simpLang : lang);
   const cost = m => { const c = simpCost(chars, lang, m); return c === null ? 'sin precio' : '~' + money(c); };
-  const vers = Object.entries(b.versions || {}).sort((x, y) => lvIdx(x[0]) - lvIdx(y[0]));
+  const vers = Object.entries(b.versions || {}).sort((x, y) => verName(b, x[0]).localeCompare(verName(b, y[0])));
+  const tl = S.simpLang && LANGS[S.simpLang] ? S.simpLang : lang, trn = tl !== lang;
   let h = `<div class="box"><div class="meta small">${esc(b.author || '')} · ${b.chapters.length} capítulos · ~${words.toLocaleString('es')} palabras</div>
     <div class="field"><label>Idioma del libro</label><select id="bLang">${Object.entries(LANGS).map(([k, L]) => `<option value="${k}" ${k === lang ? 'selected' : ''}>${L.native} · ${L.name}</option>`).join('')}</select></div>
     <div class="field"><label>Mi nivel en ${esc(LANGS[lang].name)}</label><select id="bMy">${CEFR.map(c => `<option ${c === my ? 'selected' : ''}>${c}</option>`).join('')}</select>
     <div class="small">Se usa para subrayar las palabras que probablemente no conoces y para simplificar.</div></div>
-    <div class="row"><button class="btn" id="bRead">Leer${b.pos?.ver && b.pos.ver !== 'o' ? ' (' + esc(b.pos.ver) + ')' : ''}</button>${vers.length ? `<button class="btn sec" id="bReadO">Leer el original</button>` : ''}</div></div>`;
+    <div class="row"><button class="btn" id="bRead">Leer${b.pos?.ver && b.pos.ver !== 'o' && b.versions?.[b.pos.ver] ? ' (' + esc(verName(b, b.pos.ver)) + ')' : ''}</button>${vers.length ? `<button class="btn sec" id="bReadO">Leer el original</button>` : ''}</div></div>`;
   h += `<div class="box"><h3>Nivel del libro</h3>`;
   if (ESTIMATING === id) h += `<div class="busy">Estimando el nivel con ${esc(mname(S.defModel))}…</div>`;
   else if (b.level) {
@@ -1683,17 +1733,18 @@ async function drawBook(id){
       <div class="small">${diff > 0 ? `Está ${diff} nivel${diff > 1 ? 'es' : ''} sobre el tuyo (${my}): conviene simplificarlo.` : diff < 0 ? `Está bajo tu nivel (${my}).` : `Está en tu nivel (${my}).`}</div>
       <div class="row"><button class="btn sec" id="bEst">Volver a estimar</button></div>`;
   } else h += `<div class="small">Se toman tres fragmentos del libro y el modelo de explicaciones (${esc(mname(S.defModel))}) estima su nivel MCER${lang === 'ko' ? ' (y TOPIK)' : ''}.</div><div class="row"><button class="btn" id="bEst">Estimar nivel</button></div>`;
-  h += `</div><div class="box"><h3>Versión simplificada</h3>`;
+  h += `</div><div class="box"><h3>Versiones simplificadas o traducidas</h3>`;
   for (const [lvl, v] of vers) {
     const d = (v.done || []).filter(Boolean).length, job = SIMP_JOBS.get(`${id}|${lvl}`);
-    h += `<div class="prog"><b>${esc(lvLabel(lang, lvl))}</b> · ${d}/${b.chapters.length} capítulos · ${esc(mname(v.model))}${job ? ` · <span class="busy">simplificando: ${job.doneParts}/${job.totalParts} partes, ${SIMP_PAR()} a la vez…</span>` : ''}
+    h += `<div class="prog"><b>${esc(verName(b, lvl))}</b> <span class="small">${verKind(b, lvl)}</span> · ${d}/${b.chapters.length} capítulos · ${esc(mname(v.model))}${job ? ` · <span class="busy">preparando: ${job.doneParts}/${job.totalParts} partes, ${SIMP_PAR()} a la vez…</span>` : ''}
       <div class="bar"><i style="width:${job && job.totalParts ? 100 * job.doneParts / job.totalParts : 100 * d / b.chapters.length}%"></i></div>
-      <div class="row" style="margin-top:6px"><button class="btn sec" data-readv="${lvl}">Leer ${esc(lvl)}</button>${d < b.chapters.length && !job ? `<button class="btn sec" data-cont="${lvl}">Completar</button>` : ''}<button class="btn sec" data-del="${lvl}">Borrar</button></div></div>`;
+      <div class="row" style="margin-top:6px"><button class="btn sec" data-readv="${lvl}">Leer</button>${d < b.chapters.length && !job ? `<button class="btn sec" data-cont="${lvl}">Completar</button>` : ''}<button class="btn sec" data-del="${lvl}">Borrar</button></div></div>`;
   }
-  h += `<p class="small">Reescribe cada párrafo con vocabulario y gramática del nivel elegido, sin cambiar la historia. Los párrafos quedan alineados con el original (en la lectura, ¶ muestra el original). Puedes simplificar todo el libro o ir capítulo por capítulo mientras lees.</p>
-    <div class="field"><label>Nivel</label><select id="bTgt">${CEFR.map(c => `<option value="${c}" ${c === tgt ? 'selected' : ''}>${esc(lvLabel(lang, c))}</option>`).join('')}</select></div>
+  h += `<p class="small">Reescribe cada párrafo con vocabulario y gramática del nivel elegido, sin cambiar la historia: en el mismo idioma (simplificar) o en otro (traducir y adaptar). Los párrafos quedan alineados con el original (en la lectura, ¶ muestra el original). Puedes hacerlo con todo el libro o ir capítulo por capítulo mientras lees.</p>
+    <div class="field"><label>Idioma</label><select id="bTl">${Object.entries(LANGS).map(([k, L]) => `<option value="${k}" ${k === tl ? 'selected' : ''}>${L.native} · ${L.name}${k === lang ? ' (el del libro)' : ''}</option>`).join('')}</select></div>
+    <div class="field"><label>Nivel</label><select id="bTgt">${CEFR.map(c => `<option value="${c}" ${c === tgt ? 'selected' : ''}>${esc(lvLabel(tl, c))}</option>`).join('')}</select></div>
     <div class="field"><label>Modelo</label><select id="bModel">${SIMP_MODELS.map(([m, l]) => `<option value="${m}" ${m === S.simpModel ? 'selected' : ''}>${esc(l)} · todo el libro ${cost(m)}</option>`).join('')}</select></div>
-    <div class="row"><button class="btn" id="bSimpAll">Simplificar todo el libro</button><button class="btn sec" id="bSimpRead">Simplificar mientras leo</button></div></div>
+    <div class="row"><button class="btn" id="bSimpAll">${trn ? 'Traducir' : 'Simplificar'} todo el libro</button><button class="btn sec" id="bSimpRead">${trn ? 'Traducir' : 'Simplificar'} mientras leo</button></div></div>
     <div class="box"><h3>Llevar a otro aparato</h3><p class="small">Un archivo .leamos con el libro, sus versiones simplificadas, las traducciones y explicaciones ya pagadas, tu posición y tu diccionario de ${esc(LANGS[lang].name)}. En el otro aparato: biblioteca → «📥 Importar .leamos».</p>
       <button class="btn sec" id="bExport">📦 Exportar este libro</button></div>
     <div class="box"><button class="btn sec" id="bDelete">🗑 Borrar el libro</button></div>`;
@@ -1704,13 +1755,14 @@ async function drawBook(id){
   if ($('bReadO')) $('bReadO').onclick = () => { closePanel(); openBook(id, 'o'); };
   if ($('bEst')) $('bEst').onclick = () => runEstimate(b);
   $('bTgt').onchange = e => { S.simpTarget = e.target.value; saveSet(); };
+  $('bTl').onchange = e => { S.simpLang = e.target.value; S.simpTarget = ''; saveSet(); drawBook(id); };
   $('bModel').onchange = e => { S.simpModel = e.target.value; saveSet(); };
-  $('bSimpAll').onclick = () => { if (!KEYS[provOf(S.simpModel)]) { toast('Falta la clave de la API (⚙ Ajustes).'); return; } simplifyBook(b, $('bTgt').value, S.simpModel); };
-  $('bSimpRead').onclick = async () => { const lvl = $('bTgt').value; b.versions[lvl] = b.versions[lvl] || { model: S.simpModel, done: [], date: Date.now() }; await dbPut('books', b); closePanel(); await openBook(id, lvl); };
+  $('bSimpAll').onclick = () => { if (!KEYS[provOf(S.simpModel)]) { toast('Falta la clave de la API (⚙ Ajustes).'); return; } simplifyBook(b, verKey(b, tl, $('bTgt').value), S.simpModel); };
+  $('bSimpRead').onclick = async () => { const lvl = verKey(b, tl, $('bTgt').value); b.versions[lvl] = b.versions[lvl] || { model: S.simpModel, lang: tl, done: [], date: Date.now() }; await dbPut('books', b); closePanel(); await openBook(id, lvl); };
   $('pbody').querySelectorAll('[data-readv]').forEach(x => x.onclick = () => { closePanel(); openBook(id, x.dataset.readv); });
   $('pbody').querySelectorAll('[data-cont]').forEach(x => x.onclick = () => simplifyBook(b, x.dataset.cont, b.versions[x.dataset.cont].model || S.simpModel));
   $('pbody').querySelectorAll('[data-del]').forEach(x => x.onclick = async () => {
-    if (!confirm(`¿Borrar la versión ${x.dataset.del}?`)) return;
+    if (!confirm(`¿Borrar la versión ${verName(b, x.dataset.del)}?`)) return;
     delete b.versions[x.dataset.del]; await dbPut('books', b); await dbDelPrefix('simp', `${id}|${x.dataset.del}|`); await dbDelPrefix('ana', `${id}|${x.dataset.del}|`); await dbDelPrefix('expl', `${id}|${x.dataset.del}|`);
     if (BOOK?.id === id) { BOOK.versions = b.versions; if (CH.ver === x.dataset.del) await openChapter('o', CH.ch, CUR.p, 0); }
     drawBook(id);
@@ -1743,7 +1795,7 @@ function drawWords(){
   const wl = $('wList');
   wl.innerHTML = list.slice(0, 400).map((e, i) => `<div class="ent" data-i="${i}"><div class="top"><span class="lem" lang="${lang}">${esc(e.lemma)}</span><span class="g">${esc(e.gloss || '')}</span><span class="small">${scoreOf(e)} %</span></div><div class="bar"><i style="width:${scoreOf(e)}%"></i></div></div>`).join('') + (list.length > 400 ? `<p class="small">… y ${list.length - 400} más (usa el buscador).</p>` : '') + (!list.length ? '<p class="small">Nada por aquí.</p>' : '');
   wl.querySelectorAll('.ent').forEach(el => el.onclick = () => { const e = list[+el.dataset.i]; SHEET = { kind: 'dict', tok: { t: e.lemma, lemma: e.lemma, pos: e.pos, gloss: e.gloss, form: '' } }; showSheet(); refreshSheet(); });
-  $('wLang').onchange = e => { if (BOOK && e.target.value !== BOOK.lang) { toast('Mientras lees se muestran las palabras del idioma del libro.'); e.target.value = DLANG; return; } useDict(e.target.value); drawWords(); };
+  $('wLang').onchange = e => { if (BOOK && e.target.value !== LANG()) { toast('Mientras lees se muestran las palabras del idioma que estás leyendo.'); e.target.value = DLANG; return; } useDict(e.target.value); drawWords(); };
   $('wQ').oninput = e => { WQ = e.target.value; const pos = e.target.selectionStart; drawWords(); $('wQ').focus(); $('wQ').setSelectionRange(pos, pos); };
   $('pbody').querySelectorAll('[data-f]').forEach(b => b.onclick = () => { WFILTER = b.dataset.f; drawWords(); });
 }
@@ -1751,7 +1803,7 @@ function drawWords(){
 // ajustes
 function openSettings(){
   openPanel('Ajustes', 'settings');
-  const lang = BOOK?.lang || DLANG, vs = voicesFor(lang);
+  const lang = LANG(), vs = voicesFor(lang);
   const sel = (id, opts, cur) => `<select id="${id}">${opts.map(([v, l]) => `<option value="${v}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
   $('pbody').innerHTML = `
     <div class="box"><h3>Clave de la API</h3><p class="small">Es la misma de «Hablemos» (se guarda solo en este navegador y se envía directo a la API).</p>
@@ -1785,7 +1837,7 @@ function openSettings(){
     <div class="box"><h3>Lectura</h3>
       <div class="field"><label>Tamaño de la letra: <b id="fsV">${S.fs}</b> px</label><input type="range" id="rFs" min="15" max="30" step="1" value="${S.fs}" style="width:100%"></div>
       <div class="field"><label>Tema</label>${sel('sTheme', [['', 'Automático'], ['light', 'Claro'], ['dark', 'Oscuro']], S.theme)}</div></div>
-    <div class="box"><h3>Cómo suben y bajan las palabras</h3><p class="small">Al pasar a la siguiente oración (leyendo en voz alta, con ⏭ o, si lees en silencio, cuando un párrafo que estuvo a la vista el tiempo para leerlo sale por arriba de la pantalla), las palabras de la oración que dejaste y que no miraste cuentan como «bien»: si les tocaba repaso, su intervalo crece (1 día, luego ×2,5…). Tocar una palabra para ver su traducción es «otra vez»: vuelve a cero. Con la traducción de la oración visible o al pedir la explicación de un trozo, esa oración no suma. Las palabras de tu nivel o superior que nunca has visto aparecen subrayadas; las que estás aprendiendo, con línea punteada.</p></div>
+    <div class="box"><h3>Cómo suben y bajan las palabras</h3><p class="small">Al pasar a la siguiente oración (leyendo en voz alta, con ⏭ o, si lees en silencio, cuando un párrafo que estuvo a la vista el tiempo para leerlo sale por arriba de la pantalla), las palabras que no miraste cuentan como leídas: si nunca las consultaste, quedan como <b>aprendidas</b> (sin subrayado); si alguna vez las consultaste, su intervalo crece de a poco (1 día, luego ×2,5…). Tocar una palabra para ver su traducción es «otra vez»: vuelve a cero. Con la traducción de la oración visible o al pedir la explicación de un trozo, esa oración no suma. Las palabras de tu nivel o superior que nunca has visto aparecen subrayadas; las que estás aprendiendo, con línea punteada.</p></div>
     <div class="box"><h3>Gasto (estimado)</h3>${usageHTML()}</div>
     <p class="small" style="text-align:center">Leamos · versión ${APP_VERSION}</p>`;
   const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
