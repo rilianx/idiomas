@@ -41,8 +41,8 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
 .w.from{outline:2px dashed var(--accent);outline-offset:2px}
 .w.won{animation:won 1.8s ease-out}
 #hStars{font-weight:600;white-space:nowrap;cursor:pointer}
-/* la estrella del contador: grande, abajo a la izquierda del texto, con el número dentro */
-#starBadge{position:fixed;left:12px;bottom:calc(84px + env(safe-area-inset-bottom));z-index:12;width:64px;height:64px;border:none;background:none;padding:0;cursor:pointer;filter:drop-shadow(0 2px 4px rgba(0,0,0,.25))}
+/* la estrella del contador: grande, arriba a la derecha del texto, con el número dentro */
+#starBadge{position:fixed;right:12px;top:calc(66px + env(safe-area-inset-top));z-index:12;width:64px;height:64px;border:none;background:none;padding:0;cursor:pointer;filter:drop-shadow(0 2px 4px rgba(0,0,0,.25))}
 #starBadge svg{position:absolute;inset:0;width:100%;height:100%}
 #starBadge polygon{fill:#ffc928;stroke:#e0a400;stroke-width:3;stroke-linejoin:round}
 #starBadge .n{position:absolute;left:0;right:0;top:52%;transform:translateY(-50%);text-align:center;font-weight:800;font-size:17px;color:#5a4300;line-height:1}
@@ -124,7 +124,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-08 · 39';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-08 · 40';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
