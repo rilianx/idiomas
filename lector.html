@@ -40,21 +40,20 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
 .w.peeked{text-decoration-color:var(--accent)}
 .w.from{outline:2px dashed var(--accent);outline-offset:2px}
 .w.won{animation:won 1.8s ease-out}
-#wonBanner{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom));transform:translate(-50%,40%);opacity:0;z-index:35;width:max-content;background:var(--card);border:2px solid #f0b400;border-radius:16px;padding:6px 14px 7px;box-shadow:0 8px 24px rgba(0,0,0,.2);transition:transform .45s cubic-bezier(.2,1.5,.4,1),opacity .3s;max-width:min(92vw,420px);text-align:center;cursor:pointer}
-#wonBanner.show{transform:translate(-50%,0);opacity:1}
-#wonBanner:not(.show){pointer-events:none}
-#wonBanner .t{font-weight:700;font-size:15px}
-#wonBanner .small{font-size:12px;line-height:1.35}
-#wonBanner .chips{margin:4px 0 2px}
-#wonBanner .chips span{display:inline-block;margin:3px;padding:2px 10px;border-radius:999px;background:#ffe9a0;color:#5a4300;font-weight:600;animation:pop .5s backwards}
-@keyframes pop{0%{transform:scale(.2) translateY(10px);opacity:0}70%{transform:scale(1.18)}100%{transform:scale(1);opacity:1}}
-.spark{position:fixed;left:50%;bottom:calc(140px + env(safe-area-inset-bottom));z-index:36;pointer-events:none;font-size:18px;animation:spark 1.2s ease-out forwards}
-@keyframes spark{0%{transform:translate(-50%,0) scale(.4);opacity:1}100%{transform:translate(calc(-50% + var(--dx)),calc(-1 * var(--dy))) scale(1);opacity:0}}
-#hStars,#pStars{font-weight:600;white-space:nowrap;cursor:pointer}
+#hStars{font-weight:600;white-space:nowrap;cursor:pointer}
+/* la estrella del contador: grande, abajo a la izquierda del texto, con el número dentro */
+#starBadge{position:fixed;left:12px;bottom:calc(84px + env(safe-area-inset-bottom));z-index:12;width:64px;height:64px;border:none;background:none;padding:0;cursor:pointer;filter:drop-shadow(0 2px 4px rgba(0,0,0,.25))}
+#starBadge svg{position:absolute;inset:0;width:100%;height:100%}
+#starBadge polygon{fill:#ffc928;stroke:#e0a400;stroke-width:3;stroke-linejoin:round}
+#starBadge .n{position:absolute;left:0;right:0;top:52%;transform:translateY(-50%);text-align:center;font-weight:800;font-size:17px;color:#5a4300;line-height:1}
+#starBadge.neg polygon{fill:#ffd9d2;stroke:#d36a55}
+#starBadge.bump{animation:bump2 .6s}
+#starBadge.drop{animation:drop .7s}
+@keyframes bump2{30%{transform:scale(1.3) rotate(-8deg)}60%{transform:scale(.95) rotate(4deg)}}
 .fly{position:fixed;z-index:40;pointer-events:none;font-size:24px;line-height:1;will-change:transform}
 .fly.minus{color:#d32f2f;font-weight:800;font-size:22px;text-shadow:0 0 6px #fff,0 0 10px #ffcdd2}
-#hStars.bump,#pStars.bump{animation:bump .6s}
-#hStars.drop,#pStars.drop{animation:drop .7s}
+#hStars.bump{animation:bump .6s}
+#hStars.drop{animation:drop .7s}
 @keyframes drop{20%,60%{transform:translateX(-4px);background:#f6d0c8;color:#9a2b18}40%,80%{transform:translateX(4px)}}
 @keyframes bump{30%{transform:scale(1.35);background:#ffe9a0}}
 @keyframes won{0%{background:#ffd54a;box-shadow:0 0 0 4px #ffd54a88}60%{background:#ffe9a0}100%{background:transparent;box-shadow:none}}
@@ -96,6 +95,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
 <body>
 <header id="hdr"></header>
 <main id="view"></main>
+<button id="starBadge" hidden title="Aprendidas hoy (descontando las que bajaron de 100 %) · toca para ver la lista"><svg viewBox="0 0 100 100" aria-hidden="true"><polygon points="50,4 62,37 97,38 69,59 80,94 50,73 20,94 31,59 3,38 38,37"/></svg><span class="n">0</span></button>
 <div id="trbox" hidden></div>
 <footer id="player" hidden>
   <button class="ib" id="pPrev" title="Oración anterior (←)">⏮</button>
@@ -104,7 +104,6 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
   <button class="ib" id="pRate" title="Velocidad de la voz">1×</button>
   <button class="ib" id="pTr" title="Traducir la oración marcada (T)">文<span class="lbl">Oración</span></button>
   <button class="ib" id="pOrig" title="Ver el párrafo original" hidden>¶<span class="lbl">Original</span></button>
-  <span class="ib" id="pStars" title="Aprendidas hoy (descontando las que bajaron de 100 %)">⭐ 0</span>
   <span class="grow" id="pInfo"></span>
 </footer>
 <button class="btn" id="selbtn" hidden>🎓 Explicar</button>
@@ -125,7 +124,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-08 · 37';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-08 · 39';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -271,8 +270,10 @@ function celebrate(e){
 let STAR_PENDING = 0;
 const starText = () => '⭐ ' + (todayNet() - STAR_PENDING);
 function updateStars(anim){
-  for (const st of [$('hStars'), $('pStars')]) if (st) {
-    st.textContent = starText();
+  const b = $('starBadge'), n = todayNet() - STAR_PENDING;
+  b.querySelector('.n').textContent = n; b.querySelector('.n').style.fontSize = String(n).length > 2 ? '14px' : '17px'; b.classList.toggle('neg', n < 0);
+  for (const st of [$('hStars'), b]) if (st) {
+    if (st.id === 'hStars') st.textContent = starText();
     if (anim) { st.classList.remove('bump', 'drop'); void st.offsetWidth; st.classList.add(anim); }
   }
 }
@@ -288,7 +289,7 @@ function unlearned(e){
   }, 0);
 }
 // el contador al que vuelan las estrellas: abajo en el lector, en la cabecera en la biblioteca
-const starTarget = () => (!$('player').hidden && $('pStars')) || $('hStars');
+const starTarget = () => (!$('starBadge').hidden && $('starBadge')) || $('hStars');
 // una palabra de este lema que esté a la vista
 function visibleWord(lemma){
   const v = $('view').getBoundingClientRect();
@@ -319,49 +320,20 @@ function flyToCounter(fromEl, text, cls, onArrive, delay = 0){
 }
 // la señal no puede depender de que la palabra esté a la vista (leyendo en silencio ya salió de la pantalla):
 // un aviso baja desde arriba con las palabras como fichas, una lluvia de ✨⭐, y el contador ⭐ de la cabecera salta
-let wonHide = 0;
 function showWon(){
   const items = WON; WON = []; if (!items.length) return;
-  const list = [...new Set(items.map(x => x.w))];
-  // el «dónde»: la forma más común del grupo (p. ej. al avanzar), con la oración de la primera de ellas
-  const cnt = {}; for (const x of items) cnt[x.how] = (cnt[x.how] || 0) + 1;
-  const mainHow = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])[0], last = items.find(x => x.how === mainHow) || items[0];
-  const where = last.how && HOW[last.how] ? `${HOW[last.how]}${last.text ? `: «${last.text.trim().slice(0, 34)}${last.text.trim().length > 34 ? '…' : ''}»` : ''}` : '';
-  const total = totalWon(), hoy = todayNet();
-  let b = $('wonBanner'); if (!b) { b = document.createElement('div'); b.id = 'wonBanner'; document.body.appendChild(b); b.onclick = () => b.classList.remove('show'); }
-  const lang = LANG(), shown = list.slice(0, 10);
-  b.innerHTML = `<div class="t">🎉 ${list.length === 1 ? '¡Palabra aprendida!' : `¡+${list.length} palabras aprendidas!`}</div>
-    <div class="chips">${shown.map((w, i) => `<span lang="${lang}" style="animation-delay:${120 + i * 90}ms">⭐ ${esc(w)}</span>`).join('')}${list.length > shown.length ? `<span style="animation-delay:${120 + shown.length * 90}ms">+${list.length - shown.length}</span>` : ''}</div>
-    ${where ? `<div class="small" lang="${lang}" style="margin:2px 0">${esc(where)}</div>` : ''}
-    <div class="small">hoy ${hoy >= 0 ? '+' + hoy : hoy} · ⭐ ${total} al 100 %</div>`;
-  b.classList.remove('show'); void b.offsetWidth; b.classList.add('show');
-  clearTimeout(wonHide); wonHide = setTimeout(() => b.classList.remove('show'), 2600 + shown.length * 90);
-  burst();
-  // una ⭐ vuela desde cada palabra (o desde su ficha en el aviso) hasta el contador, que suma al llegar cada una
-  const flights = shown.slice(0, 8), n = items.length;
-  updateStars();
+  const list = [...new Set(items.map(x => x.w))], n = items.length;
+  // directo a la estrella: cada palabra destella y su ⭐ vuela al contador (los detalles, en la lista de hoy)
+  const set = new Set(list);
+  document.querySelectorAll('#book .w').forEach(w => { const t = TOKS.get(w)?.tok; if (t && set.has(lemmaOf(t))) { w.classList.add('won'); setTimeout(() => w.classList.remove('won'), 1800); } });
+  const flights = list.slice(0, 10);
   flights.forEach((w, i) => {
     const take = i === flights.length - 1 ? n - (flights.length - 1) : 1;   // la última suma las que no volaron
     setTimeout(() => {
-      const from = visibleWord(w) || b.querySelectorAll('.chips span')[i] || b;
+      const from = visibleWord(w) || $('player');
       flyToCounter(from, '⭐', 'star', () => { STAR_PENDING = Math.max(0, STAR_PENDING - take); updateStars('bump'); });
-    }, 350 + i * 160);
+    }, 120 + i * 140);
   });
-  // y si alguna está a la vista (p. ej. leyendo con ▶), además destella
-  setTimeout(() => {
-    const set = new Set(list);
-    document.querySelectorAll('#book .w').forEach(w => { const t = TOKS.get(w)?.tok; if (t && set.has(lemmaOf(t))) { w.classList.add('won'); setTimeout(() => w.classList.remove('won'), 1800); } });
-  }, 50);
-}
-// una lluvia corta de ✨⭐ desde el aviso
-function burst(){
-  for (let i = 0; i < 14; i++) {
-    const p = document.createElement('span'); p.className = 'spark'; p.textContent = ['✨', '⭐', '🎉'][i % 3];
-    const a = (Math.PI * 2 * i) / 14, d = 70 + Math.random() * 70;
-    p.style.setProperty('--dx', Math.cos(a) * d + 'px'); p.style.setProperty('--dy', Math.sin(a) * d * 0.7 + 40 + 'px');
-    p.style.animationDelay = Math.random() * 120 + 'ms';
-    document.body.appendChild(p); setTimeout(() => p.remove(), 1400);
-  }
 }
 // cómo se marca cada palabra: nueva → subrayada en verde; aprendiendo (ya la consultaste y no llega a 100 %) →
 // fondo azul, más fuerte cuanto menos la sabes; sabida (100 %) → sin marca
@@ -1014,8 +986,21 @@ setInterval(() => {
     if (r.bottom < v.top + 30) continue;
     if (r.top > v.bottom - 30) break;
     const k = anaKey(+el.dataset.p); VIS.set(k, (VIS.get(k) || 0) + 1);
+    markSeen(el, v);
   }
 }, 1000);
+// desde cuándo está a la vista cada palabra (para que la primera línea cuente solo si la tuviste delante un momento)
+const WSEEN = new Map();
+function markSeen(el, v){
+  const now = Date.now();
+  for (const w of el.querySelectorAll('.w')) {
+    const r = w.getBoundingClientRect();
+    if (r.bottom < v.top || r.top > v.bottom) continue;
+    const info = TOKS.get(w); if (!info) continue;
+    const key = `${anaKey(info.p)}#${info.si}#${w.dataset.o}`;
+    if (!WSEEN.has(key)) WSEEN.set(key, now);
+  }
+}
 // leyendo en silencio, cada palabra cuenta cuando llega a la primera línea visible (justo antes de desaparecer)
 // o cuando ya la pasó, siempre que su párrafo haya estado un momento a la vista
 const SILENT_DONE = new Set();   // palabras ya contadas en esta lectura: clave#oración#posición
@@ -1024,25 +1009,27 @@ function silentRead(){
   const v = $('view').getBoundingClientRect(); let firstVisible = null;
   const first = document.querySelector('#book .para');
   const lineH = first ? parseFloat(getComputedStyle(first).lineHeight) || S.fs * 1.95 : S.fs * 1.95;
-  const zone = v.top + lineH * 1.05;   // la primera línea visible
-  const touched = new Set();
+  const top = v.top - lineH * 0.6, zone = v.top + lineH * 0.9;   // la primera línea visible (aunque esté cortada arriba)
+  const now = Date.now(); let touched = false;
   for (const el of document.querySelectorAll('#book .para')) {
     const r = el.getBoundingClientRect(), p = +el.dataset.p;
-    if (r.bottom < v.top - v.height * 3) continue;          // (muy atrás: ya se revisó antes)
+    if (r.bottom < top) continue;
     if (r.top >= zone) { if (firstVisible === null) firstVisible = p; break; }
     if (firstVisible === null && r.bottom >= v.top) firstVisible = p;
-    const k = anaKey(p), rec = ANA.get(k);
-    if (!rec || (VIS.get(k) || 0) < Math.min(needSecs(p), 3)) continue;
+    const k = anaKey(p); if (!ANA.get(k)) continue;
     for (const w of el.querySelectorAll('.w')) {
-      if (w.getBoundingClientRect().top >= zone) break;    // de aquí en adelante, todavía más abajo
+      const wr = w.getBoundingClientRect();
+      if (wr.top >= zone) break;            // de aquí en adelante, todavía más abajo
+      if (wr.top < top) continue;            // ya pasó de largo sin estar en la primera línea: no cuenta
       const info = TOKS.get(w); if (!info?.tok.lemma) continue;
       const key = `${k}#${info.si}#${w.dataset.o}`;
       if (SILENT_DONE.has(key)) continue;
+      const seen = WSEEN.get(key); if (!seen || now - seen < 1000) continue;   // tiene que haber estado a la vista un momento
       SILENT_DONE.add(key);
-      if (creditWord(info.p, info.si, info.tok)) touched.add(p);
+      if (creditWord(info.p, info.si, info.tok)) touched = true;
     }
   }
-  if (touched.size) rerenderVisible();
+  if (touched) rerenderVisible();
   // la marca quedó atrás: pasa al primer párrafo a la vista
   if (firstVisible !== null && CUR.p < firstVisible) setCursor(firstVisible, 0, { scroll: '' });
 }
@@ -1843,7 +1830,7 @@ function renderHeader(){
 }
 function updateInfo(){
   if (!BOOK || !CH) return;
-  $('pStars').textContent = starText();
+  $('starBadge').hidden = false; updateStars();
   const total = bookChars(BOOK); let before = 0;
   for (let i = 0; i < CH.ch; i++) before += BOOK.chapters[i].chars;
   const inCh = CH.paras.slice(0, CUR.p).reduce((a, t) => a + t.length, 0) * (BOOK.chapters[CH.ch]?.chars || 1) / Math.max(1, CH.paras.reduce((a, t) => a + t.length, 0));
@@ -1852,7 +1839,7 @@ function updateInfo(){
   $('pTr').classList.toggle('on', !!S.showTr || !!(TR_ONCE && TR_ONCE.p === CUR.p && TR_ONCE.s === CUR.s)); $('pOrig').classList.toggle('on', SHOW_ORIG);
   $('pRate').textContent = (Math.round(S.rate * 100) / 100).toString().replace('.', ',') + '×';
 }
-function closeBook(){ stop(); savePosNow(); flushDict(); BOOK = null; CH = null; ANA.clear(); $('player').hidden = true; $('trbox').hidden = true; drawLibrary(); }
+function closeBook(){ stop(); savePosNow(); flushDict(); BOOK = null; CH = null; ANA.clear(); $('player').hidden = true; $('starBadge').hidden = true; $('trbox').hidden = true; drawLibrary(); }
 
 /* ---------- biblioteca ---------- */
 const SAMPLES = {
@@ -2384,7 +2371,7 @@ function openSettings(){
       <div class="field"><label>Revisar el nivel de la simplificación</label>${sel('mCheck', [...CHAT_MODELS, ...DEF_MODELS.filter(([m]) => !CHAT_MODELS.some(c => c[0] === m))], CHECK_MODEL())}<div class="small">Busca palabras y gramática sobre el nivel en cada parte. Uno barato suele bastar; uno mejor detecta más.</div></div>
       <label class="check"><input type="checkbox" id="cAuto" ${S.autoAnalyze ? 'checked' : ''}><span>Traducir por adelantado los párrafos que vas a leer (la palabra que toques ya estará lista). Si no, se traduce el párrafo al tocar una palabra.</span></label>
       <label class="check"><input type="checkbox" id="cTrAlways" ${S.showTr ? 'checked' : ''}><span>Mostrar siempre la traducción de la oración marcada (si no, 文 la muestra solo para la oración que elijas). Con la traducción a la vista, las palabras de esa oración no suben.</span></label>
-      <label class="check"><input type="checkbox" id="cSilent" ${S.silentRead !== false ? 'checked' : ''}><span>Contar la lectura sin voz: al bajar la página, cada palabra cuenta como leída cuando llega a la primera línea de la pantalla, justo antes de desaparecer (si su párrafo estuvo un momento a la vista), y la marca te sigue.</span></label></div>
+      <label class="check"><input type="checkbox" id="cSilent" ${S.silentRead !== false ? 'checked' : ''}><span>Contar la lectura sin voz: al bajar la página, cuentan como leídas las palabras de la primera línea de la pantalla (justo antes de desaparecer), si estuvieron un momento a la vista; las que pasan de largo no. La marca te sigue.</span></label></div>
     <div class="box"><h3>Mi nivel</h3><div class="conj" style="align-items:center">${Object.entries(LANGS).map(([k, L]) => `<span>${L.native}</span>${sel('lv_' + k, CEFR.map(c => [c, lvLabel(k, c)]), myLevel(k))}`).join('')}</div></div>
     <div class="box"><h3>Voz</h3>
       <div class="field"><label>Leer con</label>${sel('vProv', [['', 'La voz del navegador · gratis'], ['edge', 'Microsoft Edge · voz natural gratis (con tu intermediario)'], ['openai', 'OpenAI · voz natural (con tu clave de OpenAI)']], S.ttsProv || '')}
@@ -2455,7 +2442,7 @@ function openSettings(){
 
 /* ---------- botones y teclado ---------- */
 $('pPlay').onclick = () => PLAY ? stop() : play();
-$('pStars').onclick = openToday;
+$('starBadge').onclick = openToday;
 $('pNext').onclick = () => { const was = PLAY; stop(); next(true).then(() => { if (was) play(); }); };
 $('pPrev').onclick = () => { const was = PLAY; stop(); prev(); if (was) play(); };
 const RATES = [0.6, 0.75, 0.9, 1, 1.15];
