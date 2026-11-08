@@ -98,7 +98,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
   <button class="ib" id="pRate" title="Velocidad de la voz">1×</button>
   <button class="ib" id="pTr" title="Traducir la oración marcada (T)">文<span class="lbl">Oración</span></button>
   <button class="ib" id="pOrig" title="Ver el párrafo original" hidden>¶<span class="lbl">Original</span></button>
-  <span class="ib" id="pStars" title="Palabras al 100 %">⭐ 0</span>
+  <span class="ib" id="pStars" title="Aprendidas hoy (descontando las que bajaron de 100 %)">⭐ 0</span>
   <span class="grow" id="pInfo"></span>
 </footer>
 <button class="btn" id="selbtn" hidden>🎓 Explicar</button>
@@ -119,7 +119,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-08 · 31';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-08 · 32';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -248,17 +248,18 @@ function celebrate(e){
   bumpDay(1);
   WON.push(e.lemma); clearTimeout(wonTimer); wonTimer = setTimeout(showWon, 350);
 }
-// el contador ⭐: cuántas palabras están al 100 % ahora (si una se desaprende, baja)
+// el contador ⭐: las aprendidas hoy, descontando las que se desaprendieron (empieza en 0 cada día)
+const starText = () => '⭐ ' + todayNet();
 function updateStars(anim){
   for (const st of [$('hStars'), $('pStars')]) if (st) {
-    st.textContent = '⭐ ' + totalWon();
+    st.textContent = starText();
     if (anim) { st.classList.remove('bump', 'drop'); void st.offsetWidth; st.classList.add(anim); }
   }
 }
 // una palabra que estaba al 100 % bajó (pediste su traducción)
 function unlearned(e){
   bumpDay(-1);
-  setTimeout(() => { updateStars('drop'); toast(`−1 ⭐ «${e.lemma}» bajó a ${scoreOf(e)} % · ⭐ ${totalWon()} al 100 %`); }, 0);
+  setTimeout(() => { updateStars('drop'); toast(`−1 ⭐ «${e.lemma}» bajó a ${scoreOf(e)} % · hoy ${todayNet()}`); }, 0);
 }
 // la señal no puede depender de que la palabra esté a la vista (leyendo en silencio ya salió de la pantalla):
 // un aviso baja desde arriba con las palabras como fichas, una lluvia de ✨⭐, y el contador ⭐ de la cabecera salta
@@ -1694,7 +1695,7 @@ function renderHeader(){
   if (!BOOK) {
     h.innerHTML = `<h1>📚 Leamos <small>lector para aprender idiomas</small></h1>
       <a class="ib" href="index.html" title="Hablemos: conversar con 지수">💬<span class="lbl">Hablemos</span></a>
-      <span class="ib" id="hStars" title="Palabras al 100 %">⭐ ${totalWon()}</span>
+      <span class="ib" id="hStars" title="Aprendidas hoy (descontando las que bajaron de 100 %)">${starText()}</span>
       <button class="ib" id="hWords" title="Mis palabras">📖<span class="lbl">Palabras</span></button>
       <button class="ib" id="hGram" title="Gramática">📐<span class="lbl">Gramática</span></button>
       <button class="ib" id="hSet" title="Ajustes">⚙</button>`;
@@ -1719,7 +1720,7 @@ function renderHeader(){
 }
 function updateInfo(){
   if (!BOOK || !CH) return;
-  $('pStars').textContent = '⭐ ' + totalWon();
+  $('pStars').textContent = starText();
   const total = bookChars(BOOK); let before = 0;
   for (let i = 0; i < CH.ch; i++) before += BOOK.chapters[i].chars;
   const inCh = CH.paras.slice(0, CUR.p).reduce((a, t) => a + t.length, 0) * (BOOK.chapters[CH.ch]?.chars || 1) / Math.max(1, CH.paras.reduce((a, t) => a + t.length, 0));
