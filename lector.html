@@ -38,8 +38,9 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
 .w.peeked{text-decoration-color:var(--accent)}
 .w.from{outline:2px dashed var(--accent);outline-offset:2px}
 .w.won{animation:won 1.8s ease-out}
-#wonBanner{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom));transform:translate(-50%,180%);z-index:35;background:var(--card);border:2px solid #f0b400;border-radius:16px;padding:6px 14px 7px;box-shadow:0 8px 24px rgba(0,0,0,.2);transition:transform .45s cubic-bezier(.2,1.5,.4,1);max-width:min(92vw,420px);text-align:center;cursor:pointer}
-#wonBanner.show{transform:translate(-50%,0)}
+#wonBanner{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom));transform:translate(-50%,40%);opacity:0;z-index:35;width:max-content;background:var(--card);border:2px solid #f0b400;border-radius:16px;padding:6px 14px 7px;box-shadow:0 8px 24px rgba(0,0,0,.2);transition:transform .45s cubic-bezier(.2,1.5,.4,1),opacity .3s;max-width:min(92vw,420px);text-align:center;cursor:pointer}
+#wonBanner.show{transform:translate(-50%,0);opacity:1}
+#wonBanner:not(.show){pointer-events:none}
 #wonBanner .t{font-weight:700;font-size:15px}
 #wonBanner .small{font-size:12px;line-height:1.35}
 #wonBanner .chips{margin:4px 0 2px}
@@ -48,6 +49,8 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
 .spark{position:fixed;left:50%;bottom:calc(140px + env(safe-area-inset-bottom));z-index:36;pointer-events:none;font-size:18px;animation:spark 1.2s ease-out forwards}
 @keyframes spark{0%{transform:translate(-50%,0) scale(.4);opacity:1}100%{transform:translate(calc(-50% + var(--dx)),calc(-1 * var(--dy))) scale(1);opacity:0}}
 #hStars,#pStars{font-weight:600;white-space:nowrap;cursor:pointer}
+.fly{position:fixed;z-index:40;pointer-events:none;font-size:24px;line-height:1;will-change:transform}
+.fly.minus{color:#d32f2f;font-weight:800;font-size:22px;text-shadow:0 0 6px #fff,0 0 10px #ffcdd2}
 #hStars.bump,#pStars.bump{animation:bump .6s}
 #hStars.drop,#pStars.drop{animation:drop .7s}
 @keyframes drop{20%,60%{transform:translateX(-4px);background:#f6d0c8;color:#9a2b18}40%,80%{transform:translateX(4px)}}
@@ -120,7 +123,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-08 · 34';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-08 · 35';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -256,13 +259,15 @@ function logDay(entry){
   save('lec-log', all);
 }
 function celebrate(e){
-  bumpDay(1);
+  bumpDay(1); STAR_PENDING++;
   const ctx = CREDIT_CTX || { how: 'marcada', text: '' };
   logDay({ w: e.lemma, d: 1, how: ctx.how, text: ctx.text, lang: LANG() });
   WON.push({ w: e.lemma, ...ctx }); clearTimeout(wonTimer); wonTimer = setTimeout(showWon, 400);
 }
 // el contador ⭐: las aprendidas hoy, descontando las que se desaprendieron (empieza en 0 cada día)
-const starText = () => '⭐ ' + todayNet();
+// (lo que todavía va volando no se cuenta: el contador cambia cuando llega cada ⭐ o −1)
+let STAR_PENDING = 0;
+const starText = () => '⭐ ' + (todayNet() - STAR_PENDING);
 function updateStars(anim){
   for (const st of [$('hStars'), $('pStars')]) if (st) {
     st.textContent = starText();
@@ -271,16 +276,54 @@ function updateStars(anim){
 }
 // una palabra que estaba al 100 % bajó (pediste su traducción)
 function unlearned(e){
-  bumpDay(-1);
+  bumpDay(-1); STAR_PENDING--;
   logDay({ w: e.lemma, d: -1, how: CREDIT_CTX?.how || 'consulta', text: e.sentence || '', sc: scoreOf(e), lang: LANG() });
-  setTimeout(() => { updateStars('drop'); toast(`−1 ⭐ «${e.lemma}» bajó a ${scoreOf(e)} % · hoy ${todayNet()}`); }, 0);
+  // un −1 rojo vuela desde la palabra tocada hasta el contador, que descuenta al llegar
+  setTimeout(() => {
+    const from = (TIP_EL?.isConnected && TIP_EL) || visibleWord(e.lemma) || (SHEET && $('sheet')) || null;
+    flyToCounter(from, '−1', 'minus', () => { STAR_PENDING++; updateStars('drop'); });
+    toast(`−1 ⭐ «${e.lemma}» bajó a ${scoreOf(e)} % · hoy ${todayNet()}`);
+  }, 0);
+}
+// el contador al que vuelan las estrellas: abajo en el lector, en la cabecera en la biblioteca
+const starTarget = () => (!$('player').hidden && $('pStars')) || $('hStars');
+// una palabra de este lema que esté a la vista
+function visibleWord(lemma){
+  const v = $('view').getBoundingClientRect();
+  for (const w of document.querySelectorAll('#book .w')) {
+    const t = TOKS.get(w)?.tok; if (!t || lemmaOf(t) !== lemma) continue;
+    const r = w.getBoundingClientRect(); if (r.bottom > v.top && r.top < v.bottom) return w;
+  }
+  return null;
+}
+// algo (⭐ o −1) vuela en curva desde un elemento hasta el contador; al llegar, onArrive
+function flyToCounter(fromEl, text, cls, onArrive, delay = 0){
+  const target = starTarget();
+  if (!target || !fromEl) { setTimeout(onArrive, delay); return; }
+  setTimeout(() => {
+    const a = fromEl.getBoundingClientRect(), b = target.getBoundingClientRect();
+    const x0 = a.left + a.width / 2, y0 = a.top + a.height / 2, x1 = b.left + b.width / 2, y1 = b.top + b.height / 2;
+    const f = document.createElement('span'); f.className = 'fly ' + cls; f.textContent = text;
+    f.style.left = x0 + 'px'; f.style.top = y0 + 'px'; document.body.appendChild(f);
+    const dx = x1 - x0, dy = y1 - y0;
+    const anim = f.animate([
+      { transform: 'translate(-50%,-50%) scale(.6)', opacity: 0 },
+      { transform: `translate(calc(-50% + ${dx * 0.15}px), calc(-50% + ${-40}px)) scale(1.5)`, opacity: 1, offset: 0.2 },
+      { transform: `translate(calc(-50% + ${dx * 0.6}px), calc(-50% + ${dy * 0.45}px)) scale(1.15)`, opacity: 1, offset: 0.6 },
+      { transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(.7)`, opacity: 0.9 }
+    ], { duration: 950, easing: 'cubic-bezier(.45,0,.55,1)' });
+    anim.onfinish = () => { f.remove(); onArrive(); };
+  }, delay);
 }
 // la señal no puede depender de que la palabra esté a la vista (leyendo en silencio ya salió de la pantalla):
 // un aviso baja desde arriba con las palabras como fichas, una lluvia de ✨⭐, y el contador ⭐ de la cabecera salta
 let wonHide = 0;
 function showWon(){
   const items = WON; WON = []; if (!items.length) return;
-  const list = [...new Set(items.map(x => x.w))], last = items[items.length - 1];
+  const list = [...new Set(items.map(x => x.w))];
+  // el «dónde»: la forma más común del grupo (p. ej. al avanzar), con la oración de la primera de ellas
+  const cnt = {}; for (const x of items) cnt[x.how] = (cnt[x.how] || 0) + 1;
+  const mainHow = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])[0], last = items.find(x => x.how === mainHow) || items[0];
   const where = last.how && HOW[last.how] ? `${HOW[last.how]}${last.text ? `: «${last.text.trim().slice(0, 34)}${last.text.trim().length > 34 ? '…' : ''}»` : ''}` : '';
   const total = totalWon(), hoy = todayNet();
   let b = $('wonBanner'); if (!b) { b = document.createElement('div'); b.id = 'wonBanner'; document.body.appendChild(b); b.onclick = () => b.classList.remove('show'); }
@@ -292,7 +335,16 @@ function showWon(){
   b.classList.remove('show'); void b.offsetWidth; b.classList.add('show');
   clearTimeout(wonHide); wonHide = setTimeout(() => b.classList.remove('show'), 2600 + shown.length * 90);
   burst();
-  updateStars('bump');
+  // una ⭐ vuela desde cada palabra (o desde su ficha en el aviso) hasta el contador, que suma al llegar cada una
+  const flights = shown.slice(0, 8), n = items.length;
+  updateStars();
+  flights.forEach((w, i) => {
+    const take = i === flights.length - 1 ? n - (flights.length - 1) : 1;   // la última suma las que no volaron
+    setTimeout(() => {
+      const from = visibleWord(w) || b.querySelectorAll('.chips span')[i] || b;
+      flyToCounter(from, '⭐', 'star', () => { STAR_PENDING = Math.max(0, STAR_PENDING - take); updateStars('bump'); });
+    }, 350 + i * 160);
+  });
   // y si alguna está a la vista (p. ej. leyendo con ▶), además destella
   setTimeout(() => {
     const set = new Set(list);
