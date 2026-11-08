@@ -33,7 +33,9 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
 .w{cursor:pointer;border-radius:4px;touch-action:manipulation;transition:background .15s}
 .w:hover{background:var(--accent-soft)}
 .w.new{text-decoration:underline 2px var(--new);text-underline-offset:5px}
-.w.learn{text-decoration:underline dotted 2px var(--new);text-underline-offset:5px}
+.w.learn{background:rgba(59,130,246,var(--a,.25));border-radius:4px}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .w.learn{background:rgba(96,165,250,var(--a,.25))}}
+:root[data-theme="dark"] .w.learn{background:rgba(96,165,250,var(--a,.25))}
 .w.speaking{background:var(--accent-soft)}
 .w.peeked{text-decoration-color:var(--accent)}
 .w.from{outline:2px dashed var(--accent);outline-offset:2px}
@@ -123,7 +125,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-08 · 35';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-08 · 37';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -361,15 +363,19 @@ function burst(){
     document.body.appendChild(p); setTimeout(() => p.remove(), 1400);
   }
 }
-// subrayado: «nueva» (línea continua) bajo 30 %, «aprendiendo» (punteada) hasta 70 %
+// cómo se marca cada palabra: nueva → subrayada en verde; aprendiendo (ya la consultaste y no llega a 100 %) →
+// fondo azul, más fuerte cuanto menos la sabes; sabida (100 %) → sin marca
 function wordClass(tok){
   if (!tok.lemma || SKIP_POS.has(tok.pos)) return '';
   const e = DICT[lemmaOf(tok)];
   if (!e) return tok.cefr && lvIdx(tok.cefr) >= lvIdx(myLevel(LANG())) ? 'new' : '';
   if (!e.srs && e.status === 'conocida') return '';
   const sc = scoreOf(e);
-  return sc < 30 ? 'new' : sc < 70 ? 'learn' : '';
+  if (sc >= 100) return '';
+  return isNewWord(e) ? 'new' : 'learn';
 }
+// la opacidad del azul: 0 % → fuerte, cerca de 100 % → casi nada
+const learnAlpha = tok => { const e = DICT[lemmaOf(tok)]; return (0.08 + 0.34 * (1 - scoreOf(e) / 100)).toFixed(2); };
 
 
 /* ---------- libros en IndexedDB ----------
@@ -1114,6 +1120,7 @@ function renderSentence(el, text, ana, p, si){
   const add = (tok, off) => {
     const w = document.createElement('span'); w.className = 'w'; w.textContent = tok.t; w.dataset.o = off;
     const c = tok.lemma ? wordClass(tok) : ''; if (c) w.classList.add(c);
+    if (c === 'learn') w.style.setProperty('--a', learnAlpha(tok));
     if (tok.lemma && PEEK.has(`${anaKey(p)}#${si}#${lemmaOf(tok)}`)) w.classList.add('peeked');
     if (FROM && FROM.p === p && FROM.si === si && FROM.off === off) w.classList.add('from');
     TOKS.set(w, { tok, p, si }); el.appendChild(w);
@@ -1383,11 +1390,19 @@ document.addEventListener('click', ev => {
   if (!w) { if (!ev.target.closest?.('#selbtn')) hideTip(); return; }
   const sel = getSelection(); if (sel && !sel.isCollapsed && sel.toString().trim().length > 1 && Date.now() - TAP.t > 600) return;
   ev.stopPropagation();
-  const now = Date.now();
-  if (TAP.el === w && now - TAP.t < 450) { TAP = { el: null, t: 0 }; LAST_DBL = now; getSelection()?.removeAllRanges(); hideTip(); openWord(w); return; }
+  const now = Date.now(), info = TOKS.get(w); if (!info) return;
   TAP = { el: w, t: now };
+  const key = `${info.p}#${info.si}#${w.dataset.o}`;
+  // 1.er toque: solo marca la oración (y la palabra como punto de partida de ▶); no traduce ni cuenta como consulta
+  if (!PLAY && (CUR.p !== info.p || CUR.s !== info.si)) {
+    hideTip(); setCursor(info.p, info.si, { scroll: '' }); setFrom(info.p, info.si, +w.dataset.o); return;
+  }
+  // 3.er toque (la misma palabra con su traducción a la vista): la ficha con la explicación detallada
+  if (TIP_KEY === key && !$('tip')?.hidden) { LAST_DBL = now; getSelection()?.removeAllRanges(); hideTip(); openWord(w); return; }
+  // 2.º toque: la traducción de la palabra
   showTip(w);
 });
+let TIP_KEY = null;   // la palabra cuya traducción está a la vista
 function peek(info){
   const { tok, p, si } = info; const l = lemmaOf(tok); if (!l) return;
   const key = `${anaKey(p)}#${si}#${l}`;
@@ -1400,7 +1415,8 @@ function showTip(w){
   let tip = $('tip'); if (!tip) { tip = document.createElement('div'); tip.id = 'tip'; document.body.appendChild(tip); }
   TIP_EL = w;
   // (sin estar leyendo) la oración de la palabra pasa a ser la marcada; ▶ parte desde la palabra
-  if (!PLAY) { if (CUR.p !== p || CUR.s !== si) setCursor(p, si, { scroll: '' }); setFrom(p, si, +w.dataset.o); }
+  TIP_KEY = `${p}#${si}#${w.dataset.o}`;
+  if (!PLAY) setFrom(p, si, +w.dataset.o);
   TIP_WAIT = null;
   if (!tok.lemma) {
     if (ANA.has(anaKey(p))) tip.innerHTML = 'sin traducción';
@@ -1415,12 +1431,12 @@ function showTip(w){
     w.classList.add('peeked');
     const l = lemmaOf(tok), e = DICT[l];
     const romo = LANG() === 'ko' ? `<small>${esc(romanize(tok.t))}</small>` : '';
-    tip.innerHTML = `<b>${esc(tok.gloss || e?.gloss || '—')}</b>${l && l !== tok.t.toLowerCase() && l !== tok.t ? ` · <span lang="${LANG()}">${esc(l)}</span>` : ''}${tok.form ? `<small>${esc(tok.form)}</small>` : ''}${romo}<small>toca dos veces para la explicación${PLAY ? '' : ' · ▶ lee desde aquí'}</small>`;
+    tip.innerHTML = `<b>${esc(tok.gloss || e?.gloss || '—')}</b>${l && l !== tok.t.toLowerCase() && l !== tok.t ? ` · <span lang="${LANG()}">${esc(l)}</span>` : ''}${tok.form ? `<small>${esc(tok.form)}</small>` : ''}${romo}<small>toca otra vez para la explicación${PLAY ? '' : ' · ▶ lee desde aquí'}</small>`;
     if (S.autoSpeakWord) speakWord(tok.t);
   }
   placeTip(tip, w);
 }
-function hideTip(){ TIP_EL = null; TIP_WAIT = null; const t = $('tip'); if (t) t.hidden = true; }
+function hideTip(){ TIP_EL = null; TIP_WAIT = null; TIP_KEY = null; const t = $('tip'); if (t) t.hidden = true; }
 let silentTick = 0;
 $('view').addEventListener('scroll', () => {
   hideTip(); hideSelBtn(); prefetchVisible();
@@ -1852,7 +1868,7 @@ async function drawLibrary(){
   v.innerHTML = `<div class="lib">
     <div class="welcome"><h2>Leer para aprender</h2>
       <p>Abre un libro en <b>EPUB</b> (o pega un texto) en coreano, inglés u otro idioma. La app lo lee en voz alta marcando la oración actual.</p>
-      <p><b>Toca</b> una palabra para ver qué significa ahí; <b>tócala dos veces</b> para la explicación detallada; <b>selecciona</b> un trozo para que te lo expliquen. Las palabras nuevas aparecen subrayadas: si las lees sin pedir ayuda, suben; si pides la traducción, bajan (como en Anki).</p>
+      <p><b>Toca</b> una palabra para marcar su oración; <b>otra vez</b> para ver qué significa ahí; <b>una tercera vez</b> para la explicación detallada; <b>selecciona</b> un trozo para que te lo expliquen. Las palabras nuevas aparecen subrayadas: si las lees sin pedir ayuda, suben; si pides la traducción, bajan (como en Anki).</p>
       <p>También puede <b>estimar el nivel</b> del libro y <b>simplificarlo</b> al tuyo.</p>
       ${noKey ? `<p class="fix">Para traducir hace falta tu clave de la API (la misma de «Hablemos»): ⚙ Ajustes.</p>` : ''}
       <div class="row"><button class="btn" id="lOpen">📂 Abrir EPUB o .txt</button><button class="btn sec" id="lPaste">📋 Pegar texto</button><button class="btn sec" id="lGut">🔎 Buscar en Gutenberg</button><button class="btn sec" id="lImp">📥 Importar .leamos</button>${books.length ? '<button class="btn sec" id="lExpAll">📦 Exportar todo</button>' : ''}
@@ -2231,7 +2247,7 @@ let WFILTER = 'todas', WQ = '';
 function openWords(){ openPanel('Mis palabras', 'words'); drawWords(); }
 function drawWords(){
   const lang = DLANG, all = Object.values(DICT).filter(e => e.lemma && !SKIP_POS.has(e.pos));
-  const cls = e => { const s = scoreOf(e); return s < 30 ? 'nuevas' : s < 70 ? 'aprendiendo' : 'sabidas'; };
+  const cls = e => (scoreOf(e) >= 100 || (!e.srs && e.status === 'conocida')) ? 'sabidas' : isNewWord(e) ? 'nuevas' : 'aprendiendo';
   const counts = { nuevas: 0, aprendiendo: 0, sabidas: 0 }; all.forEach(e => counts[cls(e)]++);
   let list = all.filter(e => WFILTER === 'todas' || cls(e) === WFILTER);
   if (WQ) { const q = WQ.toLowerCase(); list = list.filter(e => e.lemma.toLowerCase().includes(q) || (e.gloss || '').toLowerCase().includes(q) || Object.keys(e.forms || {}).some(f => f.toLowerCase().includes(q))); }
@@ -2282,7 +2298,7 @@ function drawGram(){
   list.sort((a, b) => (lvIdx(a.level) - lvIdx(b.level)) || a.pattern.localeCompare(b.pattern));
   const byLevel = {}; for (const e of list) (byLevel[e.level || '—'] ||= []).push(e);
   pb.innerHTML = `<div class="field"><label>Idioma</label><select id="gLangSel">${Object.entries(LANGS).map(([k, L]) => `<option value="${k}" ${k === lang ? 'selected' : ''}>${L.native} · ${L.name} (${Object.keys(loadGram(k)).length})</option>`).join('')}</select></div>
-    <p class="small">Los puntos gramaticales se agregan solos cuando pides la explicación de una palabra (doble toque) o de una frase (seleccionar o 🎓 Explicar). Cada uno lleva a las explicaciones donde apareció; su explicación completa se pide solo si la quieres.</p>
+    <p class="small">Los puntos gramaticales se agregan solos cuando pides la explicación de una palabra (tercer toque) o de una frase (seleccionar o 🎓 Explicar). Cada uno lleva a las explicaciones donde apareció; su explicación completa se pide solo si la quieres.</p>
     <input class="search" id="gramQ" placeholder="Buscar…" value="${esc(GQ)}">
     ${list.length ? Object.entries(byLevel).map(([lv, es]) => `<div class="sec-t">${esc(lvLabel(lang, lv === '—' ? '' : lv) || 'Sin nivel')}</div>` + es.map(e => `<div class="ent" data-g="${esc(e.id)}"><div class="top"><span class="lem" lang="${lang}">${esc(e.pattern)}</span><span class="g">${esc(e.title)}</span><span class="small">${e.refs.length}${e.lesson ? ' · 🎓' : ''}</span></div><div class="small" style="margin-top:3px">${esc(e.desc)}</div></div>`).join('')).join('')
       : '<p class="small" style="text-align:center;margin-top:20px">Todavía no hay puntos. Pide el detalle de una palabra o una frase mientras lees.</p>'}`;
@@ -2363,7 +2379,7 @@ function openSettings(){
       <div class="field"><label>Workspace de Anthropic (solo para claves de organización)</label><input type="text" id="kW" value="${esc(KEYS.workspace)}"></div></div>
     <div class="box"><h3>Modelos</h3>
       <div class="field"><label>Traducir palabras al leer (cada párrafo)</label>${sel('mRead', CHAT_MODELS, S.chatModel)}</div>
-      <div class="field"><label>Explicaciones (doble toque, selección, nivel del libro)</label>${sel('mDef', DEF_MODELS, S.defModel)}</div>
+      <div class="field"><label>Explicaciones (tercer toque en una palabra, selección, nivel del libro)</label>${sel('mDef', DEF_MODELS, S.defModel)}</div>
       <div class="field"><label>Simplificar y traducir libros</label>${sel('mSimp', SIMP_MODELS, S.simpModel)}<div class="small">También se elige en la ficha de cada libro (ℹ). Se usa también para la lista de nombres y para reescribir lo que quedó sobre el nivel.</div></div>
       <div class="field"><label>Revisar el nivel de la simplificación</label>${sel('mCheck', [...CHAT_MODELS, ...DEF_MODELS.filter(([m]) => !CHAT_MODELS.some(c => c[0] === m))], CHECK_MODEL())}<div class="small">Busca palabras y gramática sobre el nivel en cada parte. Uno barato suele bastar; uno mejor detecta más.</div></div>
       <label class="check"><input type="checkbox" id="cAuto" ${S.autoAnalyze ? 'checked' : ''}><span>Traducir por adelantado los párrafos que vas a leer (la palabra que toques ya estará lista). Si no, se traduce el párrafo al tocar una palabra.</span></label>
@@ -2406,7 +2422,7 @@ function openSettings(){
       <li>Una palabra que ya habías consultado alguna vez y pasas sin pedir traducción <b>sube 10 puntos</b> (como mucho una vez por minuto).</li>
       <li>Pedir la traducción de una palabra: si es nueva, queda en <b>0</b>; si no, <b>baja 30 puntos</b>.</li>
       <li>Pedir la traducción (文) o la explicación de una frase: sus palabras <b>ni suben ni bajan</b>.</li>
-      <li>Bajo 30 % la palabra se subraya; hasta 70 %, con línea punteada. Al llegar a 100 %: 🎉.</li></ul></div>
+      <li>Las <b>nuevas</b> se subrayan en verde; las que estás <b>aprendiendo</b> (ya las consultaste) tienen fondo azul, más claro cuanto más las sabes; las <b>sabidas</b> (100 %) no tienen marca. Al llegar a 100 %: 🎉.</li></ul></div>
     <div class="box"><h3>Gasto (estimado)</h3>${usageHTML()}</div>
     <p class="small" style="text-align:center">Leamos · versión ${APP_VERSION}</p>`;
   const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
