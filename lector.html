@@ -126,7 +126,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-08 · 42';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-08 · 43';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -1193,7 +1193,12 @@ function creditSentence(p, s, how = 'avance'){
 }
 
 /* ---------- leer en voz alta: la voz del navegador (gratis) o la de OpenAI (natural) ---------- */
-const utter = (text, lang, rate = S.rate) => makeUtterance(text, lang, rate, S.voices[lang]);
+// la voz del navegador: la elegida aquí o, en coreano, la que elegiste en «Hablemos» (si no, la primera disponible);
+// en coreano el texto se limpia como en «Hablemos» (solo hangul, números y puntuación básica)
+const browserVoice = lang => S.voices[lang] || (lang === 'ko' ? (load('hab-set', {}).voice || '') : '');
+// (cada carácter se cambia por un espacio: las posiciones no se mueven y el resaltado de la palabra sigue cuadrando)
+const cleanForVoice = (text, lang) => lang === 'ko' ? text.replace(/[^가-힣ㄱ-ㆎ0-9 .,?!~]/g, ' ') : text.replace(/[«»“”"„]/g, ' ');
+const utter = (text, lang, rate = S.rate) => makeUtterance(cleanForVoice(text, lang), lang, rate, browserVoice(lang));
 let CLOUD_OFF = false;   // (la clave de OpenAI falló: en esta sesión se usa la voz del navegador)
 const cloudOn = () => !CLOUD_OFF && ((S.ttsProv === 'openai' && !!KEYS.openai) || (S.ttsProv === 'edge' && !!S.proxy));
 const edgeVoice = (lang = LANG()) => (S.edgeVoices || {})[lang] || EDGE_VOICES[lang]?.[0]?.[0] || 'en-US-AriaNeural';
@@ -2390,7 +2395,7 @@ function openSettings(){
       <div class="field"><label>Voz de OpenAI (sirve para todos los idiomas)</label>${sel('vOai', TTS_VOICES.map(v => [v, v]), ttsVoice())}</div>
       ${ttsModel().startsWith('gpt-') ? `<div class="field"><label>Cómo debe leer</label><input type="text" id="vInstr" value="${esc(S.ttsInstr ?? TTS_DEFAULT_INSTR)}"></div>` : ''}
       <div class="small">Cada oración se genera una vez y queda guardada en este navegador (releer no cuesta). La velocidad se ajusta al reproducir. Del orden de 1,5 centavos de dólar por minuto de audio. Mientras suena una oración se pide la siguiente.</div>` : ''}
-      <div class="field"><label>Voz del navegador (${esc(LANGS[lang].name)})</label>${vs.length ? sel('vVoice', [['', 'La primera disponible'], ...[...vs].sort((a, b) => /natural|online|neural/i.test(b.name) - /natural|online|neural/i.test(a.name)).map(v => [v.name, (/natural|online|neural/i.test(v.name) ? '★ ' : '') + v.name + ' · ' + v.lang])], S.voices[lang] || '') + (vs.some(v => /natural|online/i.test(v.name)) ? '<div class="small">★ = voz natural (en Microsoft Edge, las «Online (Natural)» son las mismas de edge-tts, gratis).</div>' : '<div class="small">En <b>Microsoft Edge</b> el navegador trae voces naturales gratis («Online (Natural)»): abre Leamos en Edge y elígelas aquí.</div>') : '<div class="small">No hay voces de este idioma en el sistema; se usará la voz por defecto.</div>'}</div>
+      <div class="field"><label>Voz del navegador (${esc(LANGS[lang].name)})</label>${vs.length ? sel('vVoice', [['', lang === 'ko' && load('hab-set', {}).voice ? 'La misma de «Hablemos» (' + load('hab-set', {}).voice + ')' : 'La primera disponible'], ...[...vs].sort((a, b) => /natural|online|neural/i.test(b.name) - /natural|online|neural/i.test(a.name)).map(v => [v.name, (/natural|online|neural/i.test(v.name) ? '★ ' : '') + v.name + ' · ' + v.lang])], S.voices[lang] || '') + (vs.some(v => /natural|online/i.test(v.name)) ? '<div class="small">★ = voz natural (en Microsoft Edge, las «Online (Natural)» son las mismas de edge-tts, gratis).</div>' : '<div class="small">En <b>Microsoft Edge</b> el navegador trae voces naturales gratis («Online (Natural)»): abre Leamos en Edge y elígelas aquí.</div>') : '<div class="small">No hay voces de este idioma en el sistema; se usará la voz por defecto.</div>'}</div>
       <div class="field"><label>Velocidad: <b id="rateV">${S.rate}</b></label><input type="range" id="rRate" min="0.5" max="1.4" step="0.05" value="${S.rate}" style="width:100%"></div>
       <label class="check"><input type="checkbox" id="cSay" ${S.autoSpeakWord ? 'checked' : ''}><span>Decir la palabra al tocarla (si no está leyendo)</span></label>
       <button class="btn sec" id="vTest">🔊 Probar</button></div>
