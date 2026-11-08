@@ -38,15 +38,19 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
 .w.peeked{text-decoration-color:var(--accent)}
 .w.from{outline:2px dashed var(--accent);outline-offset:2px}
 .w.won{animation:won 1.8s ease-out}
-#wonBanner{position:fixed;left:50%;top:62px;transform:translate(-50%,-160%);z-index:35;background:var(--card);border:2px solid #f0b400;border-radius:16px;padding:8px 16px 9px;box-shadow:0 8px 24px rgba(0,0,0,.2);transition:transform .45s cubic-bezier(.2,1.5,.4,1);max-width:92vw;text-align:center;cursor:pointer}
-#wonBanner.show{transform:translate(-50%,0)}
-#wonBanner .t{font-weight:700;font-size:16px}
+#wonBanner{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom));transform:translate(-50%,40%);opacity:0;z-index:35;width:max-content;background:var(--card);border:2px solid #f0b400;border-radius:16px;padding:6px 14px 7px;box-shadow:0 8px 24px rgba(0,0,0,.2);transition:transform .45s cubic-bezier(.2,1.5,.4,1),opacity .3s;max-width:min(92vw,420px);text-align:center;cursor:pointer}
+#wonBanner.show{transform:translate(-50%,0);opacity:1}
+#wonBanner:not(.show){pointer-events:none}
+#wonBanner .t{font-weight:700;font-size:15px}
+#wonBanner .small{font-size:12px;line-height:1.35}
 #wonBanner .chips{margin:4px 0 2px}
 #wonBanner .chips span{display:inline-block;margin:3px;padding:2px 10px;border-radius:999px;background:#ffe9a0;color:#5a4300;font-weight:600;animation:pop .5s backwards}
 @keyframes pop{0%{transform:scale(.2) translateY(10px);opacity:0}70%{transform:scale(1.18)}100%{transform:scale(1);opacity:1}}
-.spark{position:fixed;left:50%;top:92px;z-index:36;pointer-events:none;font-size:18px;animation:spark 1.2s ease-out forwards}
-@keyframes spark{0%{transform:translate(-50%,0) scale(.4);opacity:1}100%{transform:translate(calc(-50% + var(--dx)),var(--dy)) scale(1);opacity:0}}
-#hStars,#pStars{font-weight:600;white-space:nowrap}
+.spark{position:fixed;left:50%;bottom:calc(140px + env(safe-area-inset-bottom));z-index:36;pointer-events:none;font-size:18px;animation:spark 1.2s ease-out forwards}
+@keyframes spark{0%{transform:translate(-50%,0) scale(.4);opacity:1}100%{transform:translate(calc(-50% + var(--dx)),calc(-1 * var(--dy))) scale(1);opacity:0}}
+#hStars,#pStars{font-weight:600;white-space:nowrap;cursor:pointer}
+.fly{position:fixed;z-index:40;pointer-events:none;font-size:24px;line-height:1;will-change:transform}
+.fly.minus{color:#d32f2f;font-weight:800;font-size:22px;text-shadow:0 0 6px #fff,0 0 10px #ffcdd2}
 #hStars.bump,#pStars.bump{animation:bump .6s}
 #hStars.drop,#pStars.drop{animation:drop .7s}
 @keyframes drop{20%,60%{transform:translateX(-4px);background:#f6d0c8;color:#9a2b18}40%,80%{transform:translateX(4px)}}
@@ -119,7 +123,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-08 · 32';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-08 · 35';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -244,12 +248,26 @@ const STATS = () => load('lec-stats', {});
 const todayNet = () => STATS()[today()] || 0;
 const totalWon = () => Object.values(DICT).filter(x => scoreOf(x) >= 100).length;
 function bumpDay(d){ const st = STATS(); st[today()] = (st[today()] || 0) + d; save('lec-stats', st); }
+// cómo y dónde se aprendió (lo fija quien acredita: avanzar, voz, silencio o «Ya la sé»)
+let CREDIT_CTX = null;
+const HOW = { voz: 'leyendo en voz alta', avance: 'al avanzar de oración', silencio: 'leyendo en silencio, al llegar arriba', marcada: 'marcada «Ya la sé»', consulta: 'pediste su traducción', desmarcada: 'marcada como nueva' };
+// lo que pasó hoy con cada palabra: [{ w, t, d: +1|-1, how, text, sc }]
+function logDay(entry){
+  const all = load('lec-log', {}), day = today();
+  for (const k of Object.keys(all)) if (k < day && Object.keys(all).length > 14) delete all[k];   // se guardan unos días
+  (all[day] ||= []).unshift({ ...entry, t: Date.now() }); all[day] = all[day].slice(0, 400);
+  save('lec-log', all);
+}
 function celebrate(e){
-  bumpDay(1);
-  WON.push(e.lemma); clearTimeout(wonTimer); wonTimer = setTimeout(showWon, 350);
+  bumpDay(1); STAR_PENDING++;
+  const ctx = CREDIT_CTX || { how: 'marcada', text: '' };
+  logDay({ w: e.lemma, d: 1, how: ctx.how, text: ctx.text, lang: LANG() });
+  WON.push({ w: e.lemma, ...ctx }); clearTimeout(wonTimer); wonTimer = setTimeout(showWon, 400);
 }
 // el contador ⭐: las aprendidas hoy, descontando las que se desaprendieron (empieza en 0 cada día)
-const starText = () => '⭐ ' + todayNet();
+// (lo que todavía va volando no se cuenta: el contador cambia cuando llega cada ⭐ o −1)
+let STAR_PENDING = 0;
+const starText = () => '⭐ ' + (todayNet() - STAR_PENDING);
 function updateStars(anim){
   for (const st of [$('hStars'), $('pStars')]) if (st) {
     st.textContent = starText();
@@ -258,24 +276,75 @@ function updateStars(anim){
 }
 // una palabra que estaba al 100 % bajó (pediste su traducción)
 function unlearned(e){
-  bumpDay(-1);
-  setTimeout(() => { updateStars('drop'); toast(`−1 ⭐ «${e.lemma}» bajó a ${scoreOf(e)} % · hoy ${todayNet()}`); }, 0);
+  bumpDay(-1); STAR_PENDING--;
+  logDay({ w: e.lemma, d: -1, how: CREDIT_CTX?.how || 'consulta', text: e.sentence || '', sc: scoreOf(e), lang: LANG() });
+  // un −1 rojo vuela desde la palabra tocada hasta el contador, que descuenta al llegar
+  setTimeout(() => {
+    const from = (TIP_EL?.isConnected && TIP_EL) || visibleWord(e.lemma) || (SHEET && $('sheet')) || null;
+    flyToCounter(from, '−1', 'minus', () => { STAR_PENDING++; updateStars('drop'); });
+    toast(`−1 ⭐ «${e.lemma}» bajó a ${scoreOf(e)} % · hoy ${todayNet()}`);
+  }, 0);
+}
+// el contador al que vuelan las estrellas: abajo en el lector, en la cabecera en la biblioteca
+const starTarget = () => (!$('player').hidden && $('pStars')) || $('hStars');
+// una palabra de este lema que esté a la vista
+function visibleWord(lemma){
+  const v = $('view').getBoundingClientRect();
+  for (const w of document.querySelectorAll('#book .w')) {
+    const t = TOKS.get(w)?.tok; if (!t || lemmaOf(t) !== lemma) continue;
+    const r = w.getBoundingClientRect(); if (r.bottom > v.top && r.top < v.bottom) return w;
+  }
+  return null;
+}
+// algo (⭐ o −1) vuela en curva desde un elemento hasta el contador; al llegar, onArrive
+function flyToCounter(fromEl, text, cls, onArrive, delay = 0){
+  const target = starTarget();
+  if (!target || !fromEl) { setTimeout(onArrive, delay); return; }
+  setTimeout(() => {
+    const a = fromEl.getBoundingClientRect(), b = target.getBoundingClientRect();
+    const x0 = a.left + a.width / 2, y0 = a.top + a.height / 2, x1 = b.left + b.width / 2, y1 = b.top + b.height / 2;
+    const f = document.createElement('span'); f.className = 'fly ' + cls; f.textContent = text;
+    f.style.left = x0 + 'px'; f.style.top = y0 + 'px'; document.body.appendChild(f);
+    const dx = x1 - x0, dy = y1 - y0;
+    const anim = f.animate([
+      { transform: 'translate(-50%,-50%) scale(.6)', opacity: 0 },
+      { transform: `translate(calc(-50% + ${dx * 0.15}px), calc(-50% + ${-40}px)) scale(1.5)`, opacity: 1, offset: 0.2 },
+      { transform: `translate(calc(-50% + ${dx * 0.6}px), calc(-50% + ${dy * 0.45}px)) scale(1.15)`, opacity: 1, offset: 0.6 },
+      { transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(.7)`, opacity: 0.9 }
+    ], { duration: 950, easing: 'cubic-bezier(.45,0,.55,1)' });
+    anim.onfinish = () => { f.remove(); onArrive(); };
+  }, delay);
 }
 // la señal no puede depender de que la palabra esté a la vista (leyendo en silencio ya salió de la pantalla):
 // un aviso baja desde arriba con las palabras como fichas, una lluvia de ✨⭐, y el contador ⭐ de la cabecera salta
 let wonHide = 0;
 function showWon(){
-  const list = [...new Set(WON)]; WON = []; if (!list.length) return;
+  const items = WON; WON = []; if (!items.length) return;
+  const list = [...new Set(items.map(x => x.w))];
+  // el «dónde»: la forma más común del grupo (p. ej. al avanzar), con la oración de la primera de ellas
+  const cnt = {}; for (const x of items) cnt[x.how] = (cnt[x.how] || 0) + 1;
+  const mainHow = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])[0], last = items.find(x => x.how === mainHow) || items[0];
+  const where = last.how && HOW[last.how] ? `${HOW[last.how]}${last.text ? `: «${last.text.trim().slice(0, 34)}${last.text.trim().length > 34 ? '…' : ''}»` : ''}` : '';
   const total = totalWon(), hoy = todayNet();
   let b = $('wonBanner'); if (!b) { b = document.createElement('div'); b.id = 'wonBanner'; document.body.appendChild(b); b.onclick = () => b.classList.remove('show'); }
   const lang = LANG(), shown = list.slice(0, 10);
   b.innerHTML = `<div class="t">🎉 ${list.length === 1 ? '¡Palabra aprendida!' : `¡+${list.length} palabras aprendidas!`}</div>
     <div class="chips">${shown.map((w, i) => `<span lang="${lang}" style="animation-delay:${120 + i * 90}ms">⭐ ${esc(w)}</span>`).join('')}${list.length > shown.length ? `<span style="animation-delay:${120 + shown.length * 90}ms">+${list.length - shown.length}</span>` : ''}</div>
+    ${where ? `<div class="small" lang="${lang}" style="margin:2px 0">${esc(where)}</div>` : ''}
     <div class="small">hoy ${hoy >= 0 ? '+' + hoy : hoy} · ⭐ ${total} al 100 %</div>`;
   b.classList.remove('show'); void b.offsetWidth; b.classList.add('show');
   clearTimeout(wonHide); wonHide = setTimeout(() => b.classList.remove('show'), 2600 + shown.length * 90);
   burst();
-  updateStars('bump');
+  // una ⭐ vuela desde cada palabra (o desde su ficha en el aviso) hasta el contador, que suma al llegar cada una
+  const flights = shown.slice(0, 8), n = items.length;
+  updateStars();
+  flights.forEach((w, i) => {
+    const take = i === flights.length - 1 ? n - (flights.length - 1) : 1;   // la última suma las que no volaron
+    setTimeout(() => {
+      const from = visibleWord(w) || b.querySelectorAll('.chips span')[i] || b;
+      flyToCounter(from, '⭐', 'star', () => { STAR_PENDING = Math.max(0, STAR_PENDING - take); updateStars('bump'); });
+    }, 350 + i * 160);
+  });
   // y si alguna está a la vista (p. ej. leyendo con ▶), además destella
   setTimeout(() => {
     const set = new Set(list);
@@ -925,8 +994,9 @@ function prefetchVisible(){
 }
 
 /* ---------- leer sin ayuda (en silencio, bajando la página) ----------
-   Se mide cuánto tiempo estuvo cada párrafo a la vista. Cuando sale por arriba (ya lo pasaste) y estuvo el tiempo
-   mínimo para leerlo, cuenta como leído: sus palabras que no miraste suben, igual que al avanzar con ▶ o ⏭.
+   Se mide cuánto tiempo estuvo cada párrafo a la vista. Cada palabra cuenta cuando llega a la primera línea visible
+   (justo antes de desaparecer) o ya la pasó, si su párrafo estuvo el tiempo mínimo a la vista: las que no miraste
+   suben, igual que al avanzar con ▶ o ⏭.
    La marca de la oración actual también te sigue, para que ▶ y la posición guardada queden donde vas. */
 const VIS = new Map();   // clave del párrafo → segundos a la vista
 const needSecs = p => { const t = CH.paras[p] || ''; const words = CJK(LANG()) ? t.length / 2 : t.split(/\s+/).length; return Math.max(1, words * 0.15); };
@@ -940,17 +1010,47 @@ setInterval(() => {
     const k = anaKey(+el.dataset.p); VIS.set(k, (VIS.get(k) || 0) + 1);
   }
 }, 1000);
+// leyendo en silencio, cada palabra cuenta cuando llega a la primera línea visible (justo antes de desaparecer)
+// o cuando ya la pasó, siempre que su párrafo haya estado un momento a la vista
+const SILENT_DONE = new Set();   // palabras ya contadas en esta lectura: clave#oración#posición
 function silentRead(){
   if (!BOOK || !CH || CH.missing || PLAY || S.silentRead === false) return;
   const v = $('view').getBoundingClientRect(); let firstVisible = null;
+  const first = document.querySelector('#book .para');
+  const lineH = first ? parseFloat(getComputedStyle(first).lineHeight) || S.fs * 1.95 : S.fs * 1.95;
+  const zone = v.top + lineH * 1.05;   // la primera línea visible
+  const touched = new Set();
   for (const el of document.querySelectorAll('#book .para')) {
     const r = el.getBoundingClientRect(), p = +el.dataset.p;
-    if (r.bottom >= v.top) { firstVisible = p; break; }
-    const rec = ANA.get(anaKey(p));
-    if (rec && (VIS.get(anaKey(p)) || 0) >= needSecs(p)) CH.sents[p].forEach((_, si) => creditSentence(p, si));
+    if (r.bottom < v.top - v.height * 3) continue;          // (muy atrás: ya se revisó antes)
+    if (r.top >= zone) { if (firstVisible === null) firstVisible = p; break; }
+    if (firstVisible === null && r.bottom >= v.top) firstVisible = p;
+    const k = anaKey(p), rec = ANA.get(k);
+    if (!rec || (VIS.get(k) || 0) < Math.min(needSecs(p), 3)) continue;
+    for (const w of el.querySelectorAll('.w')) {
+      if (w.getBoundingClientRect().top >= zone) break;    // de aquí en adelante, todavía más abajo
+      const info = TOKS.get(w); if (!info?.tok.lemma) continue;
+      const key = `${k}#${info.si}#${w.dataset.o}`;
+      if (SILENT_DONE.has(key)) continue;
+      SILENT_DONE.add(key);
+      if (creditWord(info.p, info.si, info.tok)) touched.add(p);
+    }
   }
+  if (touched.size) rerenderVisible();
   // la marca quedó atrás: pasa al primer párrafo a la vista
   if (firstVisible !== null && CUR.p < firstVisible) setCursor(firstVisible, 0, { scroll: '' });
+}
+// una palabra que pasaste leyendo en silencio (las mismas reglas que al pasar una oración)
+function creditWord(p, si, tok){
+  const k = anaKey(p), rec = ANA.get(k), st = rec?.sents?.[si];
+  if (!st || rec.seenEs[si]) return false;                  // pediste la traducción de esa frase: no cambia
+  const l = lemmaOf(tok); if (!l || SKIP_POS.has(tok.pos) || PEEK.has(`${k}#${si}#${l}`)) return false;
+  let e = DICT[l];
+  if (!e) { if (!tok.cefr || lvIdx(tok.cefr) < lvIdx(myLevel(LANG()))) return false; e = ensureEntry(tok, st.text); }
+  CREDIT_CTX = { how: 'silencio', text: st.text };
+  const changed = srsGood(e);
+  CREDIT_CTX = null;
+  return changed;
 }
 
 /* ---------- dibujar el libro ---------- */
@@ -1061,7 +1161,7 @@ function savePosNow(){ clearTimeout(posTimer); if (BOOK) dbPut('books', BOOK); }
 // pasar a la siguiente oración: la que se deja cuenta como leída (las palabras que no miraste suben)
 async function next(credit = true){
   if (!CH || CH.missing) return false;
-  if (credit) creditSentence(CUR.p, CUR.s);
+  if (credit) creditSentence(CUR.p, CUR.s, PLAY ? 'voz' : 'avance');
   if (CUR.s + 1 < CH.sents[CUR.p].length) { setCursor(CUR.p, CUR.s + 1); return true; }
   if (CUR.p + 1 < CH.paras.length) { setCursor(CUR.p + 1, 0); return true; }
   if (CH.ch + 1 < BOOK.chapters.length) { await openChapter(CH.ver, CH.ch + 1); return true; }
@@ -1072,10 +1172,11 @@ function prev(){
   if (CUR.s > 0) setCursor(CUR.p, CUR.s - 1);
   else if (CUR.p > 0) setCursor(CUR.p - 1, CH.sents[CUR.p - 1].length - 1);
 }
-function creditSentence(p, s){
+function creditSentence(p, s, how = 'avance'){
   const k = anaKey(p), rec = ANA.get(k);
   if (!rec || rec.done[s] || rec.seenEs[s]) return;
   const st = rec.sents[s]; if (!st) return;
+  CREDIT_CTX = { how, text: st.text };
   const seen = new Set(); let changed = false;
   for (const tok of st.tokens) {
     const l = lemmaOf(tok); if (!l || SKIP_POS.has(tok.pos) || seen.has(l)) continue; seen.add(l);
@@ -1086,6 +1187,7 @@ function creditSentence(p, s){
     // nueva: queda sabida (100 %); si ya la habías consultado, sube 10 puntos
     if (srsGood(e)) changed = true;
   }
+  CREDIT_CTX = null;
   rec.done[s] = true; dbPut('ana', rec);
   if (changed) rerenderVisible(p);
 }
@@ -1319,7 +1421,11 @@ function showTip(w){
   placeTip(tip, w);
 }
 function hideTip(){ TIP_EL = null; TIP_WAIT = null; const t = $('tip'); if (t) t.hidden = true; }
-$('view').addEventListener('scroll', () => { hideTip(); hideSelBtn(); prefetchVisible(); }, { passive: true });
+let silentTick = 0;
+$('view').addEventListener('scroll', () => {
+  hideTip(); hideSelBtn(); prefetchVisible();
+  if (!silentTick) silentTick = setTimeout(() => { silentTick = 0; silentRead(); }, 150);
+}, { passive: true });
 
 /* ---------- ficha de la palabra ---------- */
 let SHEET = null;
@@ -1716,6 +1822,7 @@ function renderHeader(){
   }
   $('hWords').onclick = () => openWords();
   $('hGram').onclick = () => openGram();
+  if ($('hStars')) $('hStars').onclick = openToday;
   $('hSet').onclick = openSettings;
 }
 function updateInfo(){
@@ -2143,6 +2250,26 @@ function drawWords(){
   $('pbody').querySelectorAll('[data-f]').forEach(b => b.onclick = () => { WFILTER = b.dataset.f; drawWords(); });
 }
 
+// ⭐ hoy: qué palabras se aprendieron o desaprendieron, cuándo, cómo y en qué oración
+function openToday(){ openPanel('Hoy ⭐', 'today'); drawToday(); }
+function drawToday(){
+  if (PANEL !== 'today') return;
+  const log = load('lec-log', {})[today()] || [];
+  const won = log.filter(x => x.d > 0).length, lost = log.filter(x => x.d < 0).length;
+  const hh = t => new Date(t).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+  $('pbody').innerHTML = `<div class="stats" style="grid-template-columns:repeat(3,1fr)"><div><b>${todayNet()}</b>hoy (neto)</div><div><b>+${won}</b>aprendidas</div><div><b>−${lost}</b>desaprendidas</div></div>
+    <p class="small">Una palabra nueva se da por aprendida cuando la pasas sin pedir su traducción (al avanzar de oración, leyendo en voz alta o, leyendo en silencio, cuando llega a la primera línea de la pantalla, justo antes de desaparecer). Si alguna no la sabías, márcala como nueva.</p>
+    ${log.map((x, i) => `<div class="ent" data-i="${i}"><div class="top"><span class="small">${hh(x.t)}</span><span class="lem" lang="${x.lang || ''}" style="font-size:17px">${x.d > 0 ? '⭐' : '−1'} ${esc(x.w)}</span><span class="g">${esc(HOW[x.how] || '')}${x.d < 0 && x.sc !== undefined ? ` · bajó a ${x.sc} %` : ''}</span></div>
+      ${x.text ? `<div class="small" lang="${x.lang || ''}" style="margin-top:3px">«${esc(x.text.trim().slice(0, 120))}»</div>` : ''}
+      ${x.d > 0 ? `<div class="row" style="margin-top:6px"><button class="chip" data-undo="${i}">No la sabía: marcar como nueva</button></div>` : ''}</div>`).join('') || '<p class="small" style="text-align:center">Todavía nada hoy.</p>'}`;
+  $('pbody').querySelectorAll('[data-undo]').forEach(b => b.onclick = () => {
+    const x = log[+b.dataset.undo]; if (x.lang && x.lang !== DLANG) useDict(x.lang);
+    const e = DICT[x.w]; if (!e) return;
+    CREDIT_CTX = { how: 'desmarcada' }; setKnown(e, false); CREDIT_CTX = null; toast(`«${x.w}» vuelve a ser nueva.`);
+    drawToday(); updateStars();
+  });
+}
+
 // gramática: los puntos que fueron apareciendo en las explicaciones
 let GLANG = null, GSEL = null, GQ = '';
 function openGram(lang, id = null){ GLANG = lang || LANG(); GSEL = id; openPanel('Gramática', 'gram'); drawGram(); }
@@ -2241,7 +2368,7 @@ function openSettings(){
       <div class="field"><label>Revisar el nivel de la simplificación</label>${sel('mCheck', [...CHAT_MODELS, ...DEF_MODELS.filter(([m]) => !CHAT_MODELS.some(c => c[0] === m))], CHECK_MODEL())}<div class="small">Busca palabras y gramática sobre el nivel en cada parte. Uno barato suele bastar; uno mejor detecta más.</div></div>
       <label class="check"><input type="checkbox" id="cAuto" ${S.autoAnalyze ? 'checked' : ''}><span>Traducir por adelantado los párrafos que vas a leer (la palabra que toques ya estará lista). Si no, se traduce el párrafo al tocar una palabra.</span></label>
       <label class="check"><input type="checkbox" id="cTrAlways" ${S.showTr ? 'checked' : ''}><span>Mostrar siempre la traducción de la oración marcada (si no, 文 la muestra solo para la oración que elijas). Con la traducción a la vista, las palabras de esa oración no suben.</span></label>
-      <label class="check"><input type="checkbox" id="cSilent" ${S.silentRead !== false ? 'checked' : ''}><span>Contar la lectura sin voz: al bajar la página, el párrafo que pasaste (y que estuvo a la vista el tiempo para leerlo) cuenta como leído, y la marca te sigue.</span></label></div>
+      <label class="check"><input type="checkbox" id="cSilent" ${S.silentRead !== false ? 'checked' : ''}><span>Contar la lectura sin voz: al bajar la página, cada palabra cuenta como leída cuando llega a la primera línea de la pantalla, justo antes de desaparecer (si su párrafo estuvo un momento a la vista), y la marca te sigue.</span></label></div>
     <div class="box"><h3>Mi nivel</h3><div class="conj" style="align-items:center">${Object.entries(LANGS).map(([k, L]) => `<span>${L.native}</span>${sel('lv_' + k, CEFR.map(c => [c, lvLabel(k, c)]), myLevel(k))}`).join('')}</div></div>
     <div class="box"><h3>Voz</h3>
       <div class="field"><label>Leer con</label>${sel('vProv', [['', 'La voz del navegador · gratis'], ['edge', 'Microsoft Edge · voz natural gratis (con tu intermediario)'], ['openai', 'OpenAI · voz natural (con tu clave de OpenAI)']], S.ttsProv || '')}
@@ -2275,7 +2402,7 @@ function openSettings(){
       <div class="field"><label>Tamaño de la letra: <b id="fsV">${S.fs}</b> px</label><input type="range" id="rFs" min="15" max="30" step="1" value="${S.fs}" style="width:100%"></div>
       <div class="field"><label>Tema</label>${sel('sTheme', [['', 'Automático'], ['light', 'Claro'], ['dark', 'Oscuro']], S.theme)}</div></div>
     <div class="box"><h3>Cómo suben y bajan las palabras</h3><ul class="small" style="padding-left:18px;margin:4px 0">
-      <li>Una palabra <b>nueva</b> (subrayada) que pasas sin pedir su traducción queda <b>sabida: 100 %</b>. «Pasar» es avanzar de oración (▶ o ⏭) o, leyendo en silencio, que su párrafo salga por arriba de la pantalla después de haberlo tenido a la vista.</li>
+      <li>Una palabra <b>nueva</b> (subrayada) que pasas sin pedir su traducción queda <b>sabida: 100 %</b>. «Pasar» es avanzar de oración (▶ o ⏭) o, leyendo en silencio, que llegue a la primera línea de la pantalla, justo antes de desaparecer (su párrafo tiene que haber estado un momento a la vista).</li>
       <li>Una palabra que ya habías consultado alguna vez y pasas sin pedir traducción <b>sube 10 puntos</b> (como mucho una vez por minuto).</li>
       <li>Pedir la traducción de una palabra: si es nueva, queda en <b>0</b>; si no, <b>baja 30 puntos</b>.</li>
       <li>Pedir la traducción (文) o la explicación de una frase: sus palabras <b>ni suben ni bajan</b>.</li>
@@ -2312,6 +2439,7 @@ function openSettings(){
 
 /* ---------- botones y teclado ---------- */
 $('pPlay').onclick = () => PLAY ? stop() : play();
+$('pStars').onclick = openToday;
 $('pNext').onclick = () => { const was = PLAY; stop(); next(true).then(() => { if (was) play(); }); };
 $('pPrev').onclick = () => { const was = PLAY; stop(); prev(); if (was) play(); };
 const RATES = [0.6, 0.75, 0.9, 1, 1.15];
