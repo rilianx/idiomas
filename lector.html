@@ -46,7 +46,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
 @keyframes pop{0%{transform:scale(.2) translateY(10px);opacity:0}70%{transform:scale(1.18)}100%{transform:scale(1);opacity:1}}
 .spark{position:fixed;left:50%;top:92px;z-index:36;pointer-events:none;font-size:18px;animation:spark 1.2s ease-out forwards}
 @keyframes spark{0%{transform:translate(-50%,0) scale(.4);opacity:1}100%{transform:translate(calc(-50% + var(--dx)),var(--dy)) scale(1);opacity:0}}
-#hStars,#pStars{font-weight:600;white-space:nowrap}
+#hStars,#pStars{font-weight:600;white-space:nowrap;cursor:pointer}
 #hStars.bump,#pStars.bump{animation:bump .6s}
 #hStars.drop,#pStars.drop{animation:drop .7s}
 @keyframes drop{20%,60%{transform:translateX(-4px);background:#f6d0c8;color:#9a2b18}40%,80%{transform:translateX(4px)}}
@@ -119,7 +119,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-08 · 32';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-08 · 33';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -244,9 +244,21 @@ const STATS = () => load('lec-stats', {});
 const todayNet = () => STATS()[today()] || 0;
 const totalWon = () => Object.values(DICT).filter(x => scoreOf(x) >= 100).length;
 function bumpDay(d){ const st = STATS(); st[today()] = (st[today()] || 0) + d; save('lec-stats', st); }
+// cómo y dónde se aprendió (lo fija quien acredita: avanzar, voz, silencio o «Ya la sé»)
+let CREDIT_CTX = null;
+const HOW = { voz: 'leyendo en voz alta', avance: 'al avanzar de oración', silencio: 'al pasar el párrafo leyendo en silencio', marcada: 'marcada «Ya la sé»', consulta: 'pediste su traducción', desmarcada: 'marcada como nueva' };
+// lo que pasó hoy con cada palabra: [{ w, t, d: +1|-1, how, text, sc }]
+function logDay(entry){
+  const all = load('lec-log', {}), day = today();
+  for (const k of Object.keys(all)) if (k < day && Object.keys(all).length > 14) delete all[k];   // se guardan unos días
+  (all[day] ||= []).unshift({ ...entry, t: Date.now() }); all[day] = all[day].slice(0, 400);
+  save('lec-log', all);
+}
 function celebrate(e){
   bumpDay(1);
-  WON.push(e.lemma); clearTimeout(wonTimer); wonTimer = setTimeout(showWon, 350);
+  const ctx = CREDIT_CTX || { how: 'marcada', text: '' };
+  logDay({ w: e.lemma, d: 1, how: ctx.how, text: ctx.text, lang: LANG() });
+  WON.push({ w: e.lemma, ...ctx }); clearTimeout(wonTimer); wonTimer = setTimeout(showWon, 400);
 }
 // el contador ⭐: las aprendidas hoy, descontando las que se desaprendieron (empieza en 0 cada día)
 const starText = () => '⭐ ' + todayNet();
@@ -259,19 +271,23 @@ function updateStars(anim){
 // una palabra que estaba al 100 % bajó (pediste su traducción)
 function unlearned(e){
   bumpDay(-1);
+  logDay({ w: e.lemma, d: -1, how: CREDIT_CTX?.how || 'consulta', text: e.sentence || '', sc: scoreOf(e), lang: LANG() });
   setTimeout(() => { updateStars('drop'); toast(`−1 ⭐ «${e.lemma}» bajó a ${scoreOf(e)} % · hoy ${todayNet()}`); }, 0);
 }
 // la señal no puede depender de que la palabra esté a la vista (leyendo en silencio ya salió de la pantalla):
 // un aviso baja desde arriba con las palabras como fichas, una lluvia de ✨⭐, y el contador ⭐ de la cabecera salta
 let wonHide = 0;
 function showWon(){
-  const list = [...new Set(WON)]; WON = []; if (!list.length) return;
+  const items = WON; WON = []; if (!items.length) return;
+  const list = [...new Set(items.map(x => x.w))], last = items[items.length - 1];
+  const where = last.how && HOW[last.how] ? `${HOW[last.how]}${last.text ? `: «${last.text.trim().slice(0, 60)}${last.text.trim().length > 60 ? '…' : ''}»` : ''}` : '';
   const total = totalWon(), hoy = todayNet();
   let b = $('wonBanner'); if (!b) { b = document.createElement('div'); b.id = 'wonBanner'; document.body.appendChild(b); b.onclick = () => b.classList.remove('show'); }
   const lang = LANG(), shown = list.slice(0, 10);
   b.innerHTML = `<div class="t">🎉 ${list.length === 1 ? '¡Palabra aprendida!' : `¡+${list.length} palabras aprendidas!`}</div>
     <div class="chips">${shown.map((w, i) => `<span lang="${lang}" style="animation-delay:${120 + i * 90}ms">⭐ ${esc(w)}</span>`).join('')}${list.length > shown.length ? `<span style="animation-delay:${120 + shown.length * 90}ms">+${list.length - shown.length}</span>` : ''}</div>
-    <div class="small">hoy ${hoy >= 0 ? '+' + hoy : hoy} · ⭐ ${total} al 100 %</div>`;
+    ${where ? `<div class="small" lang="${lang}" style="margin:2px 0">${esc(where)}</div>` : ''}
+    <div class="small">hoy ${hoy >= 0 ? '+' + hoy : hoy} · ⭐ ${total} al 100 % · toca ⭐ abajo para ver la lista</div>`;
   b.classList.remove('show'); void b.offsetWidth; b.classList.add('show');
   clearTimeout(wonHide); wonHide = setTimeout(() => b.classList.remove('show'), 2600 + shown.length * 90);
   burst();
@@ -947,7 +963,7 @@ function silentRead(){
     const r = el.getBoundingClientRect(), p = +el.dataset.p;
     if (r.bottom >= v.top) { firstVisible = p; break; }
     const rec = ANA.get(anaKey(p));
-    if (rec && (VIS.get(anaKey(p)) || 0) >= needSecs(p)) CH.sents[p].forEach((_, si) => creditSentence(p, si));
+    if (rec && (VIS.get(anaKey(p)) || 0) >= needSecs(p)) CH.sents[p].forEach((_, si) => creditSentence(p, si, 'silencio'));
   }
   // la marca quedó atrás: pasa al primer párrafo a la vista
   if (firstVisible !== null && CUR.p < firstVisible) setCursor(firstVisible, 0, { scroll: '' });
@@ -1061,7 +1077,7 @@ function savePosNow(){ clearTimeout(posTimer); if (BOOK) dbPut('books', BOOK); }
 // pasar a la siguiente oración: la que se deja cuenta como leída (las palabras que no miraste suben)
 async function next(credit = true){
   if (!CH || CH.missing) return false;
-  if (credit) creditSentence(CUR.p, CUR.s);
+  if (credit) creditSentence(CUR.p, CUR.s, PLAY ? 'voz' : 'avance');
   if (CUR.s + 1 < CH.sents[CUR.p].length) { setCursor(CUR.p, CUR.s + 1); return true; }
   if (CUR.p + 1 < CH.paras.length) { setCursor(CUR.p + 1, 0); return true; }
   if (CH.ch + 1 < BOOK.chapters.length) { await openChapter(CH.ver, CH.ch + 1); return true; }
@@ -1072,10 +1088,11 @@ function prev(){
   if (CUR.s > 0) setCursor(CUR.p, CUR.s - 1);
   else if (CUR.p > 0) setCursor(CUR.p - 1, CH.sents[CUR.p - 1].length - 1);
 }
-function creditSentence(p, s){
+function creditSentence(p, s, how = 'avance'){
   const k = anaKey(p), rec = ANA.get(k);
   if (!rec || rec.done[s] || rec.seenEs[s]) return;
   const st = rec.sents[s]; if (!st) return;
+  CREDIT_CTX = { how, text: st.text };
   const seen = new Set(); let changed = false;
   for (const tok of st.tokens) {
     const l = lemmaOf(tok); if (!l || SKIP_POS.has(tok.pos) || seen.has(l)) continue; seen.add(l);
@@ -1086,6 +1103,7 @@ function creditSentence(p, s){
     // nueva: queda sabida (100 %); si ya la habías consultado, sube 10 puntos
     if (srsGood(e)) changed = true;
   }
+  CREDIT_CTX = null;
   rec.done[s] = true; dbPut('ana', rec);
   if (changed) rerenderVisible(p);
 }
@@ -1716,6 +1734,7 @@ function renderHeader(){
   }
   $('hWords').onclick = () => openWords();
   $('hGram').onclick = () => openGram();
+  if ($('hStars')) $('hStars').onclick = openToday;
   $('hSet').onclick = openSettings;
 }
 function updateInfo(){
@@ -2143,6 +2162,26 @@ function drawWords(){
   $('pbody').querySelectorAll('[data-f]').forEach(b => b.onclick = () => { WFILTER = b.dataset.f; drawWords(); });
 }
 
+// ⭐ hoy: qué palabras se aprendieron o desaprendieron, cuándo, cómo y en qué oración
+function openToday(){ openPanel('Hoy ⭐', 'today'); drawToday(); }
+function drawToday(){
+  if (PANEL !== 'today') return;
+  const log = load('lec-log', {})[today()] || [];
+  const won = log.filter(x => x.d > 0).length, lost = log.filter(x => x.d < 0).length;
+  const hh = t => new Date(t).toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' });
+  $('pbody').innerHTML = `<div class="stats" style="grid-template-columns:repeat(3,1fr)"><div><b>${todayNet()}</b>hoy (neto)</div><div><b>+${won}</b>aprendidas</div><div><b>−${lost}</b>desaprendidas</div></div>
+    <p class="small">Una palabra nueva se da por aprendida cuando la pasas sin pedir su traducción (al avanzar de oración, leyendo en voz alta o cuando su párrafo sale por arriba leyendo en silencio). Si alguna no la sabías, márcala como nueva.</p>
+    ${log.map((x, i) => `<div class="ent" data-i="${i}"><div class="top"><span class="small">${hh(x.t)}</span><span class="lem" lang="${x.lang || ''}" style="font-size:17px">${x.d > 0 ? '⭐' : '−1'} ${esc(x.w)}</span><span class="g">${esc(HOW[x.how] || '')}${x.d < 0 && x.sc !== undefined ? ` · bajó a ${x.sc} %` : ''}</span></div>
+      ${x.text ? `<div class="small" lang="${x.lang || ''}" style="margin-top:3px">«${esc(x.text.trim().slice(0, 120))}»</div>` : ''}
+      ${x.d > 0 ? `<div class="row" style="margin-top:6px"><button class="chip" data-undo="${i}">No la sabía: marcar como nueva</button></div>` : ''}</div>`).join('') || '<p class="small" style="text-align:center">Todavía nada hoy.</p>'}`;
+  $('pbody').querySelectorAll('[data-undo]').forEach(b => b.onclick = () => {
+    const x = log[+b.dataset.undo]; if (x.lang && x.lang !== DLANG) useDict(x.lang);
+    const e = DICT[x.w]; if (!e) return;
+    CREDIT_CTX = { how: 'desmarcada' }; setKnown(e, false); CREDIT_CTX = null; toast(`«${x.w}» vuelve a ser nueva.`);
+    drawToday(); updateStars();
+  });
+}
+
 // gramática: los puntos que fueron apareciendo en las explicaciones
 let GLANG = null, GSEL = null, GQ = '';
 function openGram(lang, id = null){ GLANG = lang || LANG(); GSEL = id; openPanel('Gramática', 'gram'); drawGram(); }
@@ -2312,6 +2351,7 @@ function openSettings(){
 
 /* ---------- botones y teclado ---------- */
 $('pPlay').onclick = () => PLAY ? stop() : play();
+$('pStars').onclick = openToday;
 $('pNext').onclick = () => { const was = PLAY; stop(); next(true).then(() => { if (was) play(); }); };
 $('pPrev').onclick = () => { const was = PLAY; stop(); prev(); if (was) play(); };
 const RATES = [0.6, 0.75, 0.9, 1, 1.15];
