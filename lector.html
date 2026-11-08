@@ -48,6 +48,8 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
 @keyframes spark{0%{transform:translate(-50%,0) scale(.4);opacity:1}100%{transform:translate(calc(-50% + var(--dx)),var(--dy)) scale(1);opacity:0}}
 #hStars,#pStars{font-weight:600;white-space:nowrap}
 #hStars.bump,#pStars.bump{animation:bump .6s}
+#hStars.drop,#pStars.drop{animation:drop .7s}
+@keyframes drop{20%,60%{transform:translateX(-4px);background:#f6d0c8;color:#9a2b18}40%,80%{transform:translateX(4px)}}
 @keyframes bump{30%{transform:scale(1.35);background:#ffe9a0}}
 @keyframes won{0%{background:#ffd54a;box-shadow:0 0 0 4px #ffd54a88}60%{background:#ffe9a0}100%{background:transparent;box-shadow:none}}
 .chend{text-align:center;margin:30px 0;color:var(--muted)}
@@ -96,7 +98,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
   <button class="ib" id="pRate" title="Velocidad de la voz">1×</button>
   <button class="ib" id="pTr" title="Traducir la oración marcada (T)">文<span class="lbl">Oración</span></button>
   <button class="ib" id="pOrig" title="Ver el párrafo original" hidden>¶<span class="lbl">Original</span></button>
-  <span class="ib" id="pStars" title="Palabras aprendidas hoy (100 %)">⭐ 0</span>
+  <span class="ib" id="pStars" title="Palabras al 100 %">⭐ 0</span>
   <span class="grow" id="pInfo"></span>
 </footer>
 <button class="btn" id="selbtn" hidden>🎓 Explicar</button>
@@ -117,7 +119,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-08 · 30';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-08 · 31';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -197,7 +199,8 @@ function srsOf(e){
   return e.srs;
 }
 const scoreOf = e => { if (!e) return 0; const s = e.srs; if (!s) return e.status === 'conocida' ? 75 : 0; return Math.min(100, Math.round(100 * Math.log(1 + s.ivl) / Math.log(61))); };
-const isNewWord = e => !e || (!e.lookups && !e.srs?.lapses);
+// nueva = nunca consultada y todavía sin aprender (una que ya llegó a 100 % pasándola no es nueva)
+const isNewWord = e => !e || (!e.lookups && !e.srs?.lapses && scoreOf(e) < 30);
 function setScore(e, sc){
   const s = srsOf(e), now = Date.now(), before = scoreOf(e);
   sc = Math.max(0, Math.min(100, Math.round(sc)));
@@ -206,6 +209,7 @@ function setScore(e, sc){
   if (sc < 30 && e.status === 'conocida' && e.lookups) e.status = 'nueva';
   e.last = now; touch(e.lemma);
   if (before < 100 && scoreOf(e) >= 100) celebrate(e);
+  else if (before >= 100 && scoreOf(e) < 100) unlearned(e);
 }
 // la pasaste sin pedir su traducción
 function srsGood(e){
@@ -235,26 +239,42 @@ function setKnown(e, known){
 }
 /* ---------- 🎉 palabras aprendidas (llegan a 100 %) ---------- */
 let WON = [], wonTimer = 0;
+// por día, el neto: aprendidas menos desaprendidas
 const STATS = () => load('lec-stats', {});
+const todayNet = () => STATS()[today()] || 0;
+const totalWon = () => Object.values(DICT).filter(x => scoreOf(x) >= 100).length;
+function bumpDay(d){ const st = STATS(); st[today()] = (st[today()] || 0) + d; save('lec-stats', st); }
 function celebrate(e){
-  const st = STATS(); st[today()] = (st[today()] || 0) + 1; save('lec-stats', st);
+  bumpDay(1);
   WON.push(e.lemma); clearTimeout(wonTimer); wonTimer = setTimeout(showWon, 350);
+}
+// el contador ⭐: cuántas palabras están al 100 % ahora (si una se desaprende, baja)
+function updateStars(anim){
+  for (const st of [$('hStars'), $('pStars')]) if (st) {
+    st.textContent = '⭐ ' + totalWon();
+    if (anim) { st.classList.remove('bump', 'drop'); void st.offsetWidth; st.classList.add(anim); }
+  }
+}
+// una palabra que estaba al 100 % bajó (pediste su traducción)
+function unlearned(e){
+  bumpDay(-1);
+  setTimeout(() => { updateStars('drop'); toast(`−1 ⭐ «${e.lemma}» bajó a ${scoreOf(e)} % · ⭐ ${totalWon()} al 100 %`); }, 0);
 }
 // la señal no puede depender de que la palabra esté a la vista (leyendo en silencio ya salió de la pantalla):
 // un aviso baja desde arriba con las palabras como fichas, una lluvia de ✨⭐, y el contador ⭐ de la cabecera salta
 let wonHide = 0;
 function showWon(){
   const list = [...new Set(WON)]; WON = []; if (!list.length) return;
-  const total = Object.values(DICT).filter(x => scoreOf(x) >= 100).length, hoy = STATS()[today()] || 0;
+  const total = totalWon(), hoy = todayNet();
   let b = $('wonBanner'); if (!b) { b = document.createElement('div'); b.id = 'wonBanner'; document.body.appendChild(b); b.onclick = () => b.classList.remove('show'); }
   const lang = LANG(), shown = list.slice(0, 10);
   b.innerHTML = `<div class="t">🎉 ${list.length === 1 ? '¡Palabra aprendida!' : `¡+${list.length} palabras aprendidas!`}</div>
     <div class="chips">${shown.map((w, i) => `<span lang="${lang}" style="animation-delay:${120 + i * 90}ms">⭐ ${esc(w)}</span>`).join('')}${list.length > shown.length ? `<span style="animation-delay:${120 + shown.length * 90}ms">+${list.length - shown.length}</span>` : ''}</div>
-    <div class="small">hoy ${hoy} · ⭐ ${total} al 100 %</div>`;
+    <div class="small">hoy ${hoy >= 0 ? '+' + hoy : hoy} · ⭐ ${total} al 100 %</div>`;
   b.classList.remove('show'); void b.offsetWidth; b.classList.add('show');
   clearTimeout(wonHide); wonHide = setTimeout(() => b.classList.remove('show'), 2600 + shown.length * 90);
   burst();
-  for (const st of [$('hStars'), $('pStars')]) if (st) { st.textContent = '⭐ ' + hoy; st.classList.remove('bump'); void st.offsetWidth; st.classList.add('bump'); }
+  updateStars('bump');
   // y si alguna está a la vista (p. ej. leyendo con ▶), además destella
   setTimeout(() => {
     const set = new Set(list);
@@ -1674,7 +1694,7 @@ function renderHeader(){
   if (!BOOK) {
     h.innerHTML = `<h1>📚 Leamos <small>lector para aprender idiomas</small></h1>
       <a class="ib" href="index.html" title="Hablemos: conversar con 지수">💬<span class="lbl">Hablemos</span></a>
-      <span class="ib" id="hStars" title="Palabras aprendidas hoy (100 %)">⭐ ${STATS()[today()] || 0}</span>
+      <span class="ib" id="hStars" title="Palabras al 100 %">⭐ ${totalWon()}</span>
       <button class="ib" id="hWords" title="Mis palabras">📖<span class="lbl">Palabras</span></button>
       <button class="ib" id="hGram" title="Gramática">📐<span class="lbl">Gramática</span></button>
       <button class="ib" id="hSet" title="Ajustes">⚙</button>`;
@@ -1699,7 +1719,7 @@ function renderHeader(){
 }
 function updateInfo(){
   if (!BOOK || !CH) return;
-  $('pStars').textContent = '⭐ ' + (STATS()[today()] || 0);
+  $('pStars').textContent = '⭐ ' + totalWon();
   const total = bookChars(BOOK); let before = 0;
   for (let i = 0; i < CH.ch; i++) before += BOOK.chapters[i].chars;
   const inCh = CH.paras.slice(0, CUR.p).reduce((a, t) => a + t.length, 0) * (BOOK.chapters[CH.ch]?.chars || 1) / Math.max(1, CH.paras.reduce((a, t) => a + t.length, 0));
