@@ -37,6 +37,21 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
 .w.speaking{background:var(--accent-soft)}
 .w.peeked{text-decoration-color:var(--accent)}
 .w.from{outline:2px dashed var(--accent);outline-offset:2px}
+.w.won{animation:won 1.8s ease-out}
+#wonBanner{position:fixed;left:50%;top:62px;transform:translate(-50%,-160%);z-index:35;background:var(--card);border:2px solid #f0b400;border-radius:16px;padding:8px 16px 9px;box-shadow:0 8px 24px rgba(0,0,0,.2);transition:transform .45s cubic-bezier(.2,1.5,.4,1);max-width:92vw;text-align:center;cursor:pointer}
+#wonBanner.show{transform:translate(-50%,0)}
+#wonBanner .t{font-weight:700;font-size:16px}
+#wonBanner .chips{margin:4px 0 2px}
+#wonBanner .chips span{display:inline-block;margin:3px;padding:2px 10px;border-radius:999px;background:#ffe9a0;color:#5a4300;font-weight:600;animation:pop .5s backwards}
+@keyframes pop{0%{transform:scale(.2) translateY(10px);opacity:0}70%{transform:scale(1.18)}100%{transform:scale(1);opacity:1}}
+.spark{position:fixed;left:50%;top:92px;z-index:36;pointer-events:none;font-size:18px;animation:spark 1.2s ease-out forwards}
+@keyframes spark{0%{transform:translate(-50%,0) scale(.4);opacity:1}100%{transform:translate(calc(-50% + var(--dx)),var(--dy)) scale(1);opacity:0}}
+#hStars,#pStars{font-weight:600;white-space:nowrap}
+#hStars.bump,#pStars.bump{animation:bump .6s}
+#hStars.drop,#pStars.drop{animation:drop .7s}
+@keyframes drop{20%,60%{transform:translateX(-4px);background:#f6d0c8;color:#9a2b18}40%,80%{transform:translateX(4px)}}
+@keyframes bump{30%{transform:scale(1.35);background:#ffe9a0}}
+@keyframes won{0%{background:#ffd54a;box-shadow:0 0 0 4px #ffd54a88}60%{background:#ffe9a0}100%{background:transparent;box-shadow:none}}
 .chend{text-align:center;margin:30px 0;color:var(--muted)}
 .placeholder{background:var(--card);border:1px dashed var(--line);border-radius:12px;padding:18px;text-align:center;color:var(--muted);margin:20px 0}
 
@@ -83,6 +98,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
   <button class="ib" id="pRate" title="Velocidad de la voz">1×</button>
   <button class="ib" id="pTr" title="Traducir la oración marcada (T)">文<span class="lbl">Oración</span></button>
   <button class="ib" id="pOrig" title="Ver el párrafo original" hidden>¶<span class="lbl">Original</span></button>
+  <span class="ib" id="pStars" title="Aprendidas hoy (descontando las que bajaron de 100 %)">⭐ 0</span>
   <span class="grow" id="pInfo"></span>
 </footer>
 <button class="btn" id="selbtn" hidden>🎓 Explicar</button>
@@ -103,7 +119,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-07 · 28';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-08 · 32';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -172,46 +188,109 @@ function ensureEntry(tok, sentence){
   return e;
 }
 
-/* ---------- repetición espaciada (como Anki) ----------
-   Cada palabra tiene un intervalo. Leer una oración sin pedir la traducción de una palabra es un «bien»: si ya le
-   tocaba repaso, el intervalo crece (1 día, luego ×facilidad). Pedir su traducción es un «otra vez»: el intervalo
-   vuelve a cero y la facilidad baja. El puntaje (0–100 %) sale del intervalo: 1 día ≈ 17 %, 1 semana ≈ 50 %, 2 meses = 100 %. */
+/* ---------- cuánto sabes de cada palabra (0–100 %) ----------
+   - Palabra nueva (nunca consultada) que pasas sin pedir su traducción: queda sabida, 100 %.
+   - Palabra que ya habías consultado alguna vez y pasas sin pedir traducción: sube 10 puntos (como mucho una vez por minuto).
+   - Pedir la traducción de una palabra: si es nueva queda en 0; si no, baja 30 puntos.
+   - Pedir la traducción o la explicación de una frase: sus palabras no suben ni bajan.
+   El puntaje se guarda como un intervalo (en días) para que lo entienda también «Hablemos»: 100 % = 60 días. */
 function srsOf(e){
   if (!e.srs) e.srs = { ivl: e.status === 'conocida' ? 21 : 0, ease: 2.5, due: 0, reps: 0, lapses: 0, last: 0, lapsedAt: 0 };
   return e.srs;
 }
 const scoreOf = e => { if (!e) return 0; const s = e.srs; if (!s) return e.status === 'conocida' ? 75 : 0; return Math.min(100, Math.round(100 * Math.log(1 + s.ivl) / Math.log(61))); };
+// nueva = nunca consultada y todavía sin aprender (una que ya llegó a 100 % pasándola no es nueva)
+const isNewWord = e => !e || (!e.lookups && !e.srs?.lapses && scoreOf(e) < 30);
+function setScore(e, sc){
+  const s = srsOf(e), now = Date.now(), before = scoreOf(e);
+  sc = Math.max(0, Math.min(100, Math.round(sc)));
+  s.ivl = sc <= 0 ? 0 : Math.pow(61, sc / 100) - 1; s.due = now + s.ivl * DAY; s.last = now;
+  if (sc >= 50 && e.status !== 'conocida') { e.status = 'conocida'; e.knownAt = now; }
+  if (sc < 30 && e.status === 'conocida' && e.lookups) e.status = 'nueva';
+  e.last = now; touch(e.lemma);
+  if (before < 100 && scoreOf(e) >= 100) celebrate(e);
+  else if (before >= 100 && scoreOf(e) < 100) unlearned(e);
+}
+// la pasaste sin pedir su traducción
 function srsGood(e){
   const s = srsOf(e), now = Date.now();
-  if (now < s.due) return false;
-  if (s.ivl === 0) s.ivl = s.lapses ? 10 / 1440 : 1;        // tras un olvido, primero un paso de 10 minutos
-  else if (s.ivl < 1) s.ivl = 1;
-  else s.ivl = Math.max(s.ivl + 1, s.ivl * s.ease);
-  s.reps++; s.last = now; s.due = now + s.ivl * DAY;
-  e.heard = (e.heard || 0) + 1; e.seen = (e.seen || 0) + 1; e.last = now;   // (para «Hablemos»)
-  if (scoreOf(e) >= 50 && e.status !== 'conocida') { e.status = 'conocida'; e.knownAt = now; }
-  touch(e.lemma); return true;
+  if (isNewWord(e)) { if (scoreOf(e) >= 100) return false; learnNow(e); return true; }
+  if (now - (s.passAt || 0) < 60e3) return false;             // (la misma palabra varias veces seguidas cuenta una vez)
+  s.passAt = now; s.reps++; e.heard = (e.heard || 0) + 1; e.seen = (e.seen || 0) + 1;
+  setScore(e, scoreOf(e) + 10); return true;
 }
-// la leíste sin consultarla nunca: queda como sabida (intervalo de un mes, ~83 %)
+// nueva y sin consultar: sabida
 function learnNow(e){
-  const s = srsOf(e), now = Date.now();
-  s.ivl = Math.max(s.ivl, 30); s.reps++; s.last = now; s.due = now + s.ivl * DAY;
-  e.heard = Math.max((e.heard || 0) + 1, 5); e.seen = (e.seen || 0) + 1; e.last = now;
-  if (e.status !== 'conocida') { e.status = 'conocida'; e.knownAt = now; }
-  touch(e.lemma);
+  const s = srsOf(e); s.reps++;
+  e.heard = Math.max((e.heard || 0) + 1, 5); e.seen = (e.seen || 0) + 1;
+  setScore(e, 100);
 }
+// pediste su traducción
 function srsAgain(e){
   const s = srsOf(e), now = Date.now();
-  if (s.lapsedAt && now - s.lapsedAt < 10 * 60e3) return;    // mirarla varias veces seguidas cuenta como un solo olvido
-  if (s.reps || s.ivl) { s.lapses++; s.ease = Math.max(1.3, s.ease - 0.2); }
-  s.ivl = 0; s.due = now + 10 * 60e3; s.lapsedAt = now; e.lookups = (e.lookups || 0) + 1;
-  touch(e.lemma);
+  if (s.lapsedAt && now - s.lapsedAt < 10 * 60e3) return;    // mirarla varias veces seguidas cuenta como una vez
+  const fresh = isNewWord(e);
+  s.lapsedAt = now; e.lookups = (e.lookups || 0) + 1;
+  if (fresh) setScore(e, 0); else { s.lapses++; setScore(e, scoreOf(e) - 30); }
 }
 function setKnown(e, known){
-  const s = srsOf(e), now = Date.now();
-  if (known) { s.ivl = Math.max(s.ivl, 30); s.due = now + s.ivl * DAY; e.status = 'conocida'; e.knownAt = now; e.heard = Math.max(e.heard || 0, 5); }
-  else { s.ivl = 0; s.due = 0; e.status = 'nueva'; }
-  touch(e.lemma);
+  if (known) { e.heard = Math.max(e.heard || 0, 5); setScore(e, 100); }
+  else { setScore(e, 0); e.status = 'nueva'; touch(e.lemma); }
+}
+/* ---------- 🎉 palabras aprendidas (llegan a 100 %) ---------- */
+let WON = [], wonTimer = 0;
+// por día, el neto: aprendidas menos desaprendidas
+const STATS = () => load('lec-stats', {});
+const todayNet = () => STATS()[today()] || 0;
+const totalWon = () => Object.values(DICT).filter(x => scoreOf(x) >= 100).length;
+function bumpDay(d){ const st = STATS(); st[today()] = (st[today()] || 0) + d; save('lec-stats', st); }
+function celebrate(e){
+  bumpDay(1);
+  WON.push(e.lemma); clearTimeout(wonTimer); wonTimer = setTimeout(showWon, 350);
+}
+// el contador ⭐: las aprendidas hoy, descontando las que se desaprendieron (empieza en 0 cada día)
+const starText = () => '⭐ ' + todayNet();
+function updateStars(anim){
+  for (const st of [$('hStars'), $('pStars')]) if (st) {
+    st.textContent = starText();
+    if (anim) { st.classList.remove('bump', 'drop'); void st.offsetWidth; st.classList.add(anim); }
+  }
+}
+// una palabra que estaba al 100 % bajó (pediste su traducción)
+function unlearned(e){
+  bumpDay(-1);
+  setTimeout(() => { updateStars('drop'); toast(`−1 ⭐ «${e.lemma}» bajó a ${scoreOf(e)} % · hoy ${todayNet()}`); }, 0);
+}
+// la señal no puede depender de que la palabra esté a la vista (leyendo en silencio ya salió de la pantalla):
+// un aviso baja desde arriba con las palabras como fichas, una lluvia de ✨⭐, y el contador ⭐ de la cabecera salta
+let wonHide = 0;
+function showWon(){
+  const list = [...new Set(WON)]; WON = []; if (!list.length) return;
+  const total = totalWon(), hoy = todayNet();
+  let b = $('wonBanner'); if (!b) { b = document.createElement('div'); b.id = 'wonBanner'; document.body.appendChild(b); b.onclick = () => b.classList.remove('show'); }
+  const lang = LANG(), shown = list.slice(0, 10);
+  b.innerHTML = `<div class="t">🎉 ${list.length === 1 ? '¡Palabra aprendida!' : `¡+${list.length} palabras aprendidas!`}</div>
+    <div class="chips">${shown.map((w, i) => `<span lang="${lang}" style="animation-delay:${120 + i * 90}ms">⭐ ${esc(w)}</span>`).join('')}${list.length > shown.length ? `<span style="animation-delay:${120 + shown.length * 90}ms">+${list.length - shown.length}</span>` : ''}</div>
+    <div class="small">hoy ${hoy >= 0 ? '+' + hoy : hoy} · ⭐ ${total} al 100 %</div>`;
+  b.classList.remove('show'); void b.offsetWidth; b.classList.add('show');
+  clearTimeout(wonHide); wonHide = setTimeout(() => b.classList.remove('show'), 2600 + shown.length * 90);
+  burst();
+  updateStars('bump');
+  // y si alguna está a la vista (p. ej. leyendo con ▶), además destella
+  setTimeout(() => {
+    const set = new Set(list);
+    document.querySelectorAll('#book .w').forEach(w => { const t = TOKS.get(w)?.tok; if (t && set.has(lemmaOf(t))) { w.classList.add('won'); setTimeout(() => w.classList.remove('won'), 1800); } });
+  }, 50);
+}
+// una lluvia corta de ✨⭐ desde el aviso
+function burst(){
+  for (let i = 0; i < 14; i++) {
+    const p = document.createElement('span'); p.className = 'spark'; p.textContent = ['✨', '⭐', '🎉'][i % 3];
+    const a = (Math.PI * 2 * i) / 14, d = 70 + Math.random() * 70;
+    p.style.setProperty('--dx', Math.cos(a) * d + 'px'); p.style.setProperty('--dy', Math.sin(a) * d * 0.7 + 40 + 'px');
+    p.style.animationDelay = Math.random() * 120 + 'ms';
+    document.body.appendChild(p); setTimeout(() => p.remove(), 1400);
+  }
 }
 // subrayado: «nueva» (línea continua) bajo 30 %, «aprendiendo» (punteada) hasta 70 %
 function wordClass(tok){
@@ -850,7 +929,7 @@ function prefetchVisible(){
    mínimo para leerlo, cuenta como leído: sus palabras que no miraste suben, igual que al avanzar con ▶ o ⏭.
    La marca de la oración actual también te sigue, para que ▶ y la posición guardada queden donde vas. */
 const VIS = new Map();   // clave del párrafo → segundos a la vista
-const needSecs = p => { const t = CH.paras[p] || ''; const words = CJK(LANG()) ? t.length / 2 : t.split(/\s+/).length; return Math.max(2, words * 0.3); };
+const needSecs = p => { const t = CH.paras[p] || ''; const words = CJK(LANG()) ? t.length / 2 : t.split(/\s+/).length; return Math.max(1, words * 0.15); };
 setInterval(() => {
   if (!BOOK || !CH || CH.missing || PLAY || PANEL || SHEET || document.hidden || S.silentRead === false) return;
   const v = $('view').getBoundingClientRect();
@@ -1004,9 +1083,8 @@ function creditSentence(p, s){
     let e = DICT[l];
     // las palabras que no conoces todavía (de tu nivel o más) entran al diccionario la primera vez que las lees
     if (!e) { if (!tok.cefr || lvIdx(tok.cefr) < lvIdx(myLevel(LANG()))) continue; e = ensureEntry(tok, st.text); }
-    // nunca la consultaste: se da por aprendida (deja de subrayarse); si alguna vez la consultaste, sube de a poco
-    if (!e.lookups && !e.srs?.lapses) { if (scoreOf(e) < 70) { learnNow(e); changed = true; } else if (srsGood(e)) changed = true; }
-    else if (srsGood(e)) changed = true;
+    // nueva: queda sabida (100 %); si ya la habías consultado, sube 10 puntos
+    if (srsGood(e)) changed = true;
   }
   rec.done[s] = true; dbPut('ana', rec);
   if (changed) rerenderVisible(p);
@@ -1617,6 +1695,7 @@ function renderHeader(){
   if (!BOOK) {
     h.innerHTML = `<h1>📚 Leamos <small>lector para aprender idiomas</small></h1>
       <a class="ib" href="index.html" title="Hablemos: conversar con 지수">💬<span class="lbl">Hablemos</span></a>
+      <span class="ib" id="hStars" title="Aprendidas hoy (descontando las que bajaron de 100 %)">${starText()}</span>
       <button class="ib" id="hWords" title="Mis palabras">📖<span class="lbl">Palabras</span></button>
       <button class="ib" id="hGram" title="Gramática">📐<span class="lbl">Gramática</span></button>
       <button class="ib" id="hSet" title="Ajustes">⚙</button>`;
@@ -1641,6 +1720,7 @@ function renderHeader(){
 }
 function updateInfo(){
   if (!BOOK || !CH) return;
+  $('pStars').textContent = starText();
   const total = bookChars(BOOK); let before = 0;
   for (let i = 0; i < CH.ch; i++) before += BOOK.chapters[i].chars;
   const inCh = CH.paras.slice(0, CUR.p).reduce((a, t) => a + t.length, 0) * (BOOK.chapters[CH.ch]?.chars || 1) / Math.max(1, CH.paras.reduce((a, t) => a + t.length, 0));
@@ -2051,7 +2131,7 @@ function drawWords(){
   list.sort((a, b) => scoreOf(a) - scoreOf(b) || (b.last || b.added || 0) - (a.last || a.added || 0));
   $('pbody').innerHTML = `<div class="field"><label>Idioma</label><select id="wLang">${Object.entries(LANGS).map(([k, L]) => `<option value="${k}" ${k === lang ? 'selected' : ''}>${L.native} · ${L.name}</option>`).join('')}</select>
     ${lang === 'ko' ? '<div class="small">El diccionario de coreano es el mismo de «Hablemos».</div>' : ''}</div>
-    <div class="stats"><div><b>${all.length}</b>palabras</div><div><b>${counts.nuevas}</b>nuevas</div><div><b>${counts.aprendiendo}</b>aprendiendo</div><div><b>${counts.sabidas}</b>sabidas</div></div>
+    <div class="stats"><div><b>${all.length}</b>palabras</div><div><b>${counts.nuevas}</b>nuevas</div><div><b>${counts.aprendiendo}</b>aprendiendo</div><div><b>${counts.sabidas}</b>sabidas · ⭐ ${all.filter(e => scoreOf(e) >= 100).length} al 100 %</div></div>
     <input class="search" id="wQ" placeholder="Buscar…" value="${esc(WQ)}">
     <div class="filters">${['todas', 'nuevas', 'aprendiendo', 'sabidas'].map(f => `<button class="chip ${f === WFILTER ? 'on' : ''}" data-f="${f}">${f}</button>`).join('')}</div>
     <div id="wList"></div>`;
@@ -2194,7 +2274,12 @@ function openSettings(){
     <div class="box"><h3>Lectura</h3>
       <div class="field"><label>Tamaño de la letra: <b id="fsV">${S.fs}</b> px</label><input type="range" id="rFs" min="15" max="30" step="1" value="${S.fs}" style="width:100%"></div>
       <div class="field"><label>Tema</label>${sel('sTheme', [['', 'Automático'], ['light', 'Claro'], ['dark', 'Oscuro']], S.theme)}</div></div>
-    <div class="box"><h3>Cómo suben y bajan las palabras</h3><p class="small">Al pasar a la siguiente oración (leyendo en voz alta, con ⏭ o, si lees en silencio, cuando un párrafo que estuvo a la vista el tiempo para leerlo sale por arriba de la pantalla), las palabras que no miraste cuentan como leídas: si nunca las consultaste, quedan como <b>aprendidas</b> (sin subrayado); si alguna vez las consultaste, su intervalo crece de a poco (1 día, luego ×2,5…). Tocar una palabra para ver su traducción es «otra vez»: vuelve a cero. Con la traducción de la oración visible o al pedir la explicación de un trozo, esa oración no suma. Las palabras de tu nivel o superior que nunca has visto aparecen subrayadas; las que estás aprendiendo, con línea punteada.</p></div>
+    <div class="box"><h3>Cómo suben y bajan las palabras</h3><ul class="small" style="padding-left:18px;margin:4px 0">
+      <li>Una palabra <b>nueva</b> (subrayada) que pasas sin pedir su traducción queda <b>sabida: 100 %</b>. «Pasar» es avanzar de oración (▶ o ⏭) o, leyendo en silencio, que su párrafo salga por arriba de la pantalla después de haberlo tenido a la vista.</li>
+      <li>Una palabra que ya habías consultado alguna vez y pasas sin pedir traducción <b>sube 10 puntos</b> (como mucho una vez por minuto).</li>
+      <li>Pedir la traducción de una palabra: si es nueva, queda en <b>0</b>; si no, <b>baja 30 puntos</b>.</li>
+      <li>Pedir la traducción (文) o la explicación de una frase: sus palabras <b>ni suben ni bajan</b>.</li>
+      <li>Bajo 30 % la palabra se subraya; hasta 70 %, con línea punteada. Al llegar a 100 %: 🎉.</li></ul></div>
     <div class="box"><h3>Gasto (estimado)</h3>${usageHTML()}</div>
     <p class="small" style="text-align:center">Leamos · versión ${APP_VERSION}</p>`;
   const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
