@@ -116,7 +116,7 @@ footer{display:flex;align-items:flex-end;gap:8px;padding:8px 12px calc(10px + en
    Todo vive en el navegador: las claves, la conversación y el diccionario.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-07 · 2';   // (subir en cada cambio: sirve para confirmar que el navegador tiene la última)
+const APP_VERSION = '2026-11-09 · 3';   // (subir en cada cambio: sirve para confirmar que el navegador tiene la última)
 
 /* ---------- niveles: vocabulario y gramática ---------- */
 // [palabra, categoría, significado]
@@ -301,10 +301,60 @@ function guessLemma(surface){
 
 /* ---------- voz: leer en voz alta y reconocer lo que dices ---------- */
 // queue: no cortar lo que se está diciendo (la respuesta de 지수 espera a que termine la tuya)
-function speak(text, rate = S.rate, queue = false){
-  if (!('speechSynthesis' in window) || !text) return;
+// la voz: la del navegador o la voz natural de Microsoft Edge (gratis, a través del intermediario de Cloudflare de «Leamos»)
+const cleanKo = text => text.replace(/[^가-힣ㄱ-ㆎ0-9 .,?!~]/g, ' ');
+function browserSpeak(text, rate, queue){
+  if (!('speechSynthesis' in window)) return null;
   if (!queue) speechSynthesis.cancel();
-  speechSynthesis.speak(makeUtterance(text.replace(/[^가-힣ㄱ-ㆎ0-9 .,?!~]/g, ' '), 'ko', rate, S.voice));
+  const u = makeUtterance(cleanKo(text), 'ko', rate, S.voice); speechSynthesis.speak(u); return u;
+}
+const edgeProxy = () => S.proxy || load('lec-set', {}).proxy || '';
+const edgeVoiceKo = () => S.edgeVoice || load('lec-set', {}).edgeVoices?.ko || EDGE_VOICES.ko[0][0];
+let EDGE_OFF = false;   // (el intermediario no responde: en esta sesión se usa la voz del navegador)
+const edgeOn = () => S.ttsProv === 'edge' && !EDGE_OFF && !!edgeProxy();
+const AUD = new Audio(); AUD.preservesPitch = true;
+const EDGE_URLS = new Map();   // texto → promesa del audio (lo ya dicho no se vuelve a pedir)
+let EDGE_Q = [], EDGE_GEN = 0;
+function edgeUrl(text){
+  const k = edgeVoiceKo() + '|' + text;
+  if (!EDGE_URLS.has(k)) {
+    const pr = edgeSpeech(text, edgeVoiceKo(), edgeProxy()).then(r => URL.createObjectURL(r.blob));
+    pr.catch(() => EDGE_URLS.delete(k));
+    EDGE_URLS.set(k, pr);
+  }
+  return EDGE_URLS.get(k);
+}
+// la cola: cada trozo se pide apenas llega (en paralelo) y suena en orden, uno tras otro
+async function playEdgeQueue(gen){
+  while (EDGE_Q.length && gen === EDGE_GEN) {
+    const it = EDGE_Q[0];
+    try {
+      const url = await it.url; if (gen !== EDGE_GEN) return;
+      AUD.src = url; AUD.playbackRate = it.rate;
+      await AUD.play();
+      await new Promise(r => { AUD.onended = AUD.onerror = AUD.onpause = r; });
+    } catch (e) {
+      if (gen !== EDGE_GEN) return;
+      if (/intermediario|actualiza/.test(e.message || '')) EDGE_OFF = true;
+      console.warn('voz de Edge:', e.message);
+      if (!playEdgeQueue.warned) { playEdgeQueue.warned = true; note('Voz de Edge: ' + (e.message || 'no respondió') + '. Se usa la voz del navegador.'); }
+      const u = browserSpeak(it.text, it.rate, true);
+      if (u) await new Promise(r => { u.onend = u.onerror = r; setTimeout(r, 400 + it.text.length * 250); });
+    }
+    if (gen === EDGE_GEN) EDGE_Q.shift();
+  }
+}
+function stopSpeak(){
+  EDGE_GEN++; EDGE_Q = []; AUD.pause();
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+}
+function speak(text, rate = S.rate, queue = false){
+  if (!text) return;
+  if (!edgeOn()) { browserSpeak(text, rate, queue); return; }
+  if (!queue) stopSpeak();
+  const it = { text, rate, url: edgeUrl(text) }; it.url.catch(() => {});
+  EDGE_Q.push(it);
+  if (EDGE_Q.length === 1) playEdgeQueue(EDGE_GEN);
 }
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 /* el micrófono, como en WhatsApp: mantener presionado graba; al soltar, el texto queda en el cuadro para revisarlo
@@ -448,7 +498,7 @@ function micDown(e){
   try { $('mic').setPointerCapture(e.pointerId); } catch (_) {}
   recHeld = true; recCancel = false; recT0 = Date.now(); recText = '';
   clearTimeout(recBar.hintTimer); recBar.hintTimer = 0;
-  speechSynthesis?.cancel(); hideTip();
+  stopSpeak(); hideTip();
   recBase = recBase0 = $('inp').value.trim() ? $('inp').value.trim() + ' ' : '';   // recBase0: lo que había antes de grabar
   $('mic').classList.add('rec'); recBar('rec');
   if (useOpenAI) { startRecording(); return; }
@@ -1679,6 +1729,12 @@ function openSettings(){
     <div class="field"><label>Velocidad de la voz: <b id="rv">${S.rate}</b></label><input type="range" id="oRate" min="0.5" max="1.3" step="0.05" value="${S.rate}" style="width:100%"></div>
     <div class="field"><label>Voz coreana</label><select id="oVoice">${voicesFor('ko').length ? voicesFor('ko').map(v => `<option ${v.name === S.voice ? 'selected' : ''}>${esc(v.name)}</option>`).join('') : '<option value="">(predeterminada)</option>'}</select>
       ${voicesFor('ko').length ? '' : '<div class="small">No se encontró una voz coreana instalada. En el celular suele venir; en el computador puedes agregarla en los ajustes de idioma o voz del sistema.</div>'}
+</div>
+    <div class="field"><label>Voz</label><select id="oProv"><option value="">Del navegador (la de arriba)</option><option value="edge" ${S.ttsProv === 'edge' ? 'selected' : ''}>Microsoft Edge · voz natural gratis</option></select>
+      <div id="oEdgeBox" ${S.ttsProv === 'edge' ? '' : 'hidden'}>
+        <select id="oEdge" style="margin-top:6px">${EDGE_VOICES.ko.map(([v, n]) => `<option value="${v}" ${v === edgeVoiceKo() ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>
+        <input id="oProxy" style="margin-top:6px" placeholder="https://tu-intermediario.workers.dev" value="${esc(edgeProxy())}">
+        <div class="small">Las mismas voces neuronales de edge-tts (p. ej. SunHi), gratis. Necesita tu intermediario de Cloudflare, el mismo de «Leamos» (si ya lo pusiste allá, aparece aquí solo). Si falla, se usa la voz del navegador.</div></div>
       <div class="row" style="margin-top:6px"><button class="btn sec" id="oTest">Probar: 안녕하세요, 만나서 반가워요</button></div></div>
     ${SR ? '' : '<p class="small">⚠ Este navegador no reconoce voz: usa Chrome o Safari para hablar con el micrófono.</p>'}
     <div class="sec-t">Apariencia</div>
@@ -1709,6 +1765,9 @@ function openSettings(){
   on('oRate', 'input', e => { S.rate = +e.target.value; $('rv').textContent = S.rate; saveSet(); });
   on('oVoice', 'change', e => { S.voice = e.target.value; saveSet(); });
   on('oTest', 'click', () => speak('안녕하세요, 만나서 반가워요'));
+  on('oProv', 'change', e => { S.ttsProv = e.target.value; EDGE_OFF = false; saveSet(); $('oEdgeBox').hidden = S.ttsProv !== 'edge'; });
+  on('oEdge', 'change', e => { S.edgeVoice = e.target.value; saveSet(); });
+  on('oProxy', 'change', e => { let v = e.target.value.trim().replace(/\/+$/, ''); if (v && !/^https?:\/\//.test(v)) v = 'https://' + v; S.proxy = v; e.target.value = v; EDGE_OFF = false; saveSet(); });
   on('oTheme', 'change', e => { S.theme = e.target.value; saveSet(); if (S.theme) document.documentElement.dataset.theme = S.theme; else delete document.documentElement.dataset.theme; });
   on('xConv', 'click', () => { if (confirm('¿Borrar la conversación?')) { CONV = null; saveConv(); closePanel(); renderAll(); maybeAutoStart(); } });
   on('xExt', 'click', () => { if (confirm('¿Borrar el vocabulario y la gramática extendidos de todos los niveles?')) { EXT = {}; saveExt(); } });
