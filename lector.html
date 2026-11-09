@@ -126,7 +126,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-08 · 43';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-09 · 44';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -1233,7 +1233,7 @@ async function cloudAudio(text, lang = LANG()){
           if (edge) ({ blob, words } = await edgeSpeech(text, edgeVoice(lang), S.proxy));
           else blob = await openaiSpeech(text, { model: ttsModel(), voice: ttsVoice(), instructions: S.ttsInstr ?? TTS_DEFAULT_INSTR });
         }
-        catch (e) { if (a === 2 || e instanceof NoKey || !(netCut(e) || /demasiados|saturado|tardó/.test(e.message))) throw e; await waitVisible(); await new Promise(r => setTimeout(r, 1500 * (a + 1))); }
+        catch (e) { if (a === 2 || e instanceof NoKey || !(netCut(e) || /demasiados|saturado|tardó|429/.test(e.message))) throw e; await waitVisible(); await new Promise(r => setTimeout(r, 1500 * (a + 1))); }
       }
       if (!edge) recordVoice(text.length);
       rec = { k: key, text, blob, words: words ? wordChars(text, words) : null, date: Date.now() };
@@ -1300,7 +1300,7 @@ function speakCurrent(){
   const off = START_OFF; START_OFF = 0;    // empezar a mitad de la oración (desde la palabra tocada)
   const text = sentText(CUR.p, CUR.s).trim().slice(off);
   if (!/[\p{L}\p{N}]/u.test(text)) { advanceAfter(null); return; }
-  if (cloudOn()) return speakCloud(text, off);
+  if (cloudOn()) return S.ttsProv === 'edge' ? speakEdge(text, off) : speakCloud(text, off);
   const u = utter(text, LANG());
   u._t = Date.now();
   u.onstart = () => { u._s = Date.now(); };
@@ -1315,14 +1315,7 @@ async function speakCloud(text, off){
   const u = { cloud: true, _t: Date.now() }; UTT = u;
   let url;
   try { url = await cloudAudio(text); }
-  catch (e) {
-    if (UTT !== u) return;
-    if (e instanceof NoKey || /clave|permiso|saldo|intermediario|actualiza/.test(e.message)) CLOUD_OFF = true;
-    toast((S.ttsProv === 'edge' ? 'Voz de Edge: ' : 'Voz de OpenAI: ') + errText(e) + '. Se usa la del navegador' + (CLOUD_OFF ? ' (hasta recargar la página o revisar la clave en ⚙ Ajustes).' : '.'));
-    const b = utter(text, LANG()); b.onend = () => advanceAfter(u); b.onerror = () => advanceAfter(u);
-    if ('speechSynthesis' in window) speechSynthesis.speak(b); else advanceAfter(u);
-    return;
-  }
+  catch (e) { if (UTT === u) cloudFailed(e, u, text); return; }
   if (UTT !== u || !PLAY) return;
   const nt = nextSentText(); if (nt) cloudAudio(nt).catch(() => {});
   AUDIO.src = url; AUDIO.playbackRate = S.rate;
@@ -1335,6 +1328,64 @@ async function speakCloud(text, off){
     if (marks?.length) { const t = AUDIO.currentTime * 1000; let c = 0; for (const [ms, i] of marks) { if (ms <= t + 60) c = i; else break; } markSpoken(off + c); }
     else markSpoken(off + Math.floor(text.length * AUDIO.currentTime / AUDIO.duration));
   };
+  AUDIO.play().catch(e => { if (UTT === u) { toast('No se pudo reproducir el audio: ' + e.message); stop(); } });
+}
+// la voz de la nube falló: aviso y esta oración con la voz del navegador
+function cloudFailed(e, u, text){
+  if (e instanceof NoKey || /clave|permiso|saldo|intermediario|actualiza/.test(e.message)) CLOUD_OFF = true;
+  toast((S.ttsProv === 'edge' ? 'Voz de Edge: ' : 'Voz de OpenAI: ') + errText(e) + '. Se usa la del navegador' + (CLOUD_OFF ? ' (hasta recargar la página o revisar la clave en ⚙ Ajustes).' : '.'));
+  const b = utter(text, LANG()); b.onend = () => advanceAfter(u); b.onerror = () => advanceAfter(u);
+  if ('speechSynthesis' in window) speechSynthesis.speak(b); else advanceAfter(u);
+}
+// con la voz de Edge el audio se pide por párrafo (en trozos de hasta ~900 caracteres), no por oración: Microsoft
+// limita los pedidos por minuto. Cada oración suena desde su primera palabra (Edge dice cuándo empieza cada una) y,
+// dentro del mismo trozo, el audio sigue de corrido.
+const CHUNK_MAX = 900;
+function chunkOf(p, s){
+  const ss = CH.sents[p] || [];
+  let a = 0, len = 0, b = ss.length;
+  for (let i = 0; i < ss.length; i++) {
+    if (i > a && len + ss[i].length > CHUNK_MAX) { if (s < i) { b = i; break; } a = i; len = 0; }
+    len += ss[i].length;
+  }
+  const pos = []; let o = 0;   // dónde empieza (sin espacios) cada oración dentro del trozo
+  for (let i = a; i < b; i++) { pos.push(o + ss[i].length - ss[i].trimStart().length); o += ss[i].length; }
+  return { a, b, text: ss.slice(a, b).join(''), pos };
+}
+// el trozo que viene después (para pedirlo mientras suena el actual)
+function nextChunkText(p, c){
+  if (c.b < (CH.sents[p] || []).length) return chunkOf(p, c.b).text;
+  for (let q = p + 1; q < CH.paras.length; q++) if (/[\p{L}\p{N}]/u.test(CH.paras[q])) return chunkOf(q, 0).text;
+  return '';
+}
+const msAt = (marks, idx) => { for (const [ms, i] of marks) if (i >= idx) return ms; return null; };
+async function speakEdge(text, off){
+  const u = { cloud: true, _t: Date.now() }; UTT = u;
+  const p = CUR.p, s = CUR.s, c = chunkOf(p, s);
+  let url;
+  try { url = await cloudAudio(c.text); }
+  catch (e) { if (UTT === u) cloudFailed(e, u, text); return; }
+  if (UTT !== u || !PLAY) return;
+  const nt = nextChunkText(p, c); if (nt) cloudAudio(nt).catch(() => {});
+  const marks = AUDIO_WORDS.get(url) || [], st = c.pos[s - c.a];
+  const m0 = s === c.a && !off ? 0 : msAt(marks, st + off);
+  const t0 = Math.max(0, (m0 || 0) / 1000 - 0.08);
+  const m1 = s + 1 < c.b ? msAt(marks, c.pos[s + 1 - c.a]) : null;
+  const t1 = m1 == null ? Infinity : m1 / 1000 - 0.08;
+  // ¿el audio ya va justo por aquí (venía de la oración anterior del mismo trozo)? entonces sigue sin cortar
+  const going = AUDIO.src === url && !AUDIO.paused && Math.abs(AUDIO.currentTime - t0) < 0.7;
+  AUDIO.onended = () => advanceAfter(u);
+  AUDIO.onerror = () => advanceAfter(u);
+  AUDIO.ontimeupdate = () => {
+    if (UTT !== u) return;
+    const t = AUDIO.currentTime;
+    if (t >= t1) { advanceAfter(u); return; }
+    let ci = null; for (const [ms, i] of marks) { if (ms <= t * 1000 + 60) { if (i >= st) ci = i; } else break; }
+    if (ci !== null) markSpoken(ci - st);
+  };
+  if (going) return;
+  AUDIO.src = url; AUDIO.playbackRate = S.rate;
+  if (t0 > 0) AUDIO.addEventListener('loadedmetadata', () => { if (AUDIO.src === url && UTT === u) AUDIO.currentTime = t0; }, { once: true });
   AUDIO.play().catch(e => { if (UTT === u) { toast('No se pudo reproducir el audio: ' + e.message); stop(); } });
 }
 async function advanceAfter(u){
