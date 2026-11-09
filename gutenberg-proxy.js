@@ -3,6 +3,7 @@
 //     aunque esos sitios no autoricen a otras páginas (CORS).
 //  2. POST /tts     → voz neuronal gratuita de Microsoft Edge (la misma que usa edge-tts), con la posición de
 //     cada palabra. Cuerpo: {"text": "…", "voice": "ko-KR-SunHiNeural"}. Respuesta: {"audio": base64 mp3, "words": [[ms, "palabra"], …]}.
+//  3. GET  /tts-test → diagnóstico: prueba la voz y muestra qué versiones se intentaron y qué respondió Microsoft.
 const CORS = { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET, POST, OPTIONS', 'access-control-allow-headers': 'content-type' };
 const json = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { ...CORS, 'content-type': 'application/json' } });
 
@@ -10,6 +11,11 @@ export default {
   async fetch(req) {
     if (req.method === 'OPTIONS') return new Response(null, { headers: CORS });
     const u = new URL(req.url);
+    if (u.pathname.replace(/\/+$/, '') === '/tts-test') {
+      const voice = u.searchParams.get('voice') || 'ko-KR-SunHiNeural', tried = [];
+      try { const r = await edgeTTS('안녕하세요. 만나서 반가워요.', voice, tried); return json({ ok: true, voice, version: GOOD, bytes: Math.round(r.audio.length * 0.75), words: r.words.length, tried }); }
+      catch (e) { return json({ ok: false, voice, error: e.message, tried }, 502); }
+    }
     if (u.pathname.replace(/\/+$/, '') === '/tts') {
       if (req.method !== 'POST') return json({ error: 'usa POST' }, 405);
       try {
@@ -35,21 +41,39 @@ export default {
 };
 
 // ---- voz de Microsoft Edge (protocolo de «Leer en voz alta», como edge-tts) ----
+// Microsoft exige una versión de Chromium reciente (con una vieja responde 403) y la cambia con cada versión de
+// Edge: se prueban varias, de la más nueva a la más vieja, y se recuerda la que funcionó.
 const TOKEN = '6A5AA1D4EAFF4E9FB37E23D68491D6F4';
-const CHROMIUM = '130.0.2849.68';
+const VERSIONS = ['143.0.3650.75', '142.0.3595.53', '140.0.3485.54', '138.0.3351.65', '134.0.3124.66', '130.0.2849.68'];
+let GOOD = null;
 const escXml = s => s.replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c]));
+const hex = n => [...crypto.getRandomValues(new Uint8Array(n))].map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
 async function secMsGec(){
   let t = Math.floor(Date.now() / 1000) + 11644473600; t -= t % 300;   // hora de Windows, redondeada a 5 minutos
   const data = new TextEncoder().encode(`${BigInt(t) * 10000000n}${TOKEN}`);
   return [...new Uint8Array(await crypto.subtle.digest('SHA-256', data))].map(b => b.toString(16).padStart(2, '0')).join('').toUpperCase();
 }
-async function edgeTTS(text, voice){
-  const id = crypto.randomUUID().replace(/-/g, ''), major = CHROMIUM.split('.')[0];
-  const url = `https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=${TOKEN}&Sec-MS-GEC=${await secMsGec()}&Sec-MS-GEC-Version=1-${CHROMIUM}&ConnectionId=${id}`;
-  const resp = await fetch(url, { headers: { Upgrade: 'websocket', Origin: 'chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold', Pragma: 'no-cache', 'Cache-Control': 'no-cache',
-    'User-Agent': `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36 Edg/${major}.0.0.0` } });
-  const ws = resp.webSocket;
-  if (!ws) throw new Error('Edge no aceptó la conexión (' + resp.status + ')');
+async function connect(version){
+  const major = version.split('.')[0], id = hex(16);
+  const url = `https://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=${TOKEN}&Sec-MS-GEC=${await secMsGec()}&Sec-MS-GEC-Version=1-${version}&ConnectionId=${id}`;
+  const resp = await fetch(url, { headers: {
+    Upgrade: 'websocket', Origin: 'chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold', Pragma: 'no-cache', 'Cache-Control': 'no-cache',
+    'Accept-Encoding': 'gzip, deflate, br', 'Accept-Language': 'en-US,en;q=0.9', Cookie: `muid=${hex(16)};`,
+    'User-Agent': `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${major}.0.0.0 Safari/537.36 Edg/${major}.0.0.0`,
+    'Sec-CH-UA': `"Microsoft Edge";v="${major}", "Chromium";v="${major}", "Not_A Brand";v="24"`, 'Sec-CH-UA-Mobile': '?0', 'Sec-CH-UA-Platform': '"Windows"'
+  } });
+  return { ws: resp.webSocket, status: resp.status, id };
+}
+async function edgeTTS(text, voice, tried = []){
+  let ws = null, id = '';
+  for (const v of GOOD ? [GOOD, ...VERSIONS.filter(x => x !== GOOD)] : VERSIONS) {
+    try {
+      const c = await connect(v);
+      tried.push(`${v}: ${c.ws ? 'ok' : c.status}`);
+      if (c.ws) { ws = c.ws; id = c.id; GOOD = v; break; }
+    } catch (e) { tried.push(`${v}: ${e.message}`); }
+  }
+  if (!ws) throw new Error('Microsoft rechazó la conexión (' + tried.join(', ') + ')');
   ws.accept();
   const chunks = [], words = [], date = new Date().toString();
   const done = new Promise((ok, ko) => {
