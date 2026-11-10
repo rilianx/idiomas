@@ -126,7 +126,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-09 · 44';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-10 · 45';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -719,7 +719,7 @@ function phraseTrSystem(lang){
   return [
     `Eres traductor de ${L.name} al español. Un estudiante que lee un libro seleccionó un trozo. Recibes las oraciones anteriores (contexto), la oración completa y el trozo.`,
     '- translation: traducción natural al español del trozo, en ese contexto (si es solo parte de una oración, que se entienda cómo encaja).',
-    `- literal: traducción literal, palabra por palabra, que muestre la estructura del ${L.name}.`,
+    `- literal: traducción literal, palabra por palabra, que muestre la estructura del ${L.name}.` + (HIGH_CONTEXT.includes(lang) ? ' Lo que la oración omite (sujeto, objeto…) va entre corchetes: «[yo] compré libro».' : ''),
     'Sé exacto.'
   ].join('\n');
 }
@@ -731,8 +731,9 @@ function phraseExSystem(lang){
     '- explanation: la explicación principal, detallada y en prosa (2 a 4 párrafos cortos separados por una línea en blanco): qué quiere decir aquí, cómo se construye, las formas gramaticales importantes y por qué se usan, registro, matices, expresiones idiomáticas, lo que en español se diría distinto y cualquier dato cultural útil. Adáptate al nivel del lector.',
     '- grammar: los 1 a 4 puntos gramaticales del trozo que vale la pena estudiar (terminaciones, conjugaciones, partículas, conectores, construcciones; no vocabulario). Para cada uno: point, cómo aparece en el trozo; explanation, cómo se forma y otro ejemplo distinto; pattern, el patrón corto y general (p. ej. "-았/었어요", "-(으)ㄹ 수 있다", "present perfect"); title, su nombre en español en pocas palabras; desc, una o dos frases: qué expresa y cuándo se usa; level, su nivel MCER. Si coincide con una de las SECCIONES DE GRAMÁTICA YA CREADAS que vienen en el pedido, usa EXACTAMENTE el mismo pattern.',
     '- tip: un consejo práctico breve (o "").',
+    contextNote(lang),
     'Sé exacto y no inventes.'
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 }
 function levelSystem(lang){
   return [

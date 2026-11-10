@@ -288,6 +288,9 @@ function textHash(s){ let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h
 /* ---------- voz neuronal gratuita de Microsoft Edge (vía tu intermediario de Cloudflare) ----------
    El servicio de Edge no acepta conexiones directas desde una página web: el worker (gutenberg-proxy.js) se
    conecta por nosotros y devuelve el mp3 y la posición de cada palabra. */
+// coreano, japonés y chino son lenguas de «alto contexto»: una nota breve para los pedidos de explicación detallada
+const HIGH_CONTEXT = ['ko', 'ja', 'zh'];
+const contextNote = lang => HIGH_CONTEXT.includes(lang) ? 'Ten en cuenta que este idioma es de «alto contexto»: omite con naturalidad el sujeto, el objeto y lo que el contexto deja claro (los verbos no cambian según la persona), organiza la oración más en torno al tema («en cuanto a X…») que al sujeto, y a menudo deja cosas implícitas por cortesía, para suavizar o no confrontar. Cuando aporte a ESTA frase, di brevemente qué se omitió y cómo se recupera del contexto (quién hace qué, a qué o a quién se refiere), mostrándolo entre corchetes (p. ej. «[yo] compré [el] libro»), cuál es el tema, y si lo implícito o indirecto tiene una intención. Sin teoría general: solo lo que ayude a entender esta frase.' : '';
 const EDGE_VOICES = {
   ko: [['ko-KR-SunHiNeural', 'SunHi · mujer'], ['ko-KR-InJoonNeural', 'InJoon · hombre'], ['ko-KR-HyunsuMultilingualNeural', 'Hyunsu · hombre (multilingüe)']],
   en: [['en-US-AriaNeural', 'Aria · EE. UU., mujer'], ['en-US-JennyNeural', 'Jenny · EE. UU., mujer'], ['en-US-GuyNeural', 'Guy · EE. UU., hombre'], ['en-US-AndrewNeural', 'Andrew · EE. UU., hombre'], ['en-GB-SoniaNeural', 'Sonia · Reino Unido, mujer'], ['en-GB-RyanNeural', 'Ryan · Reino Unido, hombre']],

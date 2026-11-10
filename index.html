@@ -116,7 +116,7 @@ footer{display:flex;align-items:flex-end;gap:8px;padding:8px 12px calc(10px + en
    Todo vive en el navegador: las claves, la conversación y el diccionario.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-09 · 3';   // (subir en cada cambio: sirve para confirmar que el navegador tiene la última)
+const APP_VERSION = '2026-11-10 · 4';   // (subir en cada cambio: sirve para confirmar que el navegador tiene la última)
 
 /* ---------- niveles: vocabulario y gramática ---------- */
 // [palabra, categoría, significado]
@@ -783,11 +783,12 @@ const SENT_SYSTEM = [
   '- translation: traducción natural al español.',
   '- explanation: la explicación principal, detallada y en prosa (2 a 4 párrafos cortos separados por una línea en blanco). Explica qué quiere decir la frase en ESTA conversación y cómo se construye: las formas gramaticales importantes y por qué se usan aquí (y no otras), el registro y la cortesía, matices, lo que en español se diría distinto, y cualquier dato cultural útil. Adáptate al nivel del estudiante: si algo es nuevo para su nivel, explícalo desde lo básico.',
   '- context: en una o dos frases, cómo se conecta con los mensajes anteriores (a qué responde o qué pregunta) y qué se espera que conteste el estudiante; "" si no hay mensajes anteriores.',
-  '- literal: traducción literal que muestre el orden coreano (p. ej. «yo-TEMA escuela-A voy»).',
+  '- literal: traducción literal que muestre el orden coreano (p. ej. «yo-TEMA escuela-A voy»), con lo omitido entre corchetes (p. ej. «[yo] comí»).',
   '- grammar: los 1 a 3 puntos gramaticales clave, cada uno con cómo se forma y otro ejemplo distinto al de la frase.',
   '- answers: 2 o 3 respuestas posibles que el estudiante podría dar ahora, cortas y naturales para su nivel, con su traducción.',
   '- words: cada palabra de la frase en orden (sin signos de puntuación), para el diccionario: t es la palabra tal como aparece; lemma, su forma de diccionario (verbos y adjetivos con -다, sustantivos sin partícula); gloss, el significado en 1 a 4 palabras; meaning, una definición de diccionario breve (en una frase); explanation, en una frase, qué forma tiene aquí y qué aporta.',
   '- tip: un consejo práctico breve (o "").',
+  contextNote('ko'),
   '- new_grammar: las formas verbales y gramaticales de la frase (conjugaciones, terminaciones, conectores, construcciones) que NO están en la lista de GRAMÁTICA YA VISTA que viene en el pedido. form: el patrón (p. ej. "-았/었어요", "-네요", "-(으)ㄹ까요?"); label: qué expresa, en pocas palabras; example: el trozo de la frase donde aparece. [] si no hay nada nuevo.',
   'Sé exacto y no inventes.'
 ].join('\n');
