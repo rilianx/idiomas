@@ -60,6 +60,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
 @keyframes bump{30%{transform:scale(1.35);background:#ffe9a0}}
 @keyframes won{0%{background:#ffd54a;box-shadow:0 0 0 4px #ffd54a88}60%{background:#ffe9a0}100%{background:transparent;box-shadow:none}}
 .chend{text-align:center;margin:30px 0;color:var(--muted)}
+.cutline{border-top:2px dashed var(--muted);opacity:.5;margin:14px 0 4px;font-size:11px;color:var(--muted);text-align:right;padding-top:2px}
 .placeholder{background:var(--card);border:1px dashed var(--line);border-radius:12px;padding:18px;text-align:center;color:var(--muted);margin:20px 0}
 
 #selbtn{position:fixed;z-index:31;transform:translate(-50%,-100%)}
@@ -126,7 +127,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-12 · 47';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-12 · 48';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -782,8 +783,7 @@ function simpSystem(src, lang, lvl){
        : `Eres editor de lecturas graduadas en ${L.name} (libros adaptados para estudiantes). Reescribes un fragmento de un libro para un lector de nivel ${lvLabel(lang, lvl)} del MCER.`,
     `Devuelve en paras exactamente un párrafo ${tr ? 'traducido' : 'reescrito'} por cada párrafo recibido, en el mismo orden y la misma cantidad, escrito en ${L.name}. Nunca juntes ni dividas párrafos.`,
     '- Conserva la historia: los hechos, quién hace y dice qué, y el tono. No agregues cosas que no están.',
-    '- Coherencia: el texto simplificado tiene que seguir teniendo sentido leído de corrido. Cada línea de diálogo se mantiene (simplificada) con quién la dice, y no quites hechos, motivos ni reacciones de los que dependa lo que viene después (si alguien responde, pregunta o se sorprende por algo, ese algo tiene que estar). Simplificar es decirlo más fácil, no dejarlo fuera.',
-    '- El CONTEXTO ANTERIOR y el CONTEXTO SIGUIENTE (si vienen) son del original y solo sirven para entender de qué se habla: no los incluyas en paras.',
+    '- El fragmento puede empezar o terminar a mitad de una escena. El CONTEXTO ANTERIOR y el CONTEXTO SIGUIENTE (si vienen, del original) sirven para que lo que reescribas encaje con lo de antes y lo de después (si un diálogo responde a algo anterior, que se entienda): no los incluyas en paras.',
     ...levelRules(lang, lvl),
     '- Usa EXACTAMENTE la forma de los NOMBRES Y TÉRMINOS que vienen en el pedido (siempre igual en todo el libro). Puedes usar esos términos clave aunque estén sobre el nivel.',
     '- Si un párrafo es un título, déjalo como título corto.',
@@ -836,6 +836,9 @@ async function openChapter(ver, ch, p = 0, s = 0){
   CH.sents = CH.paras.map(t => splitSents(t, verLang(BOOK, ver)));
   CUR.p = Math.min(p, Math.max(0, CH.paras.length - 1)); CUR.s = Math.min(s, (CH.sents[CUR.p] || ['']).length - 1);
   if (!missing) for (const r of await dbPrefix('ana', `${BOOK.id}|${ver}|${ch}|`)) ANA.set(r.k, r);
+  // dónde empezó cada trozo al simplificar (para la línea punteada de depuración)
+  CH.cuts = new Set();
+  if (ver !== 'o' && !missing) { const o = await dbGet('text', `${BOOK.id}|${ch}`); if (o?.paras?.length === CH.paras.length) simpChunks(o.paras).slice(1).forEach(c => CH.cuts.add(c.start)); }
   // en una versión simplificada, se simplifican solos este capítulo y el siguiente
   if (ver !== 'o') {
     const v = BOOK.versions[ver], need = [ch, ch + 1].filter(i => i < BOOK.chapters.length && !v.done?.[i]);
@@ -1074,13 +1077,33 @@ function renderReader(){
     if ($('seeOrig')) $('seeOrig').onclick = () => openChapter('o', CH.ch, CUR.p, 0);
     updateInfo(); return;
   }
-  CH.paras.forEach((_, p) => bk.appendChild(paraEl(p)));
+  CH.paras.forEach((_, p) => {
+    if (S.showCuts !== false && CH.cuts?.has(p)) { const c = document.createElement('div'); c.className = 'cutline'; c.textContent = 'corte entre partes'; bk.appendChild(c); }
+    bk.appendChild(paraEl(p));
+  });
   const end = document.createElement('div'); end.className = 'chend';
-  end.innerHTML = CH.ch < BOOK.chapters.length - 1 ? `— fin del capítulo —<div class="row" style="justify-content:center"><button class="btn" id="nextCh">Siguiente capítulo →</button></div>` : '— fin del libro —';
+  end.innerHTML = (CH.ch < BOOK.chapters.length - 1 ? `— fin del capítulo —<div class="row" style="justify-content:center"><button class="btn" id="nextCh">Siguiente capítulo →</button></div>` : '— fin del libro —') +
+    (CH.ver !== 'o' ? `<div class="row" style="justify-content:center;margin-top:10px"><button class="btn sec" id="redoCh">↻ Rehacer este capítulo</button></div>` : '');
   bk.appendChild(end);
   v.appendChild(bk);
   if ($('nextCh')) $('nextCh').onclick = () => openChapter(CH.ver, CH.ch + 1);
+  if ($('redoCh')) $('redoCh').onclick = () => redoChapter(BOOK, CH.ver, CH.ch);
   updateInfo();
+}
+// rehacer solo un capítulo de una versión (se borran su texto, sus traducciones y explicaciones, y se vuelve a preparar)
+async function redoChapter(b, ver, ch){
+  if (SIMP_JOBS.has(`${b.id}|${ver}`)) { toast('Espera a que termine lo que se está preparando de esta versión.'); return; }
+  if (!confirm(`¿Rehacer el capítulo ${ch + 1} de la versión ${verName(b, ver)} con ${mname(S.simpModel)}? Se borran sus traducciones y explicaciones guardadas.`)) return;
+  await dbDel('simp', `${b.id}|${ver}|${ch}`);
+  for (const st of ['ana', 'expl']) await dbDelPrefix(st, `${b.id}|${ver}|${ch}|`);
+  for (const k of [...ANA.keys()]) if (k.startsWith(`${b.id}|${ver}|${ch}|`)) ANA.delete(k);
+  const fresh = await dbGet('books', b.id) || b;
+  if (fresh.versions[ver]?.done) fresh.versions[ver].done[ch] = false;
+  await dbPut('books', fresh); if (BOOK?.id === b.id) BOOK.versions = fresh.versions;
+  Object.assign(b, { versions: fresh.versions });
+  const go = simplifyBook(b, ver, S.simpModel, [ch]);
+  if (BOOK?.id === b.id && CH?.ver === ver && CH.ch === ch) await openChapter(ver, ch, 0, 0);
+  await go;
 }
 function paraEl(p){
   const el = document.createElement(CH.heads.has(p) ? 'h3' : 'p'); el.className = 'para'; el.dataset.p = p;
@@ -1743,6 +1766,13 @@ function knownWordsHint(lang){
   return Object.values(d).filter(e => scoreOf(e) >= 50 && !SKIP_POS.has(e.pos)).sort((a, b) => (b.last || 0) - (a.last || 0)).slice(0, 250).map(e => e.lemma).join(', ');
 }
 const glossText = terms => (terms || []).map(t => `${t.src} → ${t.dst}${t.note ? ' (' + t.note + ')' : ''}`).join('; ');
+// un capítulo en trozos de hasta ~2500 caracteres o 40 párrafos (se simplifican en paralelo)
+function simpChunks(paras){
+  const chunks = []; let cur = [], len = 0, start = 0;
+  paras.forEach((t, k) => { if (cur.length && (len + t.length > 2500 || cur.length >= 40)) { chunks.push({ start, paras: cur }); cur = []; len = 0; start = k; } cur.push(t); len += t.length; });
+  if (cur.length) chunks.push({ start, paras: cur });
+  return chunks;
+}
 // el texto original que rodea a un trozo (los trozos se simplifican en paralelo: así cada uno sabe qué se venía diciendo)
 function chunkContext(paras, from, to){
   const before = []; let n = 0;
@@ -1772,7 +1802,7 @@ async function simplifyChunk(b, ver, model, chunk, known, terms, stats, ctx = {}
     const probs = (chk?.problems || []).filter(p => p.para >= 1 && p.para <= ps.length && (p.words?.length || p.grammar?.length));
     if (!probs.length) break;
     stats.checked = (stats.checked || 0) + probs.length;
-    const fixUser = head + `\nEstos párrafos ya simplificados todavía tienen palabras o formas sobre el nivel ${lvLabel(lang, lvl)}. Reescríbelos para que TODO quede en el nivel: reemplaza lo marcado por palabras y estructuras más simples, sin cambiar los hechos ni quitar nada de lo que dependa el resto (un detalle solo se puede quitar si nada de lo que sigue lo necesita).\n\nTODO EL FRAGMENTO SIMPLIFICADO (para el contexto):\n${ps.map((t, i) => `[${i + 1}] ${t}`).join('\n')}\n\nPÁRRAFOS A REESCRIBIR (${probs.length}; devuelve solo estos, en este orden):\n` +
+    const fixUser = head + `\nEstos párrafos ya simplificados todavía tienen palabras o formas sobre el nivel ${lvLabel(lang, lvl)}. Reescríbelos para que TODO quede en el nivel: reemplaza lo marcado por palabras y estructuras más simples (o quita ese detalle si no es importante), sin cambiar los hechos.\n\nPÁRRAFOS (${probs.length}):\n` +
       probs.map((p, k) => `[${k + 1}] ${ps[p.para - 1]}\n   (difícil: ${[...(p.words || []), ...(p.grammar || [])].join(', ')})`).join('\n\n');
     const fixed = await askRetry(model, sys, fixUser, SIMP_SCHEMA, { effort: 'low', maxTokens: 12000, ms: 180000, kind: 'simplify', retries: 6 }).catch(() => null);
     const fp = (fixed?.paras || []).map(x => String(x).trim());
@@ -1823,9 +1853,7 @@ async function simplifyBook(b, lvl, model, only = null){
   const terms = b.versions[lvl].glossary;
   for (const ch of chs) {
     const rec = await dbGet('text', `${b.id}|${ch}`); if (!rec) continue;
-    const chunks = []; let cur = [], len = 0, start = 0;
-    rec.paras.forEach((t, k) => { if (cur.length && (len + t.length > 2500 || cur.length >= 40)) { chunks.push({ start, paras: cur }); cur = []; len = 0; start = k; } cur.push(t); len += t.length; });
-    if (cur.length) chunks.push({ start, paras: cur });
+    const chunks = simpChunks(rec.paras);
     chapters.set(ch, { rec, results: new Array(chunks.length), left: chunks.length, failed: false });
     chunks.forEach((c, i) => tasks.push({ ch, i, chunk: c.paras, ctx: chunkContext(rec.paras, c.start, c.start + c.paras.length) }));
   }
@@ -2466,6 +2494,7 @@ function openSettings(){
     <div class="box"><h3>Simplificar</h3>
       <div class="field"><label>Pedidos simultáneos a la API</label><select id="sPar">${[5, 10, 20, 50, 100].map(n => `<option value="${n}" ${n === SIMP_PAR() ? 'selected' : ''}>${n}${n === 50 ? ' (por defecto)' : ''}</option>`).join('')}</select>
       <label class="check"><input type="checkbox" id="cCheck" ${S.simpCheck !== false ? 'checked' : ''}><span>Revisar el nivel: después de cada parte, el modelo barato busca palabras o gramática sobre el nivel y esos párrafos se reescriben (más fiel al nivel; cuesta ~35 % más).</span></label>
+      <label class="check"><input type="checkbox" id="cCuts" ${S.showCuts !== false ? 'checked' : ''}><span>Mostrar con una línea punteada dónde se cortó el capítulo en partes al simplificar (para revisar si se pierde el hilo justo ahí).</span></label>
       <div class="small">Más pedidos a la vez = el libro se simplifica antes. Si tu cuenta tiene un límite bajo de pedidos por minuto, la API rechaza algunos y la app los reintenta (más lento); si ves fallas, baja este número.</div></div></div>
     <div class="box"><h3>Gutenberg y voz de Edge: tu intermediario (opcional)</h3>
       <p class="small">El navegador no deja que una página descargue libros de otro sitio si ese sitio no lo autoriza, y los intermediarios gratuitos a veces fallan. Con uno propio funciona siempre: es gratis y toma unos 5 minutos.</p>
@@ -2502,6 +2531,7 @@ function openSettings(){
   on('cTrAlways', 'change', e => { S.showTr = e.target.checked; saveSet(); });
   on('sPar', 'change', e => { S.simpPar = +e.target.value; saveSet(); });
   on('cCheck', 'change', e => { S.simpCheck = e.target.checked; saveSet(); });
+  on('cCuts', 'change', e => { S.showCuts = e.target.checked; saveSet(); if (BOOK && CH && !$('player').hidden) renderReaderKeep(); });
   for (const k of Object.keys(LANGS)) on('lv_' + k, 'change', e => { S.myLevel[k] = e.target.value; saveSet(); });
   on('vVoice', 'change', e => { S.voices[lang] = e.target.value; saveSet(); });
   on('vProv', 'change', e => { S.ttsProv = e.target.value; saveSet(); stop(); openSettings(); });
