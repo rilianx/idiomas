@@ -126,7 +126,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-10 · 46';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-12 · 47';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -782,6 +782,8 @@ function simpSystem(src, lang, lvl){
        : `Eres editor de lecturas graduadas en ${L.name} (libros adaptados para estudiantes). Reescribes un fragmento de un libro para un lector de nivel ${lvLabel(lang, lvl)} del MCER.`,
     `Devuelve en paras exactamente un párrafo ${tr ? 'traducido' : 'reescrito'} por cada párrafo recibido, en el mismo orden y la misma cantidad, escrito en ${L.name}. Nunca juntes ni dividas párrafos.`,
     '- Conserva la historia: los hechos, quién hace y dice qué, y el tono. No agregues cosas que no están.',
+    '- Coherencia: el texto simplificado tiene que seguir teniendo sentido leído de corrido. Cada línea de diálogo se mantiene (simplificada) con quién la dice, y no quites hechos, motivos ni reacciones de los que dependa lo que viene después (si alguien responde, pregunta o se sorprende por algo, ese algo tiene que estar). Simplificar es decirlo más fácil, no dejarlo fuera.',
+    '- El CONTEXTO ANTERIOR y el CONTEXTO SIGUIENTE (si vienen) son del original y solo sirven para entender de qué se habla: no los incluyas en paras.',
     ...levelRules(lang, lvl),
     '- Usa EXACTAMENTE la forma de los NOMBRES Y TÉRMINOS que vienen en el pedido (siempre igual en todo el libro). Puedes usar esos términos clave aunque estén sobre el nivel.',
     '- Si un párrafo es un título, déjalo como título corto.',
@@ -1741,11 +1743,21 @@ function knownWordsHint(lang){
   return Object.values(d).filter(e => scoreOf(e) >= 50 && !SKIP_POS.has(e.pos)).sort((a, b) => (b.last || 0) - (a.last || 0)).slice(0, 250).map(e => e.lemma).join(', ');
 }
 const glossText = terms => (terms || []).map(t => `${t.src} → ${t.dst}${t.note ? ' (' + t.note + ')' : ''}`).join('; ');
-async function simplifyChunk(b, ver, model, chunk, known, terms, stats){
+// el texto original que rodea a un trozo (los trozos se simplifican en paralelo: así cada uno sabe qué se venía diciendo)
+function chunkContext(paras, from, to){
+  const before = []; let n = 0;
+  for (let i = from - 1; i >= 0 && n < 1500; i--) { before.unshift(paras[i]); n += paras[i].length; }
+  const after = []; n = 0;
+  for (let i = to; i < paras.length && n < 500 && after.length < 2; i++) { after.push(paras[i]); n += paras[i].length; }
+  return { before: before.join('\n'), after: after.join('\n') };
+}
+async function simplifyChunk(b, ver, model, chunk, known, terms, stats, ctx = {}){
   const lang = verLang(b, ver), lvl = verLvl(ver), sys = simpSystem(b.lang, lang, lvl);
   const head = `LIBRO: «${b.title}»${b.author ? ' de ' + b.author : ''}\nIDIOMA DE LA VERSIÓN: ${LANGS[lang].name}\nNIVEL: ${lvLabel(lang, lvl)}\n` +
     (terms?.length ? `NOMBRES Y TÉRMINOS (usa exactamente esta forma): ${glossText(terms)}\n` : '') + (known ? `PALABRAS QUE EL LECTOR YA CONOCE: ${known}\n` : '');
-  const user = head + `\nPÁRRAFOS (${chunk.length}):\n` + chunk.map((t, i) => `[${i + 1}] ${t}`).join('\n\n');
+  const user = head + (ctx.before ? `\nCONTEXTO ANTERIOR (original, no lo reescribas):\n${ctx.before}\n` : '') +
+    `\nPÁRRAFOS (${chunk.length}):\n` + chunk.map((t, i) => `[${i + 1}] ${t}`).join('\n\n') +
+    (ctx.after ? `\n\nCONTEXTO SIGUIENTE (original, no lo reescribas):\n${ctx.after}` : '');
   let ps = null;
   for (let attempt = 0; attempt < 2 && !ps; attempt++) {
     const out = await askRetry(model, sys, user, SIMP_SCHEMA, { effort: 'low', maxTokens: 20000, ms: 180000, kind: 'simplify', retries: 6 });
@@ -1760,7 +1772,7 @@ async function simplifyChunk(b, ver, model, chunk, known, terms, stats){
     const probs = (chk?.problems || []).filter(p => p.para >= 1 && p.para <= ps.length && (p.words?.length || p.grammar?.length));
     if (!probs.length) break;
     stats.checked = (stats.checked || 0) + probs.length;
-    const fixUser = head + `\nEstos párrafos ya simplificados todavía tienen palabras o formas sobre el nivel ${lvLabel(lang, lvl)}. Reescríbelos para que TODO quede en el nivel: reemplaza lo marcado por palabras y estructuras más simples (o quita ese detalle si no es importante), sin cambiar los hechos.\n\nPÁRRAFOS (${probs.length}):\n` +
+    const fixUser = head + `\nEstos párrafos ya simplificados todavía tienen palabras o formas sobre el nivel ${lvLabel(lang, lvl)}. Reescríbelos para que TODO quede en el nivel: reemplaza lo marcado por palabras y estructuras más simples, sin cambiar los hechos ni quitar nada de lo que dependa el resto (un detalle solo se puede quitar si nada de lo que sigue lo necesita).\n\nTODO EL FRAGMENTO SIMPLIFICADO (para el contexto):\n${ps.map((t, i) => `[${i + 1}] ${t}`).join('\n')}\n\nPÁRRAFOS A REESCRIBIR (${probs.length}; devuelve solo estos, en este orden):\n` +
       probs.map((p, k) => `[${k + 1}] ${ps[p.para - 1]}\n   (difícil: ${[...(p.words || []), ...(p.grammar || [])].join(', ')})`).join('\n\n');
     const fixed = await askRetry(model, sys, fixUser, SIMP_SCHEMA, { effort: 'low', maxTokens: 12000, ms: 180000, kind: 'simplify', retries: 6 }).catch(() => null);
     const fp = (fixed?.paras || []).map(x => String(x).trim());
@@ -1811,11 +1823,11 @@ async function simplifyBook(b, lvl, model, only = null){
   const terms = b.versions[lvl].glossary;
   for (const ch of chs) {
     const rec = await dbGet('text', `${b.id}|${ch}`); if (!rec) continue;
-    const chunks = []; let cur = [], len = 0;
-    rec.paras.forEach(t => { if (cur.length && (len + t.length > 2500 || cur.length >= 40)) { chunks.push(cur); cur = []; len = 0; } cur.push(t); len += t.length; });
-    if (cur.length) chunks.push(cur);
+    const chunks = []; let cur = [], len = 0, start = 0;
+    rec.paras.forEach((t, k) => { if (cur.length && (len + t.length > 2500 || cur.length >= 40)) { chunks.push({ start, paras: cur }); cur = []; len = 0; start = k; } cur.push(t); len += t.length; });
+    if (cur.length) chunks.push({ start, paras: cur });
     chapters.set(ch, { rec, results: new Array(chunks.length), left: chunks.length, failed: false });
-    chunks.forEach((chunk, i) => tasks.push({ ch, i, chunk }));
+    chunks.forEach((c, i) => tasks.push({ ch, i, chunk: c.paras, ctx: chunkContext(rec.paras, c.start, c.start + c.paras.length) }));
   }
   job.totalParts = tasks.length; refreshViews();
   const chapterDone = async ch => {
@@ -1832,7 +1844,7 @@ async function simplifyBook(b, lvl, model, only = null){
     while (next < tasks.length && !stopAll) {
       const t = tasks[next++], c = chapters.get(t.ch);
       if (c.failed) continue;
-      try { c.results[t.i] = await simplifyChunk(b, lvl, model, t.chunk, known, terms, job); }
+      try { c.results[t.i] = await simplifyChunk(b, lvl, model, t.chunk, known, terms, job, t.ctx); }
       catch (e) {
         c.failed = true; job.failed++; job.err = errText(e);
         if (e instanceof NoKey || /clave|permiso|saldo/.test(e.message)) stopAll = true;   // no tiene sentido seguir
