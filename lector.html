@@ -127,7 +127,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-12 · 48';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-12 · 49';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -661,7 +661,9 @@ const ENTRY = obj({ query: STR, lemma: STR, pos: { type: 'string', enum: POS }, 
 const PHRASE_TR_SCHEMA = obj({ translation: STR, literal: STR });
 const PHRASE_EX_SCHEMA = obj({ explanation: STR, grammar: { type: 'array', items: obj({ point: STR, explanation: STR, pattern: STR, title: STR, desc: STR, level: { type: 'string', enum: CEFR } }) }, tip: STR });
 const LEVEL_SCHEMA = obj({ cefr: { type: 'string', enum: CEFR }, range: STR, summary: STR, vocabulary: STR, grammar: STR, advice: STR });
-const SIMP_SCHEMA = obj({ paras: { type: 'array', items: STR } });
+const SIMP_SCHEMA = obj({ paras: { type: 'array', items: STR } });   // (la corrección del nivel: uno por uno)
+// al simplificar, cada párrafo dice a qué párrafo original corresponde (se pueden juntar o dividir)
+const SIMP_MAP_SCHEMA = obj({ paras: { type: 'array', items: obj({ n: { type: 'integer' }, text: STR }) } });
 // nombres y términos fijos para todo el libro (que no cambien de un trozo a otro)
 const GLOSS_SCHEMA = obj({ terms: { type: 'array', items: obj({ src: STR, dst: STR, note: STR }) } });
 // revisión del nivel: qué oraciones tienen palabras o formas sobre el nivel
@@ -781,12 +783,12 @@ function simpSystem(src, lang, lvl){
   return [
     tr ? `Eres traductor y editor de lecturas graduadas (libros adaptados para estudiantes). Traduces un fragmento de un libro escrito en ${S2.name} al ${L.name}, adaptado para un lector de nivel ${lvLabel(lang, lvl)} del MCER que aprende ${L.name}.`
        : `Eres editor de lecturas graduadas en ${L.name} (libros adaptados para estudiantes). Reescribes un fragmento de un libro para un lector de nivel ${lvLabel(lang, lvl)} del MCER.`,
-    `Devuelve en paras exactamente un párrafo ${tr ? 'traducido' : 'reescrito'} por cada párrafo recibido, en el mismo orden y la misma cantidad, escrito en ${L.name}. Nunca juntes ni dividas párrafos.`,
+    `Devuelve en paras los párrafos ${tr ? 'traducidos' : 'reescritos'}, en orden y escritos en ${L.name}; en cada uno, n es el número del párrafo recibido al que corresponde. Lo normal es uno por cada párrafo recibido, pero si así la escena queda más clara y natural puedes juntar dos o más seguidos en uno (n = el número del primero) o dividir uno largo en varios (repite su n). Que no se pierda ninguno: cada párrafo recibido tiene que quedar dicho en alguno. Nunca cortes una oración entre dos párrafos, y cada línea de diálogo sigue con quien la dice.`,
     '- Conserva la historia: los hechos, quién hace y dice qué, y el tono. No agregues cosas que no están.',
     '- El fragmento puede empezar o terminar a mitad de una escena. El CONTEXTO ANTERIOR y el CONTEXTO SIGUIENTE (si vienen, del original) sirven para que lo que reescribas encaje con lo de antes y lo de después (si un diálogo responde a algo anterior, que se entienda): no los incluyas en paras.',
     ...levelRules(lang, lvl),
     '- Usa EXACTAMENTE la forma de los NOMBRES Y TÉRMINOS que vienen en el pedido (siempre igual en todo el libro). Puedes usar esos términos clave aunque estén sobre el nivel.',
-    '- Si un párrafo es un título, déjalo como título corto.',
+    '- Si un párrafo es un título, déjalo como título corto y solo en su párrafo.',
     '- Si vienen PALABRAS QUE EL LECTOR YA CONOCE, prefiérelas cuando sirvan.',
     '- Usa comillas en todos los diálogos.'
   ].join('\n');
@@ -823,22 +825,36 @@ async function openBook(id, ver){
   const b = await dbGet('books', id); if (!b) return;
   BOOK = b; useDict(b.lang);
   b.last = Date.now(); dbPut('books', b);
-  await openChapter(ver || b.pos?.ver || 'o', b.pos?.ch || 0, b.pos?.p || 0, b.pos?.s || 0);
+  const pv = b.pos?.ver || 'o', tv = ver || pv, ch = b.pos?.ch || 0;
+  if (tv === pv) return openChapter(tv, ch, b.pos?.p || 0, b.pos?.s || 0);
+  // otra versión que la última leída: el mismo lugar del original (pueden tener distinta cantidad de párrafos)
+  let o = b.pos?.p || 0;
+  if (pv !== 'o') { const r = await dbGet('simp', `${id}|${pv}|${ch}`); o = r?.map?.[o] ?? o; }
+  await openChapter(tv, ch, o, 0, true);
 }
-async function openChapter(ver, ch, p = 0, s = 0){
+// las versiones pueden tener otra cantidad de párrafos (se juntan o dividen al simplificar): map[i] = el párrafo original
+const origOf = p => CH?.map?.[p] ?? p;
+const fromOrig = (map, o) => { if (!map) return o; const i = map.findIndex(x => x >= o); return i < 0 ? map.length - 1 : (map[i] > o && i > 0 ? i - 1 : i); };
+// abrir otra versión del mismo capítulo, en el mismo lugar
+const switchVersion = ver => openChapter(ver, CH.ch, origOf(CUR.p), 0, true);
+async function openChapter(ver, ch, p = 0, s = 0, orig = false){
   if (!BOOK.versions[ver]) ver = 'o';
   ch = Math.max(0, Math.min(BOOK.chapters.length - 1, ch));
   let rec = ver === 'o' ? await dbGet('text', `${BOOK.id}|${ch}`) : await dbGet('simp', `${BOOK.id}|${ver}|${ch}`);
   const missing = !rec;
   if (missing) rec = await dbGet('text', `${BOOK.id}|${ch}`);
-  CH = { ver, ch, paras: rec?.paras || [], heads: new Set(rec?.heads || []), missing };
+  CH = { ver, ch, paras: rec?.paras || [], heads: new Set(rec?.heads || []), missing, map: !missing && ver !== 'o' && rec?.map?.length === rec?.paras?.length ? rec.map : null };
+  if (orig) { p = fromOrig(CH.map, p); s = 0; }
   useDict(verLang(BOOK, ver));
   CH.sents = CH.paras.map(t => splitSents(t, verLang(BOOK, ver)));
   CUR.p = Math.min(p, Math.max(0, CH.paras.length - 1)); CUR.s = Math.min(s, (CH.sents[CUR.p] || ['']).length - 1);
   if (!missing) for (const r of await dbPrefix('ana', `${BOOK.id}|${ver}|${ch}|`)) ANA.set(r.k, r);
   // dónde empezó cada trozo al simplificar (para la línea punteada de depuración)
   CH.cuts = new Set();
-  if (ver !== 'o' && !missing) { const o = await dbGet('text', `${BOOK.id}|${ch}`); if (o?.paras?.length === CH.paras.length) simpChunks(o.paras).slice(1).forEach(c => CH.cuts.add(c.start)); }
+  if (ver !== 'o' && !missing) {
+    const o = await dbGet('text', `${BOOK.id}|${ch}`);
+    if (o && (CH.map || o.paras.length === CH.paras.length)) for (const c of simpChunks(o.paras).slice(1)) { const i = CH.paras.findIndex((_, k) => origOf(k) >= c.start); if (i > 0) CH.cuts.add(i); }
+  }
   // en una versión simplificada, se simplifican solos este capítulo y el siguiente
   if (ver !== 'o') {
     const v = BOOK.versions[ver], need = [ch, ch + 1].filter(i => i < BOOK.chapters.length && !v.done?.[i]);
@@ -1074,7 +1090,7 @@ function renderReader(){
     bk.appendChild(ph);
     v.appendChild(bk);
     if ($('simpNow')) $('simpNow').onclick = () => simplifyBook(BOOK, CH.ver, S.simpModel, [CH.ch]);
-    if ($('seeOrig')) $('seeOrig').onclick = () => openChapter('o', CH.ch, CUR.p, 0);
+    if ($('seeOrig')) $('seeOrig').onclick = () => openChapter('o', CH.ch, CUR.p, 0);   // (sin la versión, CUR.p ya es del original)
     updateInfo(); return;
   }
   CH.paras.forEach((_, p) => {
@@ -1450,7 +1466,10 @@ async function showTr(){
   }
   if (SHOW_ORIG && CH.ver !== 'o') {
     const o = await dbGet('text', `${BOOK.id}|${CH.ch}`);
-    h += `<div class="lab">Párrafo original</div><p lang="${BOOK.lang}">${esc(o?.paras?.[CUR.p] || '—')}</p>`;
+    const a = origOf(CUR.p); let z = a;
+    if (CH.map) { const nx = CH.map.slice(CUR.p + 1).find(x => x > a); z = (nx ?? o?.paras?.length ?? a + 1) - 1; }
+    const op = (o?.paras || []).slice(a, z + 1);
+    h += `<div class="lab">Párrafo original</div>${op.length ? op.map(t => `<p lang="${BOOK.lang}">${esc(t)}</p>`).join('') : '<p>—</p>'}`;
   }
   box.innerHTML = h; box.hidden = !h; updateInfo();
   // la explicación detallada de la oración (la misma que al seleccionar un trozo; queda guardada)
@@ -1788,21 +1807,22 @@ async function simplifyChunk(b, ver, model, chunk, known, terms, stats, ctx = {}
   const user = head + (ctx.before ? `\nCONTEXTO ANTERIOR (original, no lo reescribas):\n${ctx.before}\n` : '') +
     `\nPÁRRAFOS (${chunk.length}):\n` + chunk.map((t, i) => `[${i + 1}] ${t}`).join('\n\n') +
     (ctx.after ? `\n\nCONTEXTO SIGUIENTE (original, no lo reescribas):\n${ctx.after}` : '');
-  let ps = null;
+  let ps = null, map = null;
   for (let attempt = 0; attempt < 2 && !ps; attempt++) {
-    const out = await askRetry(model, sys, user, SIMP_SCHEMA, { effort: 'low', maxTokens: 20000, ms: 180000, kind: 'simplify', retries: 6 });
-    const got = (out.paras || []).map(x => String(x).trim());
-    if (got.length === chunk.length || attempt === 1) ps = chunk.map((orig, i) => got[i] ?? orig);
+    const out = await askRetry(model, sys, user, SIMP_MAP_SCHEMA, { effort: 'low', maxTokens: 20000, ms: 180000, kind: 'simplify', retries: 6 });
+    const got = alignParas(out.paras, chunk.length);
+    if (got) ({ ps, map } = got);
+    else if (attempt === 1) { ps = chunk.slice(); map = chunk.map((_, i) => i); }
   }
   // revisión del nivel (modelo barato) y, si hay algo difícil, se reescriben solo esos párrafos (hasta 2 vueltas)
-  if (S.simpCheck === false || lvIdx(lvl) >= 4) return ps;
+  if (S.simpCheck === false || lvIdx(lvl) >= 4) return { paras: ps, map };
   for (let round = 0; round < 2; round++) {
     const chk = await askRetry(CHECK_MODEL(), checkSystem(lang, lvl), (terms?.length ? `TÉRMINOS PERMITIDOS: ${terms.map(t => t.dst).join(', ')}\n\n` : '') + 'PÁRRAFOS:\n' + ps.map((t, i) => `[${i + 1}] ${t}`).join('\n\n'),
       CHECK_SCHEMA, { effort: 'low', maxTokens: 4000, ms: 90000, kind: 'simplify', fast: true, retries: 6 }).catch(() => null);
     const probs = (chk?.problems || []).filter(p => p.para >= 1 && p.para <= ps.length && (p.words?.length || p.grammar?.length));
     if (!probs.length) break;
     stats.checked = (stats.checked || 0) + probs.length;
-    const fixUser = head + `\nEstos párrafos ya simplificados todavía tienen palabras o formas sobre el nivel ${lvLabel(lang, lvl)}. Reescríbelos para que TODO quede en el nivel: reemplaza lo marcado por palabras y estructuras más simples (o quita ese detalle si no es importante), sin cambiar los hechos.\n\nPÁRRAFOS (${probs.length}):\n` +
+    const fixUser = head + `\nEstos párrafos ya simplificados todavía tienen palabras o formas sobre el nivel ${lvLabel(lang, lvl)}. Aquí devuelve exactamente un párrafo por cada uno, en el mismo orden (sin juntar ni dividir), solo con el texto. Reescríbelos para que TODO quede en el nivel: reemplaza lo marcado por palabras y estructuras más simples (o quita ese detalle si no es importante), sin cambiar los hechos.\n\nPÁRRAFOS (${probs.length}):\n` +
       probs.map((p, k) => `[${k + 1}] ${ps[p.para - 1]}\n   (difícil: ${[...(p.words || []), ...(p.grammar || [])].join(', ')})`).join('\n\n');
     const fixed = await askRetry(model, sys, fixUser, SIMP_SCHEMA, { effort: 'low', maxTokens: 12000, ms: 180000, kind: 'simplify', retries: 6 }).catch(() => null);
     const fp = (fixed?.paras || []).map(x => String(x).trim());
@@ -1810,7 +1830,19 @@ async function simplifyChunk(b, ver, model, chunk, known, terms, stats, ctx = {}
     probs.forEach((p, k) => { if (fp[k]) ps[p.para - 1] = fp[k]; });
     stats.fixed = (stats.fixed || 0) + probs.length;
   }
-  return ps;
+  return { paras: ps, map };
+}
+// los párrafos devueltos ({n, text}) → textos y, para cada uno, el párrafo recibido (desde 0) al que corresponde.
+// Los n tienen que ir en orden, empezar en el primero y no saltarse demasiados (si no, se pide de nuevo).
+function alignParas(list, count){
+  const items = (list || []).map(x => ({ n: Math.round(+x?.n) - 1, text: String(x?.text || '').trim() })).filter(x => x.text);
+  if (!items.length) return null;
+  let last = -1;
+  for (const it of items) { if (!(it.n >= 0) || it.n >= count) return null; if (it.n < last) return null; last = it.n; }
+  if (items[0].n !== 0) items[0].n = 0;
+  const covered = new Set(items.map(x => x.n));
+  if (covered.size < Math.ceil(count * 0.5)) return null;   // se juntó demasiado: algo se perdió
+  return { ps: items.map(x => x.text), map: items.map(x => x.n) };
 }
 // antes de empezar: los nombres propios y términos clave del libro, con una sola forma para toda la versión
 async function bookGlossary(b, ver, model){
@@ -1854,13 +1886,17 @@ async function simplifyBook(b, lvl, model, only = null){
   for (const ch of chs) {
     const rec = await dbGet('text', `${b.id}|${ch}`); if (!rec) continue;
     const chunks = simpChunks(rec.paras);
-    chapters.set(ch, { rec, results: new Array(chunks.length), left: chunks.length, failed: false });
+    chapters.set(ch, { rec, results: new Array(chunks.length), starts: chunks.map(c => c.start), left: chunks.length, failed: false });
     chunks.forEach((c, i) => tasks.push({ ch, i, chunk: c.paras, ctx: chunkContext(rec.paras, c.start, c.start + c.paras.length) }));
   }
   job.totalParts = tasks.length; refreshViews();
   const chapterDone = async ch => {
     const c = chapters.get(ch);
-    await dbPut('simp', { k: `${b.id}|${lvl}|${ch}`, paras: c.results.flat(), heads: c.rec.heads });
+    const paras = [], map = [];
+    c.results.forEach((r, i) => { r.paras.forEach((t, j) => { paras.push(t); map.push(c.starts[i] + r.map[j]); }); });
+    const oh = new Set(c.rec.heads || []), heads = [];
+    map.forEach((o, i) => { if (oh.has(o) && (i === 0 || map[i - 1] !== o)) heads.push(i); });
+    await dbPut('simp', { k: `${b.id}|${lvl}|${ch}`, paras, map, heads });
     const fresh = await dbGet('books', b.id) || b; fresh.versions[lvl] = fresh.versions[lvl] || { model, done: [] }; fresh.versions[lvl].done[ch] = true; await dbPut('books', fresh);
     if (BOOK?.id === b.id) BOOK.versions = fresh.versions;
     Object.assign(b, { versions: fresh.versions });
@@ -1923,7 +1959,7 @@ function renderHeader(){
       <button class="ib" id="hSet" title="Ajustes">⚙</button>`;
     $('hBack').onclick = closeBook;
     $('hCh').onchange = e => { stop(); openChapter(CH.ver, +e.target.value); };
-    $('hVer').onchange = e => { stop(); openChapter(e.target.value, CH.ch, CUR.p, 0); };
+    $('hVer').onchange = e => { stop(); switchVersion(e.target.value); };
     $('hInfo').onclick = () => openBookPanel(BOOK.id);
   }
   $('hWords').onclick = () => openWords();
@@ -2285,7 +2321,7 @@ async function drawBook(id){
       <div class="bar"><i style="width:${job && job.totalParts ? 100 * job.doneParts / job.totalParts : 100 * d / b.chapters.length}%"></i></div>
       <div class="row" style="margin-top:6px"><button class="btn sec" data-readv="${lvl}">Leer</button>${d < b.chapters.length && !job ? `<button class="btn sec" data-cont="${lvl}">Completar</button>` : ''}${!job ? `<button class="btn sec" data-redo="${lvl}">Rehacer</button>` : ''}<button class="btn sec" data-del="${lvl}">Borrar</button></div></div>`;
   }
-  h += `<p class="small">Reescribe cada párrafo con vocabulario y gramática del nivel elegido, sin cambiar la historia: en el mismo idioma (simplificar) o en otro (traducir y adaptar). Los párrafos quedan alineados con el original (en la lectura, ¶ muestra el original). Puedes hacerlo con todo el libro o ir capítulo por capítulo mientras lees.</p>
+  h += `<p class="small">Reescribe cada párrafo con vocabulario y gramática del nivel elegido, sin cambiar la historia: en el mismo idioma (simplificar) o en otro (traducir y adaptar). Normalmente queda un párrafo por cada uno del original, pero el modelo puede juntar o dividir párrafos si la escena se entiende mejor; cada uno sabe de qué párrafos originales viene (en la lectura, ¶ muestra el original). Puedes hacerlo con todo el libro o ir capítulo por capítulo mientras lees.</p>
     <div class="field"><label>Idioma</label><select id="bTl">${Object.entries(LANGS).map(([k, L]) => `<option value="${k}" ${k === tl ? 'selected' : ''}>${L.native} · ${L.name}${k === lang ? ' (el del libro)' : ''}</option>`).join('')}</select></div>
     <div class="field"><label>Nivel</label><select id="bTgt">${CEFR.map(c => `<option value="${c}" ${c === tgt ? 'selected' : ''}>${esc(lvLabel(tl, c))}</option>`).join('')}</select></div>
     <div class="field"><label>Modelo para ${trn ? 'traducir' : 'simplificar'}</label><select id="bModel">${SIMP_MODELS.map(([m, l]) => `<option value="${m}" ${m === S.simpModel ? 'selected' : ''}>${esc(l)} · todo el libro ${cost(m)}</option>`).join('')}</select></div>
@@ -2310,7 +2346,7 @@ async function drawBook(id){
   $('pbody').querySelectorAll('[data-redo]').forEach(x => x.onclick = async () => {
     const v = x.dataset.redo;
     if (!confirm(`¿Rehacer la versión ${verName(b, v)}? Se borra lo hecho (y sus traducciones) y se vuelve a preparar todo el libro con ${mname(S.simpModel)}.`)) return;
-    if (BOOK?.id === id && CH?.ver === v) await openChapter('o', CH.ch, CUR.p, 0);
+    if (BOOK?.id === id && CH?.ver === v) await switchVersion('o');
     for (const st of ['simp', 'ana', 'expl']) await dbDelPrefix(st, `${id}|${v}|`);
     b.versions[v] = { model: S.simpModel, lang: verLang(b, v), done: [], date: Date.now() };
     await dbPut('books', b); if (BOOK?.id === id) BOOK.versions = b.versions;
@@ -2320,7 +2356,7 @@ async function drawBook(id){
   $('pbody').querySelectorAll('[data-del]').forEach(x => x.onclick = async () => {
     if (!confirm(`¿Borrar la versión ${verName(b, x.dataset.del)}?`)) return;
     delete b.versions[x.dataset.del]; await dbPut('books', b); await dbDelPrefix('simp', `${id}|${x.dataset.del}|`); await dbDelPrefix('ana', `${id}|${x.dataset.del}|`); await dbDelPrefix('expl', `${id}|${x.dataset.del}|`);
-    if (BOOK?.id === id) { BOOK.versions = b.versions; if (CH.ver === x.dataset.del) await openChapter('o', CH.ch, CUR.p, 0); }
+    if (BOOK?.id === id) { BOOK.versions = b.versions; if (CH.ver === x.dataset.del) await switchVersion('o'); }
     drawBook(id);
   });
   $('bExport').onclick = () => exportBooks([id], b.title);
