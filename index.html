@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Hablemos coreano</title>
-<link rel="stylesheet" href="comun.css?v=2026-11-14b">
+<link rel="stylesheet" href="comun.css?v=2026-11-14c">
 <style>
 
 
@@ -108,7 +108,7 @@ footer{display:flex;align-items:flex-end;gap:8px;padding:8px 12px calc(10px + en
 <div id="sheet" hidden></div>
 <div id="panel" hidden><div class="ph"><h2 id="ptitle"></h2><button class="ib" id="pclose">✕</button></div><div class="pb" id="pbody"></div></div>
 
-<script src="comun.js?v=2026-11-14b"></script>   <!-- (?v=: cambiarlo cuando cambie comun.js/css, para que el navegador no use una copia vieja) -->
+<script src="comun.js?v=2026-11-14c"></script>   <!-- (?v=: cambiarlo cuando cambie comun.js/css, para que el navegador no use una copia vieja) -->
 <script>
 'use strict';
 /* =====================================================================
@@ -116,7 +116,7 @@ footer{display:flex;align-items:flex-end;gap:8px;padding:8px 12px calc(10px + en
    Todo vive en el navegador: las claves, la conversación y el diccionario.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-14 · 7';   // (subir en cada cambio: sirve para confirmar que el navegador tiene la última)
+const APP_VERSION = '2026-11-14 · 8';   // (subir en cada cambio: sirve para confirmar que el navegador tiene la última)
 
 /* ---------- niveles: vocabulario y gramática ---------- */
 // [palabra, categoría, significado]
@@ -1521,6 +1521,7 @@ function refreshSheet(){
   if (DICT[lemma]) { const d = DICT[lemma], pr = wordProgress(lemma); h += `<div class="small" style="margin-top:6px">Dominio: <b>${pr} %</b>${d.status === 'conocida' ? ' · ya la sabes' : ''} · la oíste sin mirarla ${d.heard || 0} ${d.heard === 1 ? 'vez' : 'veces'}, la usaste ${d.used || 0}</div><div class="bar"><i style="width:${pr}%"></i></div>`; }
   if (!lemma && !gloss) h += `<div class="small">Todavía no está analizada. Toca «Explicar» para que el modelo caro la analice.</div>`;
   if (SHEET.ctx) h += `<div class="sec-t">En esta oración</div><div class="form">${esc(SHEET.ctx)}</div>`;
+  if (e?.detailed && e.related === undefined && !SHEET.busy) { const s0 = SHEET; ensureRelated(e, 'coreano', S.chatModel, 'chat', () => { saveDict(); if (SHEET === s0) refreshSheet(); }); }
   if (e && !e.fromLevel) h += entryHTML(e);
   if (lemma && pendingDefs.has(lemma)) h += `<div class="busy" style="margin-top:8px">Preparando la definición completa…</div>`;
   if (SHEET.busy) h += `<div class="busy" style="margin-top:8px">El profesor (${esc(MODELS[S.defModel]?.name || S.defModel)}) está explicando…</div>`;
@@ -1655,6 +1656,7 @@ function drawDict(){
     d.querySelector('.top').onclick = () => { DOPEN = DOPEN === e.lemma ? '' : e.lemma; if (DOPEN) VIEWED.add(e.lemma); drawDict(); };
     if (DOPEN === e.lemma) {
       const body = document.createElement('div');
+      if (e.detailed && e.related === undefined) ensureRelated(e, 'coreano', S.chatModel, 'chat', () => { saveDict(); if (DOPEN === e.lemma) drawDict(); });
       body.innerHTML = `<div class="rom">${esc(romanize(e.lemma))}${e.level ? ` · ${esc(LV(e.level).name)}` : ''} · visto ${e.seen || 0} ${e.seen === 1 ? 'vez' : 'veces'}</div>` + entryHTML(e) +
         (!e.detailed ? `<div class="small" style="margin-top:6px">Sin definición completa todavía.</div>` : '') +
         `<div class="row"><button class="btn" data-a="def">${e.detailed ? 'Rehacer definición' : 'Completar con IA'}</button><button class="btn sec" data-a="known">${e.status === 'conocida' ? 'Marcar por aprender' : 'Ya la sé ✓'}</button><button class="btn sec" data-a="del">Borrar</button></div>`;

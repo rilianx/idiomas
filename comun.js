@@ -251,6 +251,19 @@ function placeTip(tip, el){
 // palabras relacionadas (las que se aprenden juntas: posiciones, colores, momentos del día…), para la ficha de una palabra
 const RELATED = { type: 'array', items: obj({ group: STR, words: { type: 'array', items: obj({ t: STR, gloss: STR }) } }) };
 const relatedRule = langName => `- related: 1 a 3 grupos de palabras que se aprenden junto con esta, de su misma serie o campo (p. ej. para «abajo»: arriba, al lado, delante, detrás…; para un color: otros colores; para «mañana»: tarde, noche, mediodía…; para un verbo: su opuesto y verbos de la misma situación). Cada grupo: group, su nombre corto en español; words, 4 a 8 palabras comunes y útiles en ${langName} (t, en forma de diccionario; gloss, en español en 1 a 3 palabras), con los opuestos si los hay y sin repetir la palabra consultada. [] si no tiene una serie natural (p. ej. una partícula o una palabra muy específica).`;
+// las palabras que ya tenían su ficha sin las relacionadas: se piden solas (un pedido corto y barato) al abrirla
+const REL_BUSY = new Set(), REL_FAIL = new Set();
+async function ensureRelated(e, langName, model, kind, done){
+  if (!e?.lemma || e.related !== undefined || REL_BUSY.has(e.lemma) || REL_FAIL.has(e.lemma)) return;
+  REL_BUSY.add(e.lemma);
+  try {
+    const out = await ask(model, `Eres profesor de ${langName} para hispanohablantes.\n` + relatedRule(langName),
+      `PALABRA: «${e.lemma}»${e.gloss ? ` (${e.gloss})` : ''}${e.pos ? ` · ${e.pos}` : ''}`, obj({ related: RELATED }), { effort: 'low', maxTokens: 2000, ms: 60000, kind, fast: true });
+    e.related = out.related || [];
+  } catch (err) { REL_FAIL.add(e.lemma); console.warn('palabras relacionadas:', err.message); }
+  finally { REL_BUSY.delete(e.lemma); }
+  done?.();
+}
 function entryHTML(e, { lang = 'ko', extra = 'Hanja', sentence = false, maxForms = 40 } = {}){
   const say = t => `<span class="tx" lang="${lang}" data-say="${esc(t)}" style="cursor:pointer">`;
   let h = '';
@@ -264,6 +277,7 @@ function entryHTML(e, { lang = 'ko', extra = 'Hanja', sentence = false, maxForms
   const forms = Object.entries(e.forms || {}).slice(0, maxForms);
   if (forms.length) h += `<div class="sec-t">Formas que has visto</div>${inline(forms)}`;
   if (e.examples?.length) h += `<div class="sec-t">Ejemplos</div>${e.examples.map(x => `<div class="ex">${say(x.ko)}🔊 ${esc(x.ko)}</span><br><span class="small">${esc(x.es)}</span></div>`).join('')}`;
+  if (e.related === undefined && REL_BUSY.has(e.lemma)) h += `<div class="sec-t">Palabras relacionadas</div><div class="busy small">buscando…</div>`;
   if (e.related?.length) h += `<div class="sec-t">Palabras relacionadas</div>${e.related.map(g => `<div class="rel"><span class="small">${esc(g.group)}:</span> ${(g.words || []).map(w => `${say(w.t)}<b>${esc(w.t)}</b></span> <span class="small">${esc(w.gloss)}</span>`).join(' · ')}</div>`).join('')}`;
   if (sentence && e.sentence) h += `<div class="sec-t">Donde la viste</div><div class="small" lang="${lang}">${esc(e.sentence)}</div>`;
   return h;

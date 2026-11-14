@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Leamos · lector</title>
-<link rel="stylesheet" href="comun.css?v=2026-11-14b">
+<link rel="stylesheet" href="comun.css?v=2026-11-14c">
 <style>
 header select{height:38px;border:1px solid var(--line);border-radius:10px;background:var(--card);padding:0 6px;max-width:34vw;min-width:0;font-size:14px}
 
@@ -116,7 +116,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
 <div id="sheet" hidden></div>
 <div id="panel" hidden><div class="ph"><h2 id="ptitle"></h2><button class="ib" id="pclose">✕</button></div><div class="pb" id="pbody"></div></div>
 
-<script src="comun.js?v=2026-11-14b"></script>   <!-- (?v=: cambiarlo cuando cambie comun.js/css, para que el navegador no use una copia vieja) -->
+<script src="comun.js?v=2026-11-14c"></script>   <!-- (?v=: cambiarlo cuando cambie comun.js/css, para que el navegador no use una copia vieja) -->
 <script>
 'use strict';
 /* =====================================================================
@@ -127,7 +127,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-14 · 51';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-14 · 52';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -1614,6 +1614,7 @@ function refreshSheet(){
     h += srsHTML(e);
     SHEET._chips = SHEET.points?.length ? gramSection(SHEET.points.map(p => { const e = loadGram(lang)[p.id || gramId(p.pattern)]; return { pattern: p.pattern, point: p.pattern, title: p.title, desc: e?.desc || '' }; }), lang) : '';
     if (SHEET.ctx) h += `<div class="sec-t">En esta oración${SHEET.saved ? ' <span style="text-transform:none;letter-spacing:0">· guardada</span>' : ''}</div><div class="form">${esc(SHEET.ctx)}</div>`;
+    if (e?.detailed && e.related === undefined && SHEET.busy !== 'def') { const s0 = SHEET; ensureRelated(e, LANGS[lang].name, S.chatModel, 'read', () => { touch(l); if (SHEET === s0) refreshSheet(); }); }
     if (e) h += entryHTML(e, { lang, extra: LANGS[lang]?.extra || 'Nota', sentence: true, maxForms: 12 });
     if (SHEET._chips) h += SHEET._chips;
     if (SHEET.busy === 'ana') h += `<div class="busy" style="margin-top:8px">Analizando el párrafo…</div>`;
