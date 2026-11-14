@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Leamos · lector</title>
-<link rel="stylesheet" href="comun.css?v=2026-11-10b">
+<link rel="stylesheet" href="comun.css?v=2026-11-14">
 <style>
 header select{height:38px;border:1px solid var(--line);border-radius:10px;background:var(--card);padding:0 6px;max-width:34vw;min-width:0;font-size:14px}
 
@@ -116,7 +116,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
 <div id="sheet" hidden></div>
 <div id="panel" hidden><div class="ph"><h2 id="ptitle"></h2><button class="ib" id="pclose">✕</button></div><div class="pb" id="pbody"></div></div>
 
-<script src="comun.js?v=2026-11-10b"></script>   <!-- (?v=: cambiarlo cuando cambie comun.js/css, para que el navegador no use una copia vieja) -->
+<script src="comun.js?v=2026-11-14"></script>   <!-- (?v=: cambiarlo cuando cambie comun.js/css, para que el navegador no use una copia vieja) -->
 <script>
 'use strict';
 /* =====================================================================
@@ -127,7 +127,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-12 · 49';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-14 · 50';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -655,7 +655,7 @@ function partialSentences(raw){
 const GPOINTS = { type: 'array', items: obj({ pattern: STR, title: STR, desc: STR, level: { type: 'string', enum: CEFR } }) };
 const GLESSON_SCHEMA = obj({ explanation: STR, formation: STR, examples: { type: 'array', items: obj({ text: STR, es: STR }) }, mistakes: STR });
 const ENTRY = obj({ query: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, meaning: STR, explanation: STR, hanja: STR, irregular: STR,
-  conjugations: { type: 'array', items: obj({ form: STR, label: STR }) }, examples: { type: 'array', items: obj({ text: STR, es: STR }) }, in_context: STR, points: GPOINTS });
+  conjugations: { type: 'array', items: obj({ form: STR, label: STR }) }, examples: { type: 'array', items: obj({ text: STR, es: STR }) }, related: RELATED, in_context: STR, points: GPOINTS });
 // explicar un trozo, en dos pedidos a la vez: la traducción (modelo barato, rápida) y la explicación (modelo caro);
 // el palabra por palabra sale del análisis del párrafo, que ya está
 const PHRASE_TR_SCHEMA = obj({ translation: STR, literal: STR });
@@ -712,6 +712,7 @@ function defSystem(lang){
     '- irregular: si es un verbo o adjetivo irregular, de qué tipo y cómo cambia, o "".',
     '- conjugations: para verbos y adjetivos, 6 a 8 formas comunes con su etiqueta en español; para otras categorías, [].',
     `- examples: 2 oraciones de ejemplo cortas y naturales en ${L.name} (text) con su traducción (es).`,
+    relatedRule(L.name),
     pointsRule('esa palabra tal como está en la oración (su forma)'),
     '- in_context: explica con detalle (2 a 4 frases) qué significa la palabra EN ESA oración del libro, qué forma tiene y qué aporta (conjugación, partícula, matiz, registro), usando las oraciones anteriores si vienen.',
     'Sé exacto: no inventes formas ni significados.'
@@ -1581,7 +1582,7 @@ async function explainWord(){
     const l = lemmaOf({ lemma: x.lemma || sh.tok.lemma, pos: x.pos }) || lemmaOf(sh.tok);
     const e = DICT[l] || ensureEntry({ ...sh.tok, lemma: l, pos: x.pos, gloss: x.gloss }, sent);
     Object.assign(e, { pos: x.pos || e.pos, gloss: e.gloss || x.gloss, meaning: x.meaning, explanation: x.explanation, hanja: x.hanja, irregular: x.irregular,
-      conjugations: x.conjugations || [], examples: (x.examples || []).map(ex => ({ ko: ex.text, es: ex.es })), detailed: true });
+      conjugations: x.conjugations || [], examples: (x.examples || []).map(ex => ({ ko: ex.text, es: ex.es })), related: x.related || [], detailed: true });
     touch(l);
     const pts = registerPoints(x.points, { key: wordKey(sh), kind: 'word', word: sh.tok.t, lemma: l, text: sent, ctx: x.in_context || '', ...refPlace(sh.p, sh.si) }, lang);
     if (x.in_context) dbPut('expl', { k: wordKey(sh), ctx: x.in_context, lemma: l, points: pts, date: Date.now() });

@@ -248,6 +248,9 @@ function placeTip(tip, el){
 /* ---------- la ficha de una palabra del diccionario ----------
    e: { meaning, explanation, hanja, irregular, conjugations, forms, examples: [{ ko, es }], sentence }
    extra: cómo se llama el campo hanja en ese idioma (Hanja, Pronunciación, Pinyin…) */
+// palabras relacionadas (las que se aprenden juntas: posiciones, colores, momentos del día…), para la ficha de una palabra
+const RELATED = { type: 'array', items: obj({ group: STR, words: { type: 'array', items: obj({ t: STR, gloss: STR }) } }) };
+const relatedRule = langName => `- related: 1 a 3 grupos de palabras que se aprenden junto con esta, de su misma serie o campo (p. ej. para «abajo»: arriba, al lado, delante, detrás…; para un color: otros colores; para «mañana»: tarde, noche, mediodía…; para un verbo: su opuesto y verbos de la misma situación). Cada grupo: group, su nombre corto en español; words, 4 a 8 palabras comunes y útiles en ${langName} (t, en forma de diccionario; gloss, en español en 1 a 3 palabras), con los opuestos si los hay y sin repetir la palabra consultada. [] si no tiene una serie natural (p. ej. una partícula o una palabra muy específica).`;
 function entryHTML(e, { lang = 'ko', extra = 'Hanja', sentence = false, maxForms = 40 } = {}){
   const say = t => `<span class="tx" lang="${lang}" data-say="${esc(t)}" style="cursor:pointer">`;
   let h = '';
@@ -259,6 +262,7 @@ function entryHTML(e, { lang = 'ko', extra = 'Hanja', sentence = false, maxForms
   const forms = Object.entries(e.forms || {}).slice(0, maxForms);
   if (forms.length) h += `<div class="sec-t">Formas que has visto</div><div class="conj">${forms.map(([f, l]) => `${say(f)}${esc(f)}</span><span>${esc(l || '—')}</span>`).join('')}</div>`;
   if (e.examples?.length) h += `<div class="sec-t">Ejemplos</div>${e.examples.map(x => `<div class="ex">${say(x.ko)}🔊 ${esc(x.ko)}</span><br><span class="small">${esc(x.es)}</span></div>`).join('')}`;
+  if (e.related?.length) h += `<div class="sec-t">Palabras relacionadas</div>${e.related.map(g => `<div class="rel"><span class="small">${esc(g.group)}:</span> ${(g.words || []).map(w => `${say(w.t)}<b>${esc(w.t)}</b></span> <span class="small">${esc(w.gloss)}</span>`).join(' · ')}</div>`).join('')}`;
   if (sentence && e.sentence) h += `<div class="sec-t">Donde la viste</div><div class="small" lang="${lang}">${esc(e.sentence)}</div>`;
   return h;
 }
