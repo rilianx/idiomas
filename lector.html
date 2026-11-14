@@ -127,7 +127,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-14 · 52';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-14 · 53';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -654,8 +654,8 @@ function partialSentences(raw){
 // los puntos gramaticales que aparecen en una palabra o un trozo (para la sección de gramática)
 const GPOINTS = { type: 'array', items: obj({ pattern: STR, title: STR, desc: STR, level: { type: 'string', enum: CEFR } }) };
 const GLESSON_SCHEMA = obj({ explanation: STR, formation: STR, examples: { type: 'array', items: obj({ text: STR, es: STR }) }, mistakes: STR });
-const ENTRY = obj({ query: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, meaning: STR, explanation: STR, hanja: STR, irregular: STR,
-  conjugations: { type: 'array', items: obj({ form: STR, label: STR }) }, examples: { type: 'array', items: obj({ text: STR, es: STR }) }, related: RELATED, in_context: STR, points: GPOINTS });
+const ENTRY = obj({ query: STR, lemma: STR, pos: { type: 'string', enum: POS }, gloss: STR, in_context: STR, meaning: STR, explanation: STR, hanja: STR, irregular: STR,
+  conjugations: { type: 'array', items: obj({ form: STR, label: STR }) }, examples: { type: 'array', items: obj({ text: STR, es: STR }) }, related: RELATED, points: GPOINTS });
 // explicar un trozo, en dos pedidos a la vez: la traducción (modelo barato, rápida) y la explicación (modelo caro);
 // el palabra por palabra sale del análisis del párrafo, que ya está
 const PHRASE_TR_SCHEMA = obj({ translation: STR, literal: STR });
@@ -1578,7 +1578,11 @@ async function explainWord(){
     const lang = LANG(), sent = sentText(sh.p, sh.si).trim();
     const user = `LIBRO: «${BOOK.title}»\nNIVEL DEL LECTOR: ${myLevel(lang)}\n` + (prevSentences(sh.p, sh.si) ? `ORACIONES ANTERIORES: ${prevSentences(sh.p, sh.si)}\n` : '') +
       gramKnown(lang) + `ORACIÓN: «${sent}»\nPALABRA: «${sh.tok.t}»` + (sh.tok.lemma ? ` (forma de diccionario probable: ${sh.tok.lemma})` : '');
-    const x = await askRetry(S.defModel, defSystem(lang), user, ENTRY, { effort: 'low', maxTokens: 12000, ms: 150000, kind: 'explain' });
+    // se va escribiendo a medida que llega: lo de esta oración, el significado y la explicación
+    let raf = 0;
+    const onText = raw => { sh.live = { ctx: partialString(raw, 'in_context'), meaning: partialString(raw, 'meaning'), explanation: partialString(raw, 'explanation') };
+      if (!raf) raf = requestAnimationFrame(() => { raf = 0; if (SHEET === sh && sh.busy === 'def') refreshSheet(); }); };
+    const x = await askRetry(S.defModel, defSystem(lang), user, ENTRY, { effort: 'low', maxTokens: 12000, ms: 150000, kind: 'explain', onText });
     const l = lemmaOf({ lemma: x.lemma || sh.tok.lemma, pos: x.pos }) || lemmaOf(sh.tok);
     const e = DICT[l] || ensureEntry({ ...sh.tok, lemma: l, pos: x.pos, gloss: x.gloss }, sent);
     Object.assign(e, { pos: x.pos || e.pos, gloss: e.gloss || x.gloss, meaning: x.meaning, explanation: x.explanation, hanja: x.hanja, irregular: x.irregular,
@@ -1588,7 +1592,7 @@ async function explainWord(){
     if (x.in_context) dbPut('expl', { k: wordKey(sh), ctx: x.in_context, lemma: l, points: pts, date: Date.now() });
     if (SHEET === sh) { sh.ctx = x.in_context || ''; sh.points = pts; sh.saved = 0; if (l !== lemmaOf(sh.tok)) sh.tok = { ...sh.tok, lemma: l, pos: x.pos || sh.tok.pos }; }
   } catch (err) { if (SHEET === sh) sh.err = 'No se pudo explicar: ' + errText(err); }
-  if (SHEET === sh) { sh.busy = false; refreshSheet(); }
+  if (SHEET === sh) { sh.busy = false; sh.live = null; refreshSheet(); }
 }
 function showSheet(){ $('veil').hidden = false; $('sheet').hidden = false; $('sheet').scrollTop = 0; }
 function closeSheet(){ SHEET = null; $('veil').hidden = true; $('sheet').hidden = true; if (CH && !CH.missing) document.querySelectorAll('#book .para').forEach(el => { const p = +el.dataset.p; if (Math.abs(p - CUR.p) < 40) rerenderPara(p); }); }
@@ -1613,9 +1617,12 @@ function refreshSheet(){
     if (tok.form) h += `<div class="form">${esc(tok.form)}</div>`;
     h += srsHTML(e);
     SHEET._chips = SHEET.points?.length ? gramSection(SHEET.points.map(p => { const e = loadGram(lang)[p.id || gramId(p.pattern)]; return { pattern: p.pattern, point: p.pattern, title: p.title, desc: e?.desc || '' }; }), lang) : '';
-    if (SHEET.ctx) h += `<div class="sec-t">En esta oración${SHEET.saved ? ' <span style="text-transform:none;letter-spacing:0">· guardada</span>' : ''}</div><div class="form">${esc(SHEET.ctx)}</div>`;
+    const live = SHEET.busy === 'def' ? SHEET.live : null;
+    if (SHEET.ctx && !live?.ctx) h += `<div class="sec-t">En esta oración${SHEET.saved ? ' <span style="text-transform:none;letter-spacing:0">· guardada</span>' : ''}</div><div class="form">${esc(SHEET.ctx)}</div>`;
+    if (live?.ctx) h += `<div class="sec-t">En esta oración</div><div class="form">${esc(live.ctx)} ▍</div>`;
+    if (live && (live.meaning || live.explanation)) h += (live.meaning ? `<div class="sec-t">Significado</div><div>${esc(live.meaning)}</div>` : '') + (live.explanation ? `<div class="sec-t">Explicación</div><div>${esc(live.explanation)} ▍</div>` : '');
     if (e?.detailed && e.related === undefined && SHEET.busy !== 'def') { const s0 = SHEET; ensureRelated(e, LANGS[lang].name, S.chatModel, 'read', () => { touch(l); if (SHEET === s0) refreshSheet(); }); }
-    if (e) h += entryHTML(e, { lang, extra: LANGS[lang]?.extra || 'Nota', sentence: true, maxForms: 12 });
+    if (e && !(live && (live.meaning || live.explanation))) h += entryHTML(e, { lang, extra: LANGS[lang]?.extra || 'Nota', sentence: true, maxForms: 12 });
     if (SHEET._chips) h += SHEET._chips;
     if (SHEET.busy === 'ana') h += `<div class="busy" style="margin-top:8px">Analizando el párrafo…</div>`;
     if (SHEET.busy === 'def') h += `<div class="busy" style="margin-top:8px">El profesor (${esc(mname(S.defModel))}) está explicando…</div>`;

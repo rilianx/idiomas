@@ -116,7 +116,7 @@ footer{display:flex;align-items:flex-end;gap:8px;padding:8px 12px calc(10px + en
    Todo vive en el navegador: las claves, la conversación y el diccionario.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-14 · 8';   // (subir en cada cambio: sirve para confirmar que el navegador tiene la última)
+const APP_VERSION = '2026-11-14 · 9';   // (subir en cada cambio: sirve para confirmar que el navegador tiene la última)
 
 /* ---------- niveles: vocabulario y gramática ---------- */
 // [palabra, categoría, significado]
@@ -1022,7 +1022,20 @@ async function explainSentence(m){
   m.sawEs = true; msgLemmas(m).forEach(l => VIEWED.add(l));
   m.explBusy = true; m.explErr = ''; renderAll();
   try {
-    const x = await ask(S.defModel, SENT_SYSTEM, seenGrammarText() + ctxBlock(m, 'FRASE A EXPLICAR (la dijo ' + (m.role === 'me' ? 'el estudiante' : '지수') + '): «' + m.ko + '»'), SENT_SCHEMA, { effort: 'low', maxTokens: 16000, ms: 150000, kind: 'explain' });
+    // se va escribiendo debajo de la frase a medida que llega (traducción, contexto y explicación)
+    let raf = 0;
+    const onText = raw => {
+      const tr = partialString(raw, 'translation'), ex = partialString(raw, 'explanation'), cx = partialString(raw, 'context');
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        const host = document.querySelector(`.msg[data-id="${m.id}"]`); if (!host || !m.explBusy) return;
+        let live = host.querySelector('.es.live');
+        if (!live) { live = document.createElement('div'); live.className = 'es live'; live.hidden = false; host.appendChild(live); }
+        live.innerHTML = (tr ? `<div><b style="color:var(--fg)">${esc(tr)}</b></div>` : '') + (cx ? `<div class="form">💬 ${esc(cx)}</div>` : '') + (ex ? `<div class="sec-t">Explicación</div>${paras(ex + ' ▍')}` : '<div class="busy small">explicando…</div>');
+      });
+    };
+    const x = await ask(S.defModel, SENT_SYSTEM, seenGrammarText() + ctxBlock(m, 'FRASE A EXPLICAR (la dijo ' + (m.role === 'me' ? 'el estudiante' : '지수') + '): «' + m.ko + '»'), SENT_SCHEMA, { effort: 'low', maxTokens: 16000, ms: 150000, kind: 'explain', onText });
     m.expl = x; m.showExpl = true;
     const before = extGrammarCount(); noteExtGrammar(x.new_grammar); saveExt(); m.explGrammar = extGrammarCount() - before;
     // las palabras explicadas quedan en el diccionario (sin contar como vistas otra vez)
