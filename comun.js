@@ -258,9 +258,11 @@ function entryHTML(e, { lang = 'ko', extra = 'Hanja', sentence = false, maxForms
   if (e.explanation) h += `<div class="sec-t">Explicación</div><div>${esc(e.explanation)}</div>`;
   if (e.hanja) h += `<div class="small" style="margin-top:6px">${esc(extra)}: ${esc(e.hanja)}</div>`;
   if (e.irregular) h += `<div class="form">⚠ ${esc(e.irregular)}</div>`;
-  if (e.conjugations?.length) h += `<div class="sec-t">Conjugación</div><div class="conj">${e.conjugations.map(c => `${say(c.form)}${esc(c.form)}</span><span>${esc(c.label)}</span>`).join('')}</div>`;
+  // en línea, como las palabras relacionadas: forma (etiqueta) · forma (etiqueta)… (ocupa mucho menos que una tabla)
+  const inline = list => `<div class="rel">${list.map(([f, l]) => `${say(f)}<b>${esc(f)}</b></span> <span class="small">${esc(l || '—')}</span>`).join(' · ')}</div>`;
+  if (e.conjugations?.length) h += `<div class="sec-t">Conjugación</div>${inline(e.conjugations.map(c => [c.form, c.label]))}`;
   const forms = Object.entries(e.forms || {}).slice(0, maxForms);
-  if (forms.length) h += `<div class="sec-t">Formas que has visto</div><div class="conj">${forms.map(([f, l]) => `${say(f)}${esc(f)}</span><span>${esc(l || '—')}</span>`).join('')}</div>`;
+  if (forms.length) h += `<div class="sec-t">Formas que has visto</div>${inline(forms)}`;
   if (e.examples?.length) h += `<div class="sec-t">Ejemplos</div>${e.examples.map(x => `<div class="ex">${say(x.ko)}🔊 ${esc(x.ko)}</span><br><span class="small">${esc(x.es)}</span></div>`).join('')}`;
   if (e.related?.length) h += `<div class="sec-t">Palabras relacionadas</div>${e.related.map(g => `<div class="rel"><span class="small">${esc(g.group)}:</span> ${(g.words || []).map(w => `${say(w.t)}<b>${esc(w.t)}</b></span> <span class="small">${esc(w.gloss)}</span>`).join(' · ')}</div>`).join('')}`;
   if (sentence && e.sentence) h += `<div class="sec-t">Donde la viste</div><div class="small" lang="${lang}">${esc(e.sentence)}</div>`;
