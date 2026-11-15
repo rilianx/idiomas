@@ -142,7 +142,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-16 · 60';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-16 · 61';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -853,9 +853,13 @@ const origOf = p => CH?.map?.[p] ?? p;
 const fromOrig = (map, o) => { if (!map) return o; const i = map.findIndex(x => x >= o); return i < 0 ? map.length - 1 : (map[i] > o && i > 0 ? i - 1 : i); };
 // abrir otra versión del mismo capítulo, en el mismo lugar
 const switchVersion = ver => openChapter(ver, CH.ch, origOf(CUR.p), 0, true);
-async function openChapter(ver, ch, p = 0, s = 0, orig = false){
+// sin posición: el capítulo se abre donde quedó la última vez (y, si lo terminaste, al final, junto a los ejercicios)
+const chKey = (ver, ch) => `${ver}|${ch}`;
+async function openChapter(ver, ch, p, s = 0, orig = false){
   if (!BOOK.versions[ver]) ver = 'o';
   ch = Math.max(0, Math.min(BOOK.chapters.length - 1, ch));
+  const saved = p === undefined ? BOOK.chPos?.[chKey(ver, ch)] : null;
+  if (p === undefined) { p = saved?.p || 0; s = saved?.s || 0; }
   let rec = ver === 'o' ? await dbGet('text', `${BOOK.id}|${ch}`) : await dbGet('simp', `${BOOK.id}|${ver}|${ch}`);
   const missing = !rec;
   if (missing) rec = await dbGet('text', `${BOOK.id}|${ch}`);
@@ -879,7 +883,20 @@ async function openChapter(ver, ch, p = 0, s = 0, orig = false){
   }
   renderReader();
   setCursor(CUR.p, CUR.s, { scroll: 'instant' });
+  if (saved?.end) document.querySelector('#book .chend')?.scrollIntoView({ block: 'center', behavior: 'instant' });
+  else if (saved?.top > CUR.p) document.querySelector(`#book .para[data-p="${saved.top}"]`)?.scrollIntoView({ block: 'center', behavior: 'instant' });
   prefetchVisible();
+}
+// dónde va la lectura de cada capítulo: la oración marcada, el primer párrafo a la vista y si llegaste al final
+function chapterSpot(){
+  if (!BOOK || !CH || CH.missing) return;
+  const v = $('view').getBoundingClientRect(), k = chKey(CH.ver, CH.ch), cp = (BOOK.chPos = BOOK.chPos || {})[k] || {};
+  let top = null;
+  for (const el of document.querySelectorAll('#book .para')) { const r = el.getBoundingClientRect(); if (r.bottom > v.top + v.height * 0.25) { top = +el.dataset.p; break; } }
+  const end = document.querySelector('#book .chend'), er = end?.getBoundingClientRect();
+  const fin = !!er && er.top < v.bottom - 40;
+  BOOK.chPos[k] = { ...cp, p: CUR.p, s: CUR.s, top, end: fin || (cp.end && top === cp.top) };
+  savePos();
 }
 
 /* ---------- analizar párrafos (modelo barato), con una cola ---------- */
@@ -1250,7 +1267,7 @@ function setCursor(p, s, { scroll = 'smooth' } = {}){
       $('view').scrollBy({ top: r.top - v.top - v.height * (minTop + 0.08), behavior: scroll === 'instant' ? 'instant' : 'smooth' });
     }
   }
-  BOOK.pos = { ver: CH.ver, ch: CH.ch, p, s }; savePos();
+  BOOK.pos = { ver: CH.ver, ch: CH.ch, p, s }; (BOOK.chPos = BOOK.chPos || {})[chKey(CH.ver, CH.ch)] = { ...BOOK.chPos[chKey(CH.ver, CH.ch)], p, s }; savePos();
   prefetch(); showTr(); updateInfo();
 }
 let posTimer = 0;
@@ -1627,7 +1644,7 @@ function hideTip(){ TIP_EL = null; TIP_WAIT = null; TIP_KEY = null; const t = $(
 let silentTick = 0;
 $('view').addEventListener('scroll', () => {
   hideTip(); hideSelBtn(); prefetchVisible();
-  if (!silentTick) silentTick = setTimeout(() => { silentTick = 0; silentRead(); }, 150);
+  if (!silentTick) silentTick = setTimeout(() => { silentTick = 0; silentRead(); chapterSpot(); }, 150);
 }, { passive: true });
 
 /* ---------- ficha de la palabra ---------- */
