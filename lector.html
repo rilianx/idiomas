@@ -7,6 +7,7 @@
 <link rel="stylesheet" href="comun.css?v=2026-11-14c">
 <style>
 header select{height:38px;border:1px solid var(--line);border-radius:10px;background:var(--card);padding:0 6px;max-width:34vw;min-width:0;font-size:14px}
+@media (max-width:480px){header{gap:5px;padding:8px}header .ib{min-width:34px;height:36px;padding:0 5px}header select{flex:1 1 0;max-width:none;padding:0 3px}header .sp{display:none}}
 
 #view{flex:1;overflow-y:auto;position:relative}
 /* la parte de arriba se va desvaneciendo: la vista se queda un poco más abajo (lo que se desvanece ya se leyó) */
@@ -120,7 +121,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
   <button class="big" id="pPlay" title="Leer en voz alta (espacio)">▶</button>
   <button class="ib" id="pNext" title="Siguiente oración (→)">⏭</button>
   <button class="ib" id="pRate" title="Velocidad de la voz">1×</button>
-  <button class="ib" id="pTr" title="Traducir la oración marcada (T)">文<span class="lbl">Oración</span></button>
+  <button class="ib" id="pTr" title="Explicar en detalle la oración marcada (T)">🎓<span class="lbl">Detalle</span></button>
   <button class="ib" id="pOrig" title="Ver el párrafo original" hidden>¶<span class="lbl">Original</span></button>
   <span class="grow" id="pInfo"></span>
 </footer>
@@ -142,7 +143,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-16 · 61';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-16 · 62';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -2071,7 +2072,8 @@ function renderHeader(){
     h.innerHTML = `<button class="ib" id="hBack" title="Biblioteca">←</button>
       <select id="hCh" title="Capítulo">${BOOK.chapters.map((c, i) => `<option value="${i}" ${i === CH?.ch ? 'selected' : ''}>${esc((i + 1) + '. ' + c.title).slice(0, 60)}</option>`).join('')}</select>
       <select id="hVer" title="Versión">${[['o', 'Original'], ...vers.map(v => { const d = (BOOK.versions[v].done || []).filter(Boolean).length; return [v, `${verName(BOOK, v)} ${verKind(BOOK, v)}${d < BOOK.chapters.length ? ` (${d}/${BOOK.chapters.length})` : ''}`]; })].map(([v, l]) => `<option value="${v}" ${v === CH?.ver ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>
-      <span style="flex:1"></span>
+      <span class="sp" style="flex:1"></span>
+      <button class="ib" id="hEx" title="Ejercicios del capítulo">🧠</button>
       <button class="ib" id="hInfo" title="Nivel y versiones del libro">ℹ</button>
       <button class="ib" id="hWords" title="Mis palabras">📖</button>
       <button class="ib" id="hGram" title="Gramática">📐</button>
@@ -2080,6 +2082,7 @@ function renderHeader(){
     $('hCh').onchange = e => { stop(); openChapter(CH.ver, +e.target.value); };
     $('hVer').onchange = e => { stop(); switchVersion(e.target.value); };
     $('hInfo').onclick = () => openBookPanel(BOOK.id);
+    $('hEx').onclick = () => { if (CH && !CH.missing) { stop(); openExercises(); } };
   }
   $('hWords').onclick = () => openWords();
   $('hGram').onclick = () => openGram();
@@ -2094,7 +2097,7 @@ function updateInfo(){
   const inCh = CH.paras.slice(0, CUR.p).reduce((a, t) => a + t.length, 0) * (BOOK.chapters[CH.ch]?.chars || 1) / Math.max(1, CH.paras.reduce((a, t) => a + t.length, 0));
   $('pInfo').textContent = `${Math.round(100 * (before + inCh) / Math.max(1, total))} % · cap. ${CH.ch + 1}/${BOOK.chapters.length}`;
   $('pOrig').hidden = CH.ver === 'o';
-  $('pTr').classList.toggle('on', !!S.showTr || !!(TR_ONCE && TR_ONCE.p === CUR.p && TR_ONCE.s === CUR.s)); $('pOrig').classList.toggle('on', SHOW_ORIG);
+  $('pOrig').classList.toggle('on', SHOW_ORIG);
   $('pRate').textContent = (Math.round(S.rate * 100) / 100).toString().replace('.', ',') + '×';
 }
 function closeBook(){ stop(); savePosNow(); flushDict(); BOOK = null; CH = null; ANA.clear(); $('view').classList.remove('fade'); $('player').hidden = true; $('starBadge').hidden = true; $('trbox').hidden = true; drawLibrary(); }
@@ -2734,7 +2737,7 @@ function openSettings(){
       <div class="field"><label>Revisar el nivel de la simplificación</label>${sel('mCheck', [...CHAT_MODELS, ...DEF_MODELS.filter(([m]) => !CHAT_MODELS.some(c => c[0] === m))], CHECK_MODEL())}<div class="small">Busca palabras y gramática sobre el nivel en cada parte. Uno barato suele bastar; uno mejor detecta más.</div></div>
       <label class="check"><input type="checkbox" id="cAuto" ${S.autoAnalyze ? 'checked' : ''}><span>Traducir por adelantado los párrafos que vas a leer (la palabra que toques ya estará lista). Si no, se traduce el párrafo al tocar una palabra.</span></label>
       <label class="check"><input type="checkbox" id="cTrTap" ${S.trOnTap !== false ? 'checked' : ''}><span>Al marcar una oración tocándola, escribir su traducción debajo (sin pedirla). Con la traducción a la vista, las palabras de esa oración no suben.</span></label>
-      <label class="check"><input type="checkbox" id="cTrAlways" ${S.showTr ? 'checked' : ''}><span>Mostrar siempre la traducción de la oración marcada (si no, 文 la muestra solo para la oración que elijas). Con la traducción a la vista, las palabras de esa oración no suben.</span></label>
+      <label class="check"><input type="checkbox" id="cTrAlways" ${S.showTr ? 'checked' : ''}><span>Mostrar siempre la traducción de la oración marcada (si no, aparece debajo al marcar una oración tocándola). Con la traducción a la vista, las palabras de esa oración no suben.</span></label>
       <label class="check"><input type="checkbox" id="cPy" ${S.pinyin === false ? 'checked' : ''}><span>Chino: ocultar el pinyin (la oración marcada y la frase seleccionada lo muestran igual).</span></label>
       <label class="check"><input type="checkbox" id="cPyK" ${S.pinyinKnown === false ? 'checked' : ''}><span>Chino: ocultar el pinyin de las palabras que ya sé, las que no tienen marca (la oración marcada lo muestra igual).</span></label>
       <label class="check"><input type="checkbox" id="cFade" ${S.fadeTop !== false ? 'checked' : ''}><span>Desvanecer la parte de arriba del texto, para leer un poco más abajo (lo que se desvanece cuenta como leído).</span></label>
@@ -2776,7 +2779,7 @@ function openSettings(){
       <li>Una palabra <b>nueva</b> (subrayada) que pasas sin pedir su traducción queda <b>sabida: 100 %</b>. «Pasar» es avanzar de oración (▶ o ⏭) o, leyendo en silencio, que llegue a la primera línea de la pantalla, justo antes de desaparecer (su párrafo tiene que haber estado un momento a la vista).</li>
       <li>Una palabra que ya habías consultado alguna vez y pasas sin pedir traducción <b>sube 10 puntos</b> (como mucho una vez por minuto).</li>
       <li>Pedir la traducción de una palabra: si es nueva, queda en <b>0</b>; si no, <b>baja 30 puntos</b>.</li>
-      <li>Pedir la traducción (文) o la explicación de una frase: sus palabras <b>ni suben ni bajan</b>.</li>
+      <li>Ver la traducción de una oración o la explicación de una frase: sus palabras <b>ni suben ni bajan</b>.</li>
       <li>Las <b>nuevas</b> se subrayan en verde; las que estás <b>aprendiendo</b> (ya las consultaste) tienen fondo azul, más claro cuanto más las sabes; las <b>sabidas</b> (100 %) no tienen marca. Al llegar a 100 %: 🎉.</li></ul></div>
     <div class="box"><h3>Gasto (estimado)</h3>${usageHTML()}</div>
     <p class="small" style="text-align:center">Leamos · versión ${APP_VERSION}</p>`;
@@ -2820,11 +2823,11 @@ $('pNext').onclick = () => { const was = PLAY; stop(); next(true).then(() => { i
 $('pPrev').onclick = () => { const was = PLAY; stop(); prev(); if (was) play(); };
 const RATES = [0.6, 0.75, 0.9, 1, 1.15];
 $('pRate').onclick = () => { const i = RATES.findIndex(r => r >= S.rate - 0.001); S.rate = RATES[(i + 1) % RATES.length]; saveSet(); updateInfo(); if (PLAY) { if (UTT?.cloud) AUDIO.playbackRate = S.rate; else { stop(); play(); } } };
+// la traducción ya sale sola al marcar la oración: el botón de abajo va directo a la explicación detallada
 $('pTr').onclick = () => {
-  if (S.showTr) { S.showTr = false; saveSet(); TR_ONCE = null; showTr(); return; }   // (apaga el modo «siempre»)
-  const on = TR_ONCE && TR_ONCE.p === CUR.p && TR_ONCE.s === CUR.s && TR_ONCE.ch === CH?.ch;
-  TR_ONCE = on ? null : { p: CUR.p, s: CUR.s, ch: CH?.ch };
-  showTr();
+  if (!CH || CH.missing) return;
+  const p = CUR.p, si = CUR.s, text = sentText(p, si).trim();
+  if (/[\p{L}\p{N}]/u.test(text)) explainPhrase({ text, p, si, p2: p, si2: si });
 };
 $('pOrig').onclick = () => { SHOW_ORIG = !SHOW_ORIG; updateInfo(); showTr(); };
 document.addEventListener('keydown', e => {
