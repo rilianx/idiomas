@@ -41,6 +41,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
 .hz::after{content:attr(data-py);font-size:.52em;padding:0 .1em;color:var(--muted);line-height:1.1;letter-spacing:0;font-family:system-ui,sans-serif}
 #book.py .para{line-height:2.3}
 /* la traducción de la oración que marcaste tocándola, escrita debajo */
+.blank{display:inline-block;border-bottom:2px solid var(--muted);color:transparent;min-width:2em;margin:0 2px}
 .trl-l{position:absolute;white-space:nowrap;font-size:calc(var(--fs) * .55);line-height:1.15;color:var(--muted);pointer-events:none;font-family:system-ui,sans-serif}
 #book{position:relative}
 /* ocultar (sin mover el texto): todo, o en las palabras que ya sabes; la oración marcada siempre lo muestra */
@@ -141,7 +142,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-15 · 59';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-16 · 60';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -268,7 +269,7 @@ const totalWon = () => Object.values(DICT).filter(x => scoreOf(x) >= 100).length
 function bumpDay(d){ const st = STATS(); st[today()] = (st[today()] || 0) + d; save('lec-stats', st); }
 // cómo y dónde se aprendió (lo fija quien acredita: avanzar, voz, silencio o «Ya la sé»)
 let CREDIT_CTX = null;
-const HOW = { voz: 'leyendo en voz alta', avance: 'al avanzar de oración', silencio: 'leyendo en silencio, al llegar arriba', marcada: 'marcada «Ya la sé»', consulta: 'pediste su traducción', desmarcada: 'marcada como nueva' };
+const HOW = { voz: 'leyendo en voz alta', avance: 'al avanzar de oración', silencio: 'leyendo en silencio, al llegar arriba', marcada: 'marcada «Ya la sé»', ejercicio: 'en los ejercicios del capítulo', consulta: 'pediste su traducción', desmarcada: 'marcada como nueva' };
 // lo que pasó hoy con cada palabra: [{ w, t, d: +1|-1, how, text, sc }]
 function logDay(entry){
   const all = load('lec-log', {}), day = today();
@@ -1118,11 +1119,12 @@ function renderReader(){
   });
   const end = document.createElement('div'); end.className = 'chend';
   end.innerHTML = (CH.ch < BOOK.chapters.length - 1 ? `— fin del capítulo —<div class="row" style="justify-content:center"><button class="btn" id="nextCh">Siguiente capítulo →</button></div>` : '— fin del libro —') +
-    (CH.ver !== 'o' ? `<div class="row" style="justify-content:center;margin-top:10px"><button class="btn sec" id="redoCh">↻ Rehacer este capítulo</button></div>` : '');
+    `<div class="row" style="justify-content:center;margin-top:10px"><button class="btn sec" id="exCh">🧠 Ejercicios del capítulo</button>${CH.ver !== 'o' ? `<button class="btn sec" id="redoCh">↻ Rehacer este capítulo</button>` : ''}</div>`;
   bk.appendChild(end);
   v.appendChild(bk);
   if ($('nextCh')) $('nextCh').onclick = () => openChapter(CH.ver, CH.ch + 1);
   if ($('redoCh')) $('redoCh').onclick = () => redoChapter(BOOK, CH.ver, CH.ch);
+  if ($('exCh')) $('exCh').onclick = () => openExercises();
   updateInfo();
   if (TR_TAP) requestAnimationFrame(showTapTr);
 }
@@ -2471,6 +2473,111 @@ async function drawBook(id){
 // mis palabras (del idioma del libro abierto, o el que se elija)
 let WFILTER = 'todas', WQ = '';
 function openWords(){ openPanel('Mis palabras', 'words'); drawWords(); }
+/* ---------- ejercicios del capítulo (tipo Anki), con las oraciones ya analizadas ----------
+   · Completar: la oración en español → la oración en el idioma con una o dos palabras que ya sabes en blanco
+     (se elige entre opciones del mismo capítulo).
+   · Entender: la oración en el idioma, con una palabra que estás aprendiendo destacada → ¿qué significa?
+     (se muestra la traducción y tú dices si la sabías).
+   Acertar sube la palabra (+15); fallar la baja (−20). */
+let EX = null;
+const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+async function openExercises(){
+  openPanel(`Ejercicios · ${BOOK.chapters[CH.ch]?.title || 'capítulo ' + (CH.ch + 1)}`, 'ex');
+  $('pbody').innerHTML = '<p class="busy">Preparando los ejercicios…</p>';
+  const recs = await dbPrefix('ana', `${BOOK.id}|${CH.ver}|${CH.ch}|`);
+  const sents = [];
+  for (const r of recs) (r.sents || []).forEach((st, si) => { if (st?.tokens?.length && st.text) sents.push({ ...st, p: +r.k.split('|').pop(), si }); });
+  const okTok = t => t.lemma && !SKIP_POS.has(t.pos) && /[\p{L}]/u.test(t.t);
+  const pool = sents.flatMap(st => st.tokens.filter(okTok));
+  const fill = [], learn = [];
+  for (const st of shuffle(sents.slice())) {
+    const toks = st.tokens.filter(okTok);
+    const learning = toks.filter(t => { const c = wordClass(t); return c === 'learn' || c === 'new'; });
+    const known = toks.filter(t => !wordClass(t) && t.t.length > 1);
+    if (learning.length && learn.length < 8) learn.push({ kind: 'learn', st, tok: learning[Math.floor(Math.random() * learning.length)] });
+    else if (known.length && fill.length < 8 && toks.length >= 3) {
+      const n = toks.length >= 9 && known.length >= 2 ? 2 : 1;
+      fill.push({ kind: 'fill', st, blanks: shuffle(known.slice()).slice(0, n) });
+    }
+  }
+  if (!fill.length && !learn.length) { $('pbody').innerHTML = '<p>Todavía no hay oraciones analizadas en este capítulo (se analizan al leerlo). Lee un poco y vuelve.</p>'; return; }
+  // las traducciones que falten, en un solo pedido
+  const need = [...fill, ...learn].filter(c => !c.st.es);
+  if (need.length) {
+    try {
+      const out = await askRetry(S.chatModel, `Traduce al español, de forma natural, oraciones numeradas de un libro en ${LANGS[LANG()].name}. Devuelve en es una traducción por oración, en el mismo orden.`,
+        need.map((c, i) => `[${i + 1}] ${c.st.text.trim()}`).join('\n'), TR_SCHEMA, { effort: 'low', maxTokens: 4000, ms: 90000, kind: 'read', fast: true });
+      need.forEach((c, i) => { c.st.es = out.es?.[i] || ''; });
+    } catch (e) { toast('No se pudieron traducir las oraciones: ' + errText(e)); }
+  }
+  const cards = [];
+  for (let i = 0; i < Math.max(fill.length, learn.length); i++) { if (fill[i]?.st.es) cards.push(fill[i]); if (learn[i]) cards.push(learn[i]); }
+  // opciones para cada hueco: la correcta y 3 del capítulo (de la misma categoría si se puede)
+  for (const c of cards) if (c.kind === 'fill') c.opts = c.blanks.map(b => {
+    const same = pool.filter(t => t.pos === b.pos && t.t !== b.t), any = pool.filter(t => t.t !== b.t);
+    const ds = [...new Set(shuffle((same.length >= 3 ? same : any).map(t => t.t)))].filter(x => x !== b.t).slice(0, 3);
+    return shuffle([b.t, ...ds]);
+  });
+  EX = { cards, i: 0, ok: 0, bad: 0, step: 0, picked: [] };
+  drawExercise();
+}
+function exGrade(tok, good, text){
+  const e = ensureEntry(tok, text); if (!e) return;
+  CREDIT_CTX = { how: 'ejercicio', text }; setScore(e, scoreOf(e) + (good ? 15 : -20)); CREDIT_CTX = null;
+}
+function drawExercise(){
+  const pb = $('pbody'), lang = LANG();
+  if (!EX) return;
+  if (EX.i >= EX.cards.length) {
+    pb.innerHTML = `<div class="box" style="text-align:center"><h3>¡Listo! 🎉</h3><p>${EX.ok} bien · ${EX.bad} por repasar</p><div class="row" style="justify-content:center"><button class="btn" id="exAgain">Otra ronda</button><button class="btn sec" id="exClose">Volver a la lectura</button></div></div>`;
+    $('exAgain').onclick = openExercises; $('exClose').onclick = closePanel; return;
+  }
+  const c = EX.cards[EX.i], st = c.st, text = st.text.trim();
+  let h = `<div class="small">${EX.i + 1} de ${EX.cards.length} · ${c.kind === 'fill' ? 'completa en ' + LANGS[lang].name : '¿qué significa?'}</div><div class="bar"><i style="width:${Math.round(100 * EX.i / EX.cards.length)}%"></i></div>`;
+  if (c.kind === 'fill') {
+    // la oración con los huecos (en orden de aparición)
+    const order = c.blanks.map(b => ({ b, at: text.indexOf(b.t) })).sort((x, y) => x.at - y.at);
+    let html = '', from = 0;
+    order.forEach(({ b, at }, k) => {
+      if (at < from) return;
+      const j = c.blanks.indexOf(b), done = EX.picked[j];
+      html += esc(text.slice(from, at)) + (done ? `<b style="color:${done === b.t ? 'var(--ok, #16a34a)' : 'var(--bad, #dc2626)'}">${esc(b.t)}</b>` : `<span class="blank">${'＿'.repeat(Math.max(2, Math.min(6, b.t.length)))}</span>`);
+      from = at + b.t.length;
+    });
+    html += esc(text.slice(from));
+    h += `<div class="box"><div class="lab">En español</div><p style="font-size:18px">${esc(st.es)}</p><div class="lab">En ${LANGS[lang].name}</div><p lang="${lang}" style="font-size:22px;line-height:1.8">${html}</p>`;
+    const j = EX.picked.length;
+    if (j < c.blanks.length) h += `<div class="row">${c.opts[j].map(o => `<button class="btn sec" lang="${lang}" data-opt="${esc(o)}" style="font-size:18px">${esc(o)}</button>`).join('')}</div>`;
+    else h += `<div class="row"><button class="spk" data-say="${esc(text)}">🔊</button><button class="btn" id="exNext">Siguiente →</button></div>`;
+    h += '</div>';
+  } else {
+    const at = text.indexOf(c.tok.t);
+    const html = at < 0 ? esc(text) : esc(text.slice(0, at)) + `<b style="text-decoration:underline 2px var(--new);text-underline-offset:5px">${esc(c.tok.t)}</b>` + esc(text.slice(at + c.tok.t.length));
+    h += `<div class="box"><p lang="${lang}" style="font-size:22px;line-height:1.8">${html} <button class="spk" data-say="${esc(text)}">🔊</button></p>`;
+    if (!EX.step) h += `<div class="row"><button class="btn" id="exShow">Mostrar</button></div>`;
+    else {
+      const e = DICT[lemmaOf(c.tok)];
+      h += `<div class="lab">Traducción</div><p style="font-size:18px">${esc(st.es || '—')}</p><p><b lang="${lang}">${esc(c.tok.t)}</b>${lemmaOf(c.tok) !== c.tok.t ? ` (<span lang="${lang}">${esc(lemmaOf(c.tok))}</span>)` : ''} = ${esc(c.tok.gloss || e?.gloss || '—')}</p>
+        <div class="row"><button class="btn sec" id="exBad">No lo sabía</button><button class="btn" id="exGood">Lo sabía ✓</button></div>`;
+    }
+    h += '</div>';
+  }
+  pb.innerHTML = h;
+  pb.querySelectorAll('[data-say]').forEach(x => x.onclick = () => sayText(x.dataset.say));
+  pb.querySelectorAll('[data-opt]').forEach(x => x.onclick = () => {
+    const j = EX.picked.length, b = c.blanks[j], good = x.dataset.opt === b.t;
+    EX.picked.push(x.dataset.opt);
+    if (good) EX.ok++; else EX.bad++;
+    exGrade(b, good, text);
+    if (EX.picked.length >= c.blanks.length) sayText(text);
+    drawExercise();
+  });
+  if ($('exNext')) $('exNext').onclick = () => { EX.i++; EX.picked = []; drawExercise(); };
+  if ($('exShow')) $('exShow').onclick = () => { EX.step = 1; sayText(text); drawExercise(); };
+  const next = good => { exGrade(c.tok, good, text); if (good) EX.ok++; else EX.bad++; EX.i++; EX.step = 0; drawExercise(); };
+  if ($('exGood')) $('exGood').onclick = () => next(true);
+  if ($('exBad')) $('exBad').onclick = () => next(false);
+}
 function drawWords(){
   const lang = DLANG, all = Object.values(DICT).filter(e => e.lemma && !SKIP_POS.has(e.pos));
   const cls = e => (scoreOf(e) >= 100 || (!e.srs && e.status === 'conocida')) ? 'sabidas' : isNewWord(e) ? 'nuevas' : 'aprendiendo';
