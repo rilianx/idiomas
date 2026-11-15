@@ -27,7 +27,7 @@ header select{height:38px;border:1px solid var(--line);border-radius:10px;backgr
 /* lectura */
 #book{max-width:700px;margin:0 auto;padding:18px 18px 45vh}
 #book .chtitle{font-size:22px;margin:.2em 0 1em;color:var(--muted);font-weight:600}
-.para{font-size:var(--fs);line-height:1.95;margin:0 0 .9em}
+.para{font-size:var(--fs);line-height:2.15;margin:0 0 .9em}
 h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
 #book[lang=ko] .para{word-break:keep-all}
 .s{border-radius:6px;transition:background .2s;padding:3px 0;-webkit-box-decoration-break:clone;box-decoration-break:clone}
@@ -39,7 +39,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
 /* chino: el pinyin debajo de cada carácter (en un atributo: no entra en el texto de la palabra) */
 .hz{display:inline-flex;flex-direction:column;align-items:center;line-height:1.15}
 .hz::after{content:attr(data-py);font-size:.52em;padding:0 .1em;color:var(--muted);line-height:1.1;letter-spacing:0;font-family:system-ui,sans-serif}
-#book.py{line-height:2.1}
+#book.py .para{line-height:2.3}
 /* la traducción de la oración que marcaste tocándola, escrita debajo */
 .trl-l{position:absolute;white-space:nowrap;font-size:calc(var(--fs) * .55);line-height:1.15;color:var(--muted);pointer-events:none;font-family:system-ui,sans-serif}
 #book{position:relative}
@@ -141,7 +141,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-15 · 58';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-15 · 59';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -1580,7 +1580,7 @@ function showTapTr(){
     while (wi < words.length && (!part.length || used + words[wi].length / 2 <= goal)) { part.push(words[wi]); used += words[wi].length + 1; wi++; }
     if (!part.length) return;
     const d = document.createElement('span'); d.className = 'trl-l'; d.textContent = part.join(' ');
-    d.style.left = (l.left - br.left) + 'px'; d.style.top = (l.bottom - br.top - 1) + 'px';
+    d.style.left = (l.left - br.left) + 'px'; d.style.top = (l.bottom - br.top + 1) + 'px';
     if (last) { d.style.whiteSpace = 'normal'; d.style.maxWidth = (br.right - l.left - 18) + 'px'; }
     bk.appendChild(d);
   });
