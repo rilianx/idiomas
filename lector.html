@@ -143,7 +143,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-16 · 63';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-16 · 64';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -2539,14 +2539,22 @@ async function startExercises(kind, sents){
     } else if (kind === 'read') cards.push({ kind, st, tok });
     else cards.push({ kind, st, hints: [...new Map(learning.map(t => [lemmaOf(t), t])).values()] });
   }
-  // las traducciones que falten (y, para traducir, una pista de gramática), en un solo pedido
-  const need = cards.filter(c => !c.st.es || kind === 'write');
+  // las traducciones que falten (y, para traducir, una pista de gramática), en un solo pedido; quedan guardadas
+  // con el análisis del párrafo, así la próxima vez no se vuelven a pedir
+  for (const c of cards) if (c.st.exHint !== undefined) c.hint = c.st.exHint;
+  const need = cards.filter(c => !c.st.es || (kind === 'write' && c.st.exHint === undefined));
   if (need.length) {
     try {
       const sys = `Traduce al español, de forma natural, oraciones numeradas de un libro en ${LANGS[lang].name}. Devuelve en items una por oración, en el mismo orden: es, la traducción; hint, ` +
         (kind === 'write' ? `una pista breve de la gramática que un estudiante de nivel ${lvLabel(lang, myLevel(lang))} necesitaría para decir esa oración en ${LANGS[lang].name} (la forma y para qué, p. ej. "pasado cortés: -았/었어요"), o "" si no hace falta.` : '"".');
       const out = await askRetry(S.chatModel, sys, need.map((c, i) => `[${i + 1}] ${c.st.text}`).join('\n'), obj({ items: { type: 'array', items: obj({ es: STR, hint: STR }) } }), { effort: 'low', maxTokens: 5000, ms: 90000, kind: 'read', fast: true });
-      need.forEach((c, i) => { const it = out.items?.[i]; if (it) { c.st.es = c.st.es || it.es || ''; c.hint = it.hint || ''; } });
+      need.forEach((c, i) => { const it = out.items?.[i]; if (it) { c.st.es = c.st.es || it.es || ''; if (kind === 'write') c.hint = c.st.exHint = it.hint || ''; } });
+      const byP = new Map(); need.forEach(c => { if (!byP.has(c.st.p)) byP.set(c.st.p, []); byP.get(c.st.p).push(c.st); });
+      for (const [p, list] of byP) {
+        const k = `${BOOK.id}|${CH.ver}|${CH.ch}|${p}`, rec = ANA.get(k) || await dbGet('ana', k); if (!rec?.sents) continue;
+        for (const st of list) { const x = rec.sents[st.si]; if (!x) continue; if (st.es) x.es = st.es; if (st.exHint !== undefined) x.exHint = st.exHint; }
+        ANA.set(k, rec); dbPut('ana', rec);
+      }
     } catch (e) { toast('No se pudieron traducir las oraciones: ' + errText(e)); }
   }
   EX = { kind, sents, cards: cards.filter(c => c.kind === 'read' || c.st.es), i: 0, ok: 0, bad: 0, step: 0, picked: null };
