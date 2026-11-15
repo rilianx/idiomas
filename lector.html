@@ -143,7 +143,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-16 · 65';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-16 · 66';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -966,6 +966,7 @@ async function analyze(job){
     last = 0; update();
   }));
   const rec = { k: job.k, sents: buildSents(job, parts), done: [], seenEs: [] };
+  rec.sents.forEach((x, si) => { const m = TR_MEM.get(`${job.k}#${si}`); if (x && !x.es && m) x.es = m; if (PICK_MEM.has(`${job.k}#${si}`)) rec.seenEs[si] = true; });
   await dbPut('ana', rec); ANA.set(job.k, rec);
   return rec;
 }
@@ -1575,7 +1576,7 @@ document.addEventListener('click', ev => {
 let TIP_KEY = null;   // la palabra cuya traducción está a la vista
 // al marcar una oración tocándola, su traducción se escribe debajo (sin pedirla); se va al pasar a otra oración.
 // Como con 文, con la traducción a la vista las palabras de esa oración no suben.
-let TR_TAP = null;
+let TR_TAP = null; const PICK_MEM = new Set();
 function showTapTr(){
   // se escribe en el espacio entre líneas, debajo de cada línea de la oración (repartida según su largo), sin mover el texto
   document.querySelectorAll('#book .trl-l').forEach(x => x.remove());
@@ -1605,6 +1606,7 @@ function showTapTr(){
     bk.appendChild(d);
   });
   if (es === undefined) return;
+  PICK_MEM.add(`${anaKey(p)}#${s}`);
   const rec = ANA.get(anaKey(p)); if (rec?.sents?.[s] && !rec.seenEs?.[s]) { (rec.seenEs = rec.seenEs || [])[s] = true; dbPut('ana', rec); }
 }
 addEventListener('resize', () => { if (TR_TAP) showTapTr(); });
@@ -2506,9 +2508,24 @@ const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.f
 const EX_KINDS = { fill: ['✏️ Rellenar', 'la oración con una palabra nueva o que estás aprendiendo en blanco; eliges entre otras palabras nuevas'], read: ['👁 Entender', 'la oración en el idioma con una palabra destacada → ¿qué significa?'], write: ['🗣 Traducir', 'la oración en español → dila en el idioma, con pistas de las palabras (y la gramática) que necesitas'] };
 const exTok = t => t.lemma && !SKIP_POS.has(t.pos) && /[\p{L}]/u.test(t.t);
 const exLearning = t => exTok(t) && ['learn', 'new'].includes(wordClass(t));
+// solo entran las oraciones que marcaste al leer (su traducción ya se vio) o que pediste en detalle: todo lo que
+// hace falta ya está guardado, así que los ejercicios abren al instante. La pista de gramática sale solo de los detalles.
 async function exSentences(){
-  const recs = await dbPrefix('ana', `${BOOK.id}|${CH.ver}|${CH.ch}|`), out = [];
-  for (const r of recs) (r.sents || []).forEach((st, si) => { if (st?.tokens?.length && st.text?.trim()) out.push({ ...st, text: st.text.trim(), p: +r.k.split('|').pop(), si }); });
+  const pre = `${BOOK.id}|${CH.ver}|${CH.ch}|`, recs = await dbPrefix('ana', pre), out = [];
+  const det = new Map();
+  for (const x of await dbPrefix('expl', pre)) {
+    const m = x.k.slice(pre.length).match(/^(\d+)\|f\|(\d+)\|([\s\S]*)$/); if (!m || !x.x) continue;
+    det.set(`${m[1]}|${m[2]}|${m[3].trim()}`, x.x);
+  }
+  for (const r of recs) {
+    const p = +r.k.split('|').pop();
+    (r.sents || []).forEach((st, si) => {
+      const text = st?.text?.trim(); if (!st?.tokens?.length || !text) return;
+      const d = det.get(`${p}|${si}|${text}`), es = st.es || d?.translation || TR_MEM.get(`${r.k}#${si}`);
+      if (!es || !(r.seenEs?.[si] || d)) return;
+      out.push({ ...st, text, es, p, si, gram: (d?.grammar || []).map(g => `${g.pattern || g.point}${g.title ? ': ' + g.title : ''}`).slice(0, 3) });
+    });
+  }
   return out;
 }
 // la ronda de cada tipo queda guardada (por capítulo y versión) hasta que se termina o se pide otra
@@ -2526,8 +2543,8 @@ async function openExercises(){
   $('pbody').innerHTML = '<p class="busy">Buscando oraciones…</p>';
   const sents = await exSentences();
   const n = sents.filter(st => st.tokens.some(exLearning)).length;
-  if (!n) { $('pbody').innerHTML = `<p>${sents.length ? 'En lo analizado de este capítulo no quedan palabras nuevas ni en aprendizaje. ¡Bien!' : 'Todavía no hay oraciones analizadas en este capítulo (se analizan al leerlo). Lee un poco y vuelve.'}</p>`; return; }
-  $('pbody').innerHTML = `<p class="small">${n} oraciones del capítulo tienen palabras nuevas o que estás aprendiendo. Elige un tipo de ejercicio (hasta 10 tarjetas):</p>` +
+  if (!n) { $('pbody').innerHTML = `<p>${sents.length ? 'Las oraciones que marcaste en este capítulo ya no tienen palabras nuevas ni en aprendizaje. ¡Bien!' : 'Los ejercicios se arman con las oraciones que marcas al leer (tocando una palabra de otra oración, aparece su traducción) o que pides en detalle (🎓). En este capítulo todavía no hay.'}</p>`; return; }
+  $('pbody').innerHTML = `<p class="small">${n} oraciones que marcaste en este capítulo tienen palabras nuevas o que estás aprendiendo. Elige un tipo de ejercicio (hasta 10 tarjetas):</p>` +
     Object.entries(EX_KINDS).map(([k, [t, d]]) => { const sv = exSaved(k); return `<button class="box" data-kind="${k}" style="display:block;width:100%;text-align:left;cursor:pointer;margin:8px 0"><b style="font-size:17px">${t}</b>${sv ? ` <span class="badge lv">sigue: ${sv.i + 1} de ${sv.cards.length}</span>` : ''}<div class="small">${d}</div></button>`; }).join('');
   $('pbody').querySelectorAll('[data-kind]').forEach(b => b.onclick = () => resumeExercises(b.dataset.kind, sents) || startExercises(b.dataset.kind, sents));
 }
@@ -2542,7 +2559,6 @@ function resumeExercises(kind, sents){
 }
 async function startExercises(kind, sents){
   const lang = LANG(), pb = $('pbody');
-  pb.innerHTML = '<p class="busy">Preparando los ejercicios…</p>';
   const pool = sents.flatMap(st => st.tokens.filter(exLearning));
   const cards = [];
   for (const st of shuffle(sents.slice())) {
@@ -2557,25 +2573,8 @@ async function startExercises(kind, sents){
     } else if (kind === 'read') cards.push({ kind, st, tok });
     else cards.push({ kind, st, hints: [...new Map(learning.map(t => [lemmaOf(t), t])).values()] });
   }
-  // las traducciones que falten (y, para traducir, una pista de gramática), en un solo pedido; quedan guardadas
-  // con el análisis del párrafo, así la próxima vez no se vuelven a pedir
-  for (const c of cards) if (c.st.exHint !== undefined) c.hint = c.st.exHint;
-  const need = cards.filter(c => !c.st.es || (kind === 'write' && c.st.exHint === undefined));
-  if (need.length) {
-    try {
-      const sys = `Traduce al español, de forma natural, oraciones numeradas de un libro en ${LANGS[lang].name}. Devuelve en items una por oración, en el mismo orden: es, la traducción; hint, ` +
-        (kind === 'write' ? `una pista breve de la gramática que un estudiante de nivel ${lvLabel(lang, myLevel(lang))} necesitaría para decir esa oración en ${LANGS[lang].name} (la forma y para qué, p. ej. "pasado cortés: -았/었어요"), o "" si no hace falta.` : '"".');
-      const out = await askRetry(S.chatModel, sys, need.map((c, i) => `[${i + 1}] ${c.st.text}`).join('\n'), obj({ items: { type: 'array', items: obj({ es: STR, hint: STR }) } }), { effort: 'low', maxTokens: 5000, ms: 90000, kind: 'read', fast: true });
-      need.forEach((c, i) => { const it = out.items?.[i]; if (it) { c.st.es = c.st.es || it.es || ''; if (kind === 'write') c.hint = c.st.exHint = it.hint || ''; } });
-      const byP = new Map(); need.forEach(c => { if (!byP.has(c.st.p)) byP.set(c.st.p, []); byP.get(c.st.p).push(c.st); });
-      for (const [p, list] of byP) {
-        const k = `${BOOK.id}|${CH.ver}|${CH.ch}|${p}`, rec = ANA.get(k) || await dbGet('ana', k); if (!rec?.sents) continue;
-        for (const st of list) { const x = rec.sents[st.si]; if (!x) continue; if (st.es) x.es = st.es; if (st.exHint !== undefined) x.exHint = st.exHint; }
-        ANA.set(k, rec); dbPut('ana', rec);
-      }
-    } catch (e) { toast('No se pudieron traducir las oraciones: ' + errText(e)); }
-  }
-  EX = { kind, sents, cards: cards.filter(c => c.kind === 'read' || c.st.es), i: 0, ok: 0, bad: 0, step: 0, picked: null };
+  for (const c of cards) c.hint = c.st.gram?.join(' · ') || '';
+  EX = { kind, sents, cards, i: 0, ok: 0, bad: 0, step: 0, picked: null };
   exSave(); drawExercise();
 }
 function exGrade(tok, good, text){
