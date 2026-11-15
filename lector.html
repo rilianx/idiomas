@@ -41,7 +41,8 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
 .hz::after{content:attr(data-py);font-size:.52em;padding:0 .1em;color:var(--muted);line-height:1.1;letter-spacing:0;font-family:system-ui,sans-serif}
 #book.py{line-height:2.1}
 /* la traducción de la oración que marcaste tocándola, escrita debajo */
-.trl{display:block;font-size:.6em;line-height:1.3;color:var(--muted);margin:-.55em 0 .5em;font-family:system-ui,sans-serif;font-weight:normal}
+.trl-l{position:absolute;white-space:nowrap;font-size:calc(var(--fs) * .55);line-height:1.15;color:var(--muted);pointer-events:none;font-family:system-ui,sans-serif}
+#book{position:relative}
 /* ocultar (sin mover el texto): todo, o en las palabras que ya sabes; la oración marcada siempre lo muestra */
 #book.nopy .hz::after,#book.pyk .w.k .hz::after{visibility:hidden;position:absolute;top:100%;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:.44em;padding:0}
 #book.nopy .hz,#book.pyk .w.k .hz{position:relative}
@@ -140,7 +141,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-15 · 57';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-15 · 58';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -857,6 +858,7 @@ async function openChapter(ver, ch, p = 0, s = 0, orig = false){
   let rec = ver === 'o' ? await dbGet('text', `${BOOK.id}|${ch}`) : await dbGet('simp', `${BOOK.id}|${ver}|${ch}`);
   const missing = !rec;
   if (missing) rec = await dbGet('text', `${BOOK.id}|${ch}`);
+  TR_TAP = null;
   CH = { ver, ch, paras: rec?.paras || [], heads: new Set(rec?.heads || []), missing, map: !missing && ver !== 'o' && rec?.map?.length === rec?.paras?.length ? rec.map : null };
   if (orig) { p = fromOrig(CH.map, p); s = 0; }
   useDict(verLang(BOOK, ver));
@@ -1122,6 +1124,7 @@ function renderReader(){
   if ($('nextCh')) $('nextCh').onclick = () => openChapter(CH.ver, CH.ch + 1);
   if ($('redoCh')) $('redoCh').onclick = () => redoChapter(BOOK, CH.ver, CH.ch);
   updateInfo();
+  if (TR_TAP) requestAnimationFrame(showTapTr);
 }
 // rehacer solo un capítulo de una versión (se borran su texto, sus traducciones y explicaciones, y se vuelve a preparar)
 async function redoChapter(b, ver, ch){
@@ -1554,16 +1557,37 @@ let TIP_KEY = null;   // la palabra cuya traducción está a la vista
 // Como con 文, con la traducción a la vista las palabras de esa oración no suben.
 let TR_TAP = null;
 function showTapTr(){
-  document.querySelectorAll('#book .trl').forEach(x => { if (!TR_TAP || +x.dataset.p !== TR_TAP.p || +x.dataset.s !== TR_TAP.s) x.remove(); });
+  // se escribe en el espacio entre líneas, debajo de cada línea de la oración (repartida según su largo), sin mover el texto
+  document.querySelectorAll('#book .trl-l').forEach(x => x.remove());
   if (!TR_TAP || !CH || CH.missing) return;
-  const { p, s } = TR_TAP, el = sentEl(p, s); if (!el) return;
-  let box = el.nextElementSibling?.classList.contains('trl') ? el.nextElementSibling : null;
-  if (!box) { box = document.createElement('span'); box.className = 'trl'; box.dataset.p = p; box.dataset.s = s; el.after(box); }
+  const { p, s } = TR_TAP, el = sentEl(p, s), bk = $('book'); if (!el || !bk) return;
   const es = trGet(p, s);
-  if (es === undefined) { box.innerHTML = '<span class="busy">traduciendo…</span>'; ensureTr(p, s); return; }
-  box.textContent = es || '—';
+  if (es === undefined) ensureTr(p, s);
+  const text = es === undefined ? 'traduciendo…' : (es || '—');
+  const br = bk.getBoundingClientRect(), lines = [];
+  for (const r of el.getClientRects()) {
+    if (r.width < 1) continue;
+    const L = lines.find(l => Math.abs(l.bottom - r.bottom) < 6);
+    if (L) { L.left = Math.min(L.left, r.left); L.right = Math.max(L.right, r.right); } else lines.push({ left: r.left, right: r.right, bottom: r.bottom });
+  }
+  lines.sort((a, b) => a.bottom - b.bottom);
+  const words = text.split(/\s+/), total = lines.reduce((a, l) => a + l.right - l.left, 0) || 1;
+  let wi = 0, acc = 0, used = 0;
+  lines.forEach((l, i) => {
+    acc += l.right - l.left;
+    const last = i === lines.length - 1, goal = last ? Infinity : text.length * acc / total;
+    const part = [];
+    while (wi < words.length && (!part.length || used + words[wi].length / 2 <= goal)) { part.push(words[wi]); used += words[wi].length + 1; wi++; }
+    if (!part.length) return;
+    const d = document.createElement('span'); d.className = 'trl-l'; d.textContent = part.join(' ');
+    d.style.left = (l.left - br.left) + 'px'; d.style.top = (l.bottom - br.top - 1) + 'px';
+    if (last) { d.style.whiteSpace = 'normal'; d.style.maxWidth = (br.right - l.left - 18) + 'px'; }
+    bk.appendChild(d);
+  });
+  if (es === undefined) return;
   const rec = ANA.get(anaKey(p)); if (rec?.sents?.[s] && !rec.seenEs?.[s]) { (rec.seenEs = rec.seenEs || [])[s] = true; dbPut('ana', rec); }
 }
+addEventListener('resize', () => { if (TR_TAP) showTapTr(); });
 function peek(info){
   const { tok, p, si } = info; const l = lemmaOf(tok); if (!l) return;
   const key = `${anaKey(p)}#${si}#${l}`;
