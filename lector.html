@@ -40,6 +40,8 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
 .hz{display:inline-flex;flex-direction:column;align-items:center;line-height:1.15}
 .hz::after{content:attr(data-py);font-size:.52em;padding:0 .1em;color:var(--muted);line-height:1.1;letter-spacing:0;font-family:system-ui,sans-serif}
 #book.py{line-height:2.1}
+/* la traducción de la oración que marcaste tocándola, escrita debajo */
+.trl{display:block;font-size:.72em;line-height:1.45;color:var(--muted);margin:3px 0 10px;font-family:system-ui,sans-serif;font-weight:normal}
 /* ocultar (sin mover el texto): todo, o en las palabras que ya sabes; la oración marcada siempre lo muestra */
 #book.nopy .hz::after,#book.pyk .w.k .hz::after{visibility:hidden;position:absolute;top:100%;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:.44em;padding:0}
 #book.nopy .hz,#book.pyk .w.k .hz{position:relative}
@@ -138,7 +140,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-15 · 55';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-15 · 56';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -964,6 +966,7 @@ function onAnalyzed(job){
     if (w && TOKS.get(w)?.tok.lemma) showTip(w); else if (TIP_EL) { const t = $('tip'); if (t) t.innerHTML = ANA.has(job.k) ? 'sin traducción' : 'no se pudo traducir'; }
   }
   if (job.p === CUR.p) showTr();
+  if (TR_TAP?.p === job.p) showTapTr();
 }
 // la traducción de las oraciones de un párrafo, cuando se activa 文 y el párrafo se analizó sin ella
 // traducción de una oración, pedida aparte cuando hace falta (un pedido corto, con el párrafo como contexto)
@@ -983,6 +986,7 @@ async function ensureTr(p, s = CUR.s){
   const rec = ANA.get(anaKey(p)); if (rec?.sents?.[s]) { rec.sents[s].es = es; dbPut('ana', rec); }
   TR_INFLIGHT.delete(k);
   if (p === CUR.p && s === CUR.s) showTr();
+  if (TR_TAP?.p === p && TR_TAP.s === s) showTapTr();
 }
 function prefetch(){
   if (!S.autoAnalyze || !CH || CH.missing) return;
@@ -1148,6 +1152,7 @@ function paraEl(p){
 function rerenderPara(p){
   const old = document.querySelector(`#book .para[data-p="${p}"]`); if (!old) return;
   old.replaceWith(paraEl(p));
+  if (TR_TAP?.p === p) showTapTr();
 }
 // cuando cambia el estado de palabras, se redibujan los párrafos a la vista (la misma palabra puede estar en varios)
 function rerenderVisible(p){
@@ -1227,6 +1232,7 @@ function sentEl(p, s){ return document.querySelector(`#book .para[data-p="${p}"]
 /* ---------- la oración actual ---------- */
 function setCursor(p, s, { scroll = 'smooth' } = {}){
   setFrom(null);
+  if (TR_TAP && (TR_TAP.p !== p || TR_TAP.s !== s)) { TR_TAP = null; showTapTr(); }
   document.querySelectorAll('#book .s.cur').forEach(x => x.classList.remove('cur'));
   document.querySelectorAll('#book .w.speaking').forEach(x => x.classList.remove('speaking'));
   CUR.p = p; CUR.s = s;
@@ -1534,7 +1540,9 @@ document.addEventListener('click', ev => {
   const key = `${info.p}#${info.si}#${w.dataset.o}`;
   // 1.er toque: solo marca la oración (y la palabra como punto de partida de ▶); no traduce ni cuenta como consulta
   if (!PLAY && (CUR.p !== info.p || CUR.s !== info.si)) {
-    hideTip(); setCursor(info.p, info.si, { scroll: '' }); setFrom(info.p, info.si, +w.dataset.o); return;
+    hideTip(); setCursor(info.p, info.si, { scroll: '' }); setFrom(info.p, info.si, +w.dataset.o);
+    if (S.trOnTap !== false) { TR_TAP = { p: info.p, s: info.si }; showTapTr(); }
+    return;
   }
   // 3.er toque (la misma palabra con su traducción a la vista): la ficha con la explicación detallada
   if (TIP_KEY === key && !$('tip')?.hidden) { LAST_DBL = now; getSelection()?.removeAllRanges(); hideTip(); openWord(w); return; }
@@ -1542,6 +1550,20 @@ document.addEventListener('click', ev => {
   showTip(w);
 });
 let TIP_KEY = null;   // la palabra cuya traducción está a la vista
+// al marcar una oración tocándola, su traducción se escribe debajo (sin pedirla); se va al pasar a otra oración.
+// Como con 文, con la traducción a la vista las palabras de esa oración no suben.
+let TR_TAP = null;
+function showTapTr(){
+  document.querySelectorAll('#book .trl').forEach(x => { if (!TR_TAP || +x.dataset.p !== TR_TAP.p || +x.dataset.s !== TR_TAP.s) x.remove(); });
+  if (!TR_TAP || !CH || CH.missing) return;
+  const { p, s } = TR_TAP, el = sentEl(p, s); if (!el) return;
+  let box = el.nextElementSibling?.classList.contains('trl') ? el.nextElementSibling : null;
+  if (!box) { box = document.createElement('span'); box.className = 'trl'; box.dataset.p = p; box.dataset.s = s; el.after(box); }
+  const es = trGet(p, s);
+  if (es === undefined) { box.innerHTML = '<span class="busy">traduciendo…</span>'; ensureTr(p, s); return; }
+  box.textContent = es || '—';
+  const rec = ANA.get(anaKey(p)); if (rec?.sents?.[s] && !rec.seenEs?.[s]) { (rec.seenEs = rec.seenEs || [])[s] = true; dbPut('ana', rec); }
+}
 function peek(info){
   const { tok, p, si } = info; const l = lemmaOf(tok); if (!l) return;
   const key = `${anaKey(p)}#${si}#${l}`;
@@ -2563,6 +2585,7 @@ function openSettings(){
       <div class="field"><label>Simplificar y traducir libros</label>${sel('mSimp', SIMP_MODELS, S.simpModel)}<div class="small">También se elige en la ficha de cada libro (ℹ). Se usa también para la lista de nombres y para reescribir lo que quedó sobre el nivel.</div></div>
       <div class="field"><label>Revisar el nivel de la simplificación</label>${sel('mCheck', [...CHAT_MODELS, ...DEF_MODELS.filter(([m]) => !CHAT_MODELS.some(c => c[0] === m))], CHECK_MODEL())}<div class="small">Busca palabras y gramática sobre el nivel en cada parte. Uno barato suele bastar; uno mejor detecta más.</div></div>
       <label class="check"><input type="checkbox" id="cAuto" ${S.autoAnalyze ? 'checked' : ''}><span>Traducir por adelantado los párrafos que vas a leer (la palabra que toques ya estará lista). Si no, se traduce el párrafo al tocar una palabra.</span></label>
+      <label class="check"><input type="checkbox" id="cTrTap" ${S.trOnTap !== false ? 'checked' : ''}><span>Al marcar una oración tocándola, escribir su traducción debajo (sin pedirla). Con la traducción a la vista, las palabras de esa oración no suben.</span></label>
       <label class="check"><input type="checkbox" id="cTrAlways" ${S.showTr ? 'checked' : ''}><span>Mostrar siempre la traducción de la oración marcada (si no, 文 la muestra solo para la oración que elijas). Con la traducción a la vista, las palabras de esa oración no suben.</span></label>
       <label class="check"><input type="checkbox" id="cPy" ${S.pinyin === false ? 'checked' : ''}><span>Chino: ocultar el pinyin (la oración marcada y la frase seleccionada lo muestran igual).</span></label>
       <label class="check"><input type="checkbox" id="cPyK" ${S.pinyinKnown === false ? 'checked' : ''}><span>Chino: ocultar el pinyin de las palabras que ya sé, las que no tienen marca (la oración marcada lo muestra igual).</span></label>
@@ -2623,6 +2646,7 @@ function openSettings(){
   on('cPy', 'change', e => { S.pinyin = !e.target.checked; saveSet(); if (BOOK && CH && !$('player').hidden) renderReaderKeep(); });
   on('cPyK', 'change', e => { S.pinyinKnown = !e.target.checked; saveSet(); if (BOOK && CH && !$('player').hidden) renderReaderKeep(); });
   on('cTrAlways', 'change', e => { S.showTr = e.target.checked; saveSet(); });
+  on('cTrTap', 'change', e => { S.trOnTap = e.target.checked; saveSet(); if (!S.trOnTap) { TR_TAP = null; showTapTr(); } });
   on('sPar', 'change', e => { S.simpPar = +e.target.value; saveSet(); });
   on('cCheck', 'change', e => { S.simpCheck = e.target.checked; saveSet(); });
   on('cCuts', 'change', e => { S.showCuts = e.target.checked; saveSet(); if (BOOK && CH && !$('player').hidden) renderReaderKeep(); });
