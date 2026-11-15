@@ -143,7 +143,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-16 · 64';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-16 · 65';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -2511,6 +2511,15 @@ async function exSentences(){
   for (const r of recs) (r.sents || []).forEach((st, si) => { if (st?.tokens?.length && st.text?.trim()) out.push({ ...st, text: st.text.trim(), p: +r.k.split('|').pop(), si }); });
   return out;
 }
+// la ronda de cada tipo queda guardada (por capítulo y versión) hasta que se termina o se pide otra
+const exKey = kind => `${BOOK.id}|${CH.ver}|${CH.ch}|${kind}`;
+const exSaved = kind => load('lec-ex', {})[exKey(kind)];
+function exSave(){
+  const all = load('lec-ex', {}), k = exKey(EX.kind);
+  if (EX.i >= EX.cards.length) delete all[k];
+  else all[k] = { i: EX.i, ok: EX.ok, bad: EX.bad, cards: EX.cards.map(c => ({ kind: c.kind, p: c.st.p, si: c.st.si, tok: c.tok, opts: c.opts, hints: c.hints, hint: c.hint })) };
+  save('lec-ex', all);
+}
 async function openExercises(){
   openPanel(`Ejercicios · ${BOOK.chapters[CH.ch]?.title || 'capítulo ' + (CH.ch + 1)}`, 'ex');
   EX = null;
@@ -2519,8 +2528,17 @@ async function openExercises(){
   const n = sents.filter(st => st.tokens.some(exLearning)).length;
   if (!n) { $('pbody').innerHTML = `<p>${sents.length ? 'En lo analizado de este capítulo no quedan palabras nuevas ni en aprendizaje. ¡Bien!' : 'Todavía no hay oraciones analizadas en este capítulo (se analizan al leerlo). Lee un poco y vuelve.'}</p>`; return; }
   $('pbody').innerHTML = `<p class="small">${n} oraciones del capítulo tienen palabras nuevas o que estás aprendiendo. Elige un tipo de ejercicio (hasta 10 tarjetas):</p>` +
-    Object.entries(EX_KINDS).map(([k, [t, d]]) => `<button class="box" data-kind="${k}" style="display:block;width:100%;text-align:left;cursor:pointer;margin:8px 0"><b style="font-size:17px">${t}</b><div class="small">${d}</div></button>`).join('');
-  $('pbody').querySelectorAll('[data-kind]').forEach(b => b.onclick = () => startExercises(b.dataset.kind, sents));
+    Object.entries(EX_KINDS).map(([k, [t, d]]) => { const sv = exSaved(k); return `<button class="box" data-kind="${k}" style="display:block;width:100%;text-align:left;cursor:pointer;margin:8px 0"><b style="font-size:17px">${t}</b>${sv ? ` <span class="badge lv">sigue: ${sv.i + 1} de ${sv.cards.length}</span>` : ''}<div class="small">${d}</div></button>`; }).join('');
+  $('pbody').querySelectorAll('[data-kind]').forEach(b => b.onclick = () => resumeExercises(b.dataset.kind, sents) || startExercises(b.dataset.kind, sents));
+}
+// retomar la ronda guardada de ese tipo (si las oraciones siguen ahí)
+function resumeExercises(kind, sents){
+  const sv = exSaved(kind); if (!sv) return false;
+  const by = new Map(sents.map(st => [`${st.p}|${st.si}`, st]));
+  const cards = sv.cards.map(c => { const st = by.get(`${c.p}|${c.si}`); return st ? { ...c, st } : null; });
+  if (cards.some(c => !c)) return false;
+  EX = { kind, sents, cards, i: sv.i, ok: sv.ok, bad: sv.bad, step: 0, picked: null };
+  drawExercise(); return true;
 }
 async function startExercises(kind, sents){
   const lang = LANG(), pb = $('pbody');
@@ -2558,7 +2576,7 @@ async function startExercises(kind, sents){
     } catch (e) { toast('No se pudieron traducir las oraciones: ' + errText(e)); }
   }
   EX = { kind, sents, cards: cards.filter(c => c.kind === 'read' || c.st.es), i: 0, ok: 0, bad: 0, step: 0, picked: null };
-  drawExercise();
+  exSave(); drawExercise();
 }
 function exGrade(tok, good, text){
   const e = ensureEntry(tok, text); if (!e) return;
@@ -2580,10 +2598,11 @@ function drawExercise(){
   if (!EX) return;
   if (EX.i >= EX.cards.length) {
     pb.innerHTML = `<div class="box" style="text-align:center"><h3>${EX.cards.length ? '¡Listo! 🎉' : 'No hay tarjetas de este tipo'}</h3>${EX.cards.length ? `<p>${EX.ok} bien · ${EX.bad} por repasar</p>` : ''}<div class="row" style="justify-content:center"><button class="btn" id="exAgain">Otra ronda</button><button class="btn sec" id="exMenu">Otro tipo</button><button class="btn sec" id="exClose">Volver a la lectura</button></div></div>`;
-    $('exAgain').onclick = () => startExercises(EX.kind, EX.sents); $('exMenu').onclick = openExercises; $('exClose').onclick = closePanel; return;
+    $('exAgain').onclick = () => startExercises(EX.kind, EX.sents); $('exMenu').onclick = openExercises; $('exClose').onclick = closePanel;
+    if (EX.cards.length) exSave(); return;
   }
   const c = EX.cards[EX.i], st = c.st, text = st.text, L = LANGS[lang].name;
-  let h = `<div class="small">${EX_KINDS[c.kind][0]} · ${EX.i + 1} de ${EX.cards.length}</div><div class="bar"><i style="width:${Math.round(100 * EX.i / EX.cards.length)}%"></i></div><div class="box">`;
+  let h = `<div class="small" style="display:flex;gap:8px;align-items:center"><span style="flex:1">${EX_KINDS[c.kind][0]} · ${EX.i + 1} de ${EX.cards.length}</span><button class="chip" id="exNew">Otra ronda</button><button class="chip" id="exBack">Tipos</button></div><div class="bar"><i style="width:${Math.round(100 * EX.i / EX.cards.length)}%"></i></div><div class="box">`;
   const gloss = t => esc(t.gloss || DICT[lemmaOf(t)]?.gloss || '—');
   if (c.kind === 'fill') {
     const done = EX.picked;
@@ -2609,9 +2628,12 @@ function drawExercise(){
     const good = x.dataset.opt === c.tok.t; EX.picked = x.dataset.opt;
     if (good) EX.ok++; else EX.bad++;
     exGrade(c.tok, good, text); sayText(text); drawExercise();
+    const all = load('lec-ex', {}), sv = all[exKey(EX.kind)]; if (sv) { sv.i = EX.i + 1; sv.ok = EX.ok; sv.bad = EX.bad; if (sv.i >= sv.cards.length) delete all[exKey(EX.kind)]; save('lec-ex', all); }
   });
-  const advance = () => { EX.i++; EX.step = 0; EX.picked = null; EX.ans = ''; drawExercise(); };
+  const advance = () => { EX.i++; EX.step = 0; EX.picked = null; EX.ans = ''; exSave(); drawExercise(); };
   if ($('exNext')) $('exNext').onclick = advance;
+  $('exNew').onclick = () => { if (confirm('¿Empezar otra ronda? Se deja la actual.')) startExercises(EX.kind, EX.sents); };
+  $('exBack').onclick = openExercises;
   if ($('exShow')) $('exShow').onclick = () => { EX.ans = $('exAns')?.value.trim() || ''; EX.step = 1; sayText(text); drawExercise(); };
   const grade = good => { for (const t of c.kind === 'write' ? c.hints : [c.tok]) exGrade(t, good, text); if (good) EX.ok++; else EX.bad++; advance(); };
   if ($('exGood')) $('exGood').onclick = () => grade(true);
