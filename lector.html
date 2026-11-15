@@ -40,6 +40,11 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
 .hz{display:inline-flex;flex-direction:column;align-items:center;line-height:1.15}
 .hz::after{content:attr(data-py);font-size:.52em;padding:0 .1em;color:var(--muted);line-height:1.1;letter-spacing:0;font-family:system-ui,sans-serif}
 #book.py{line-height:2.1}
+/* ocultar (sin mover el texto): todo, o en las palabras que ya sabes; la oración marcada siempre lo muestra */
+#book.nopy .hz::after,#book.pyk .w.k .hz::after{visibility:hidden;position:absolute;top:100%;left:50%;transform:translateX(-50%);white-space:nowrap;font-size:.44em;padding:0}
+#book.nopy .hz,#book.pyk .w.k .hz{position:relative}
+#book .s.cur .hz::after{visibility:visible}
+.phrase .hz::after{font-size:.5em}
 #book.py .w.new{text-decoration:none}
 #book.py .w.new .hz{border-bottom:2px solid var(--new)}
 .w.learn{background:rgba(59,130,246,var(--a,.25));border-radius:4px}
@@ -133,7 +138,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-15 · 54';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-15 · 55';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -1087,7 +1092,7 @@ function renderReader(){
   renderHeader();
   const v = $('view'); v.innerHTML = '';
   const bk = document.createElement('div'); bk.id = 'book'; bk.lang = LANG();
-  if (pinyinOn()) { bk.classList.add('py'); loadPinyin(); }
+  if (pinyinOn()) { bk.classList.add('py'); bk.classList.toggle('nopy', S.pinyin === false); bk.classList.toggle('pyk', S.pinyinKnown === false); loadPinyin(); }
   const title = BOOK.chapters[CH.ch]?.title || '';
   bk.innerHTML = `<div class="chtitle">${CH.heads.has(0) && !CH.missing ? '' : esc(title)}${CH.ver !== 'o' ? ` <span class="badge lv">${esc(verName(BOOK, CH.ver))} · ${verKind(BOOK, CH.ver)}</span>` : ''}</div>`;
   if (CH.missing) {
@@ -1168,7 +1173,12 @@ function loadPinyin(){
   PY_LOAD.then(ok => { if (ok && BOOK && CH && LANG() === 'zh' && !$('player').hidden) renderReaderKeep(); });
   return PY_LOAD;
 }
-const pinyinOn = () => LANG() === 'zh' && S.pinyin !== false;
+const pinyinOn = () => LANG() === 'zh';
+// un texto con el pinyin debajo de cada carácter (para la frase seleccionada)
+function pyHTML(text){
+  const py = pyArr(text); if (!py) return esc(text);
+  return [...text].map((ch, i) => /[\u3400-\u9fff]/.test(ch) && py[i] ? `<span class="hz" data-py="${esc(py[i])}">${esc(ch)}</span>` : esc(ch)).join('');
+}
 function pyArr(text){
   if (!window.pinyinPro) { loadPinyin(); return null; }
   if (!PY_MEM.has(text)) { if (PY_MEM.size > 3000) PY_MEM.clear(); PY_MEM.set(text, [...text].length === text.length ? pinyinPro.pinyin(text, { type: 'array' }) : null); }
@@ -1181,7 +1191,8 @@ function renderSentence(el, text, ana, p, si){
     const w = document.createElement('span'); w.className = 'w'; w.dataset.o = off;
     const c = tok.lemma ? wordClass(tok) : '';
     // pinyin debajo de cada carácter (salvo, si así se eligió, en las palabras que ya sabes)
-    if (py && /[\u3400-\u9fff]/.test(tok.t) && !(S.pinyinKnown === false && tok.lemma && !c)) {
+    if (py && /[\u3400-\u9fff]/.test(tok.t)) {
+      if (tok.lemma && !c) w.classList.add('k');   // (sabida: su pinyin se puede ocultar)
       [...tok.t].forEach((ch, k) => {
         if (/[\u3400-\u9fff]/.test(ch) && py[off + k]) { const h = document.createElement('span'); h.className = 'hz'; h.dataset.py = py[off + k]; h.textContent = ch; w.appendChild(h); }
         else w.appendChild(document.createTextNode(ch));
@@ -1675,7 +1686,7 @@ function refreshSheet(){
       <p class="small" style="margin-top:10px">¿No empezó la descarga? <a href="${gutEpub(b)}" target="_blank" rel="noopener">Descárgalo de nuevo</a> o búscalo en <a href="https://www.gutenberg.org/ebooks/${b.id}" target="_blank" rel="noopener">gutenberg.org</a>.</p>`;
   } else if (SHEET.kind === 'phrase') {
     const x = SHEET.x || {}, words = x.words?.length ? x.words : phraseWords(SHEET);
-    h += `<div class="phrase" lang="${lang}">${esc(SHEET.text)} <button class="spk" data-say="${esc(SHEET.text)}">🔊</button></div>`;
+    h += `<div class="phrase" lang="${lang}">${lang === 'zh' ? pyHTML(SHEET.text) : esc(SHEET.text)} <button class="spk" data-say="${esc(SHEET.text)}">🔊</button></div>`;
     if (SHEET.err) h += `<div class="fix">${esc(SHEET.err)}</div>`;
     h += x.translation ? `<div class="gloss"><b>${esc(x.translation)}</b></div>${x.literal ? `<div class="small">Literal: ${esc(x.literal)}</div>` : ''}` : SHEET.busyTr ? '<div class="busy" style="margin-top:8px">Traduciendo…</div>' : '';
     if (x.explanation || SHEET.busyEx) h += `<div class="sec-t">Explicación</div>${paras(x.explanation || '')}${SHEET.busyEx ? `<div class="busy">El profesor (${esc(mname(S.defModel))}) está explicando…</div>` : ''}`;
@@ -2553,8 +2564,8 @@ function openSettings(){
       <div class="field"><label>Revisar el nivel de la simplificación</label>${sel('mCheck', [...CHAT_MODELS, ...DEF_MODELS.filter(([m]) => !CHAT_MODELS.some(c => c[0] === m))], CHECK_MODEL())}<div class="small">Busca palabras y gramática sobre el nivel en cada parte. Uno barato suele bastar; uno mejor detecta más.</div></div>
       <label class="check"><input type="checkbox" id="cAuto" ${S.autoAnalyze ? 'checked' : ''}><span>Traducir por adelantado los párrafos que vas a leer (la palabra que toques ya estará lista). Si no, se traduce el párrafo al tocar una palabra.</span></label>
       <label class="check"><input type="checkbox" id="cTrAlways" ${S.showTr ? 'checked' : ''}><span>Mostrar siempre la traducción de la oración marcada (si no, 文 la muestra solo para la oración que elijas). Con la traducción a la vista, las palabras de esa oración no suben.</span></label>
-      <label class="check"><input type="checkbox" id="cPy" ${S.pinyin !== false ? 'checked' : ''}><span>Chino: mostrar el pinyin (con tildes) debajo de los caracteres.</span></label>
-      <label class="check"><input type="checkbox" id="cPyK" ${S.pinyinKnown === false ? 'checked' : ''}><span>Chino: ocultar el pinyin de las palabras que ya sé (las que no tienen marca).</span></label>
+      <label class="check"><input type="checkbox" id="cPy" ${S.pinyin === false ? 'checked' : ''}><span>Chino: ocultar el pinyin (la oración marcada y la frase seleccionada lo muestran igual).</span></label>
+      <label class="check"><input type="checkbox" id="cPyK" ${S.pinyinKnown === false ? 'checked' : ''}><span>Chino: ocultar el pinyin de las palabras que ya sé, las que no tienen marca (la oración marcada lo muestra igual).</span></label>
       <label class="check"><input type="checkbox" id="cFade" ${S.fadeTop !== false ? 'checked' : ''}><span>Desvanecer la parte de arriba del texto, para leer un poco más abajo (lo que se desvanece cuenta como leído).</span></label>
       <label class="check"><input type="checkbox" id="cSilent" ${S.silentRead !== false ? 'checked' : ''}><span>Contar la lectura sin voz: al bajar la página, cuentan como leídas las palabras de la primera línea de la pantalla (justo antes de desaparecer), si estuvieron un momento a la vista; las que pasan de largo no. La marca te sigue.</span></label></div>
     <div class="box"><h3>Mi nivel</h3><div class="conj" style="align-items:center">${Object.entries(LANGS).map(([k, L]) => `<span>${L.native}</span>${sel('lv_' + k, CEFR.map(c => [c, lvLabel(k, c)]), myLevel(k))}`).join('')}</div></div>
@@ -2609,7 +2620,7 @@ function openSettings(){
   on('cAuto', 'change', e => { S.autoAnalyze = e.target.checked; saveSet(); });
   on('cSilent', 'change', e => { S.silentRead = e.target.checked; saveSet(); });
   on('cFade', 'change', e => { S.fadeTop = e.target.checked; saveSet(); });
-  on('cPy', 'change', e => { S.pinyin = e.target.checked; saveSet(); if (BOOK && CH && !$('player').hidden) renderReaderKeep(); });
+  on('cPy', 'change', e => { S.pinyin = !e.target.checked; saveSet(); if (BOOK && CH && !$('player').hidden) renderReaderKeep(); });
   on('cPyK', 'change', e => { S.pinyinKnown = !e.target.checked; saveSet(); if (BOOK && CH && !$('player').hidden) renderReaderKeep(); });
   on('cTrAlways', 'change', e => { S.showTr = e.target.checked; saveSet(); });
   on('sPar', 'change', e => { S.simpPar = +e.target.value; saveSet(); });
