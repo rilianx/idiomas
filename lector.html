@@ -143,7 +143,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-16 · 66';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-17 · 67';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -216,7 +216,7 @@ function ensureEntry(tok, sentence){
    - Palabra nueva (nunca consultada) que pasas sin pedir su traducción: queda sabida, 100 %.
    - Palabra que ya habías consultado alguna vez y pasas sin pedir traducción: sube 10 puntos (como mucho una vez por minuto).
    - Pedir la traducción de una palabra: si es nueva queda en 0; si no, baja 30 puntos.
-   - Pedir la traducción o la explicación de una frase: sus palabras no suben ni bajan.
+   - Ver la traducción o la explicación de una frase: no cambia nada; al pasarla, sus palabras suben igual, salvo las que tocaste.
    El puntaje se guarda como un intervalo (en días) para que lo entienda también «Hablemos»: 100 % = 60 días. */
 function srsOf(e){
   if (!e.srs) e.srs = { ivl: e.status === 'conocida' ? 21 : 0, ease: 2.5, due: 0, reps: 0, lapses: 0, last: 0, lapsedAt: 0 };
@@ -1100,7 +1100,7 @@ function silentRead(){
 // una palabra que pasaste leyendo en silencio (las mismas reglas que al pasar una oración)
 function creditWord(p, si, tok){
   const k = anaKey(p), rec = ANA.get(k), st = rec?.sents?.[si];
-  if (!st || rec.seenEs[si]) return false;                  // pediste la traducción de esa frase: no cambia
+  if (!st) return false;   // (aunque hayas visto la traducción de la oración: solo no suben las palabras que tocaste)
   const l = lemmaOf(tok); if (!l || SKIP_POS.has(tok.pos) || PEEK.has(`${k}#${si}#${l}`)) return false;
   let e = DICT[l];
   if (!e) { if (!tok.cefr || lvIdx(tok.cefr) < lvIdx(myLevel(LANG()))) return false; e = ensureEntry(tok, st.text); }
@@ -1291,7 +1291,7 @@ function prev(){
 }
 function creditSentence(p, s, how = 'avance'){
   const k = anaKey(p), rec = ANA.get(k);
-  if (!rec || rec.done[s] || rec.seenEs[s]) return;
+  if (!rec || rec.done[s]) return;
   const st = rec.sents[s]; if (!st) return;
   CREDIT_CTX = { how, text: st.text };
   const seen = new Set(); let changed = false;
@@ -1533,7 +1533,7 @@ async function showTr(){
   let h = '';
   if (S.showTr || once) {
     const rec = ANA.get(anaKey(CUR.p));
-    if (rec) { rec.seenEs[CUR.s] = true; dbPut('ana', rec); }   // pediste la traducción: esa oración no suma
+    if (rec) { rec.seenEs[CUR.s] = true; dbPut('ana', rec); }   // (oración marcada: entra a los ejercicios)
     const es = trGet(CUR.p, CUR.s);
     h += `<div class="lab">Traducción de la oración</div><p>${es !== undefined ? esc(es || '—') : '<span class="busy">traduciendo…</span>'}</p>
       <div class="row" style="margin:2px 0 6px"><button class="chip" id="trExplain">🎓 Explicar esta oración en detalle</button></div>`;
@@ -1575,7 +1575,7 @@ document.addEventListener('click', ev => {
 });
 let TIP_KEY = null;   // la palabra cuya traducción está a la vista
 // al marcar una oración tocándola, su traducción se escribe debajo (sin pedirla); se va al pasar a otra oración.
-// Como con 文, con la traducción a la vista las palabras de esa oración no suben.
+// La oración queda «marcada» (entra a los ejercicios); sus palabras siguen subiendo al pasarla, salvo las que tocaste.
 let TR_TAP = null; const PICK_MEM = new Set();
 function showTapTr(){
   // se escribe en el espacio entre líneas, debajo de cada línea de la oración (repartida según su largo), sin mover el texto
@@ -1836,7 +1836,7 @@ $('selbtn').onclick = () => { const s = $('selbtn')._sel; hideSelBtn(); getSelec
 async function explainPhrase(sel, again = false){
   const { text, p, si, p2, si2 } = sel;
   hideTip();
-  // las oraciones seleccionadas no suben al pasar (pediste ayuda con ellas)
+  // las oraciones seleccionadas quedan marcadas (entran a los ejercicios)
   const [a, b] = p < p2 || (p === p2 && si <= si2) ? [[p, si], [p2, si2]] : [[p2, si2], [p, si]];
   const whole = [], range = [];
   for (let pp = a[0]; pp <= b[0]; pp++) for (let ss = pp === a[0] ? a[1] : 0; ss <= (pp === b[0] ? b[1] : CH.sents[pp].length - 1); ss++) {
@@ -2776,8 +2776,8 @@ function openSettings(){
       <div class="field"><label>Simplificar y traducir libros</label>${sel('mSimp', SIMP_MODELS, S.simpModel)}<div class="small">También se elige en la ficha de cada libro (ℹ). Se usa también para la lista de nombres y para reescribir lo que quedó sobre el nivel.</div></div>
       <div class="field"><label>Revisar el nivel de la simplificación</label>${sel('mCheck', [...CHAT_MODELS, ...DEF_MODELS.filter(([m]) => !CHAT_MODELS.some(c => c[0] === m))], CHECK_MODEL())}<div class="small">Busca palabras y gramática sobre el nivel en cada parte. Uno barato suele bastar; uno mejor detecta más.</div></div>
       <label class="check"><input type="checkbox" id="cAuto" ${S.autoAnalyze ? 'checked' : ''}><span>Traducir por adelantado los párrafos que vas a leer (la palabra que toques ya estará lista). Si no, se traduce el párrafo al tocar una palabra.</span></label>
-      <label class="check"><input type="checkbox" id="cTrTap" ${S.trOnTap !== false ? 'checked' : ''}><span>Al marcar una oración tocándola, escribir su traducción debajo (sin pedirla). Con la traducción a la vista, las palabras de esa oración no suben.</span></label>
-      <label class="check"><input type="checkbox" id="cTrAlways" ${S.showTr ? 'checked' : ''}><span>Mostrar siempre la traducción de la oración marcada (si no, aparece debajo al marcar una oración tocándola). Con la traducción a la vista, las palabras de esa oración no suben.</span></label>
+      <label class="check"><input type="checkbox" id="cTrTap" ${S.trOnTap !== false ? 'checked' : ''}><span>Al marcar una oración tocándola, escribir su traducción debajo (sin pedirla). Sus palabras suben igual al pasarla, salvo las que tocaste.</span></label>
+      <label class="check"><input type="checkbox" id="cTrAlways" ${S.showTr ? 'checked' : ''}><span>Mostrar siempre la traducción de la oración marcada (si no, aparece debajo al marcar una oración tocándola).</span></label>
       <label class="check"><input type="checkbox" id="cPy" ${S.pinyin === false ? 'checked' : ''}><span>Chino: ocultar el pinyin (la oración marcada y la frase seleccionada lo muestran igual).</span></label>
       <label class="check"><input type="checkbox" id="cPyK" ${S.pinyinKnown === false ? 'checked' : ''}><span>Chino: ocultar el pinyin de las palabras que ya sé, las que no tienen marca (la oración marcada lo muestra igual).</span></label>
       <label class="check"><input type="checkbox" id="cFade" ${S.fadeTop !== false ? 'checked' : ''}><span>Desvanecer la parte de arriba del texto, para leer un poco más abajo (lo que se desvanece cuenta como leído).</span></label>
@@ -2819,7 +2819,7 @@ function openSettings(){
       <li>Una palabra <b>nueva</b> (subrayada) que pasas sin pedir su traducción queda <b>sabida: 100 %</b>. «Pasar» es avanzar de oración (▶ o ⏭) o, leyendo en silencio, que llegue a la primera línea de la pantalla, justo antes de desaparecer (su párrafo tiene que haber estado un momento a la vista).</li>
       <li>Una palabra que ya habías consultado alguna vez y pasas sin pedir traducción <b>sube 10 puntos</b> (como mucho una vez por minuto).</li>
       <li>Pedir la traducción de una palabra: si es nueva, queda en <b>0</b>; si no, <b>baja 30 puntos</b>.</li>
-      <li>Ver la traducción de una oración o la explicación de una frase: sus palabras <b>ni suben ni bajan</b>.</li>
+      <li>Ver la traducción de una oración o la explicación de una frase: <b>no cambia nada</b>; al pasarla, sus palabras suben igual, salvo las que tocaste para ver su traducción.</li>
       <li>Las <b>nuevas</b> se subrayan en verde; las que estás <b>aprendiendo</b> (ya las consultaste) tienen fondo azul, más claro cuanto más las sabes; las <b>sabidas</b> (100 %) no tienen marca. Al llegar a 100 %: 🎉.</li></ul></div>
     <div class="box"><h3>Gasto (estimado)</h3>${usageHTML()}</div>
     <p class="small" style="text-align:center">Leamos · versión ${APP_VERSION}</p>`;
