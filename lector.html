@@ -143,7 +143,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-17 · 67';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-21 · 68';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -1367,12 +1367,33 @@ async function cloudAudio(text, lang = LANG()){
 async function sayText(text, lang = LANG(), rate = S.rate){
   if (!text) return;
   if (cloudOn()) {
-    try { const url = await cloudAudio(text, lang); WORD_AUDIO.src = url; WORD_AUDIO.playbackRate = rate; await WORD_AUDIO.play(); return; }
+    try { const url = await cloudAudio(text, lang); WORD_AUDIO.ontimeupdate = null; WORD_AUDIO.src = url; WORD_AUDIO.playbackRate = rate; await WORD_AUDIO.play(); return; }
     catch (e) { console.warn('voz OpenAI:', e.message); }
   }
   if ('speechSynthesis' in window) { speechSynthesis.cancel(); speechSynthesis.speak(utter(text, lang, rate)); }
 }
 function speakWord(text){ if (!PLAY) sayText(text); }
+// decir solo una oración (al marcarla tocándola), sin seguir leyendo. Con la voz de Edge se usa el audio del párrafo
+// (el mismo que al leer, y queda guardado): suena desde su primera palabra hasta la siguiente oración.
+async function saySentence(p, s){
+  if (PLAY || !CH || CH.missing) return;
+  const text = sentText(p, s).trim(); if (!/[\p{L}\p{N}]/u.test(text)) return;
+  if (cloudOn() && S.ttsProv === 'edge') {
+    try {
+      const c = chunkOf(p, s), url = await cloudAudio(c.text);
+      if (PLAY || CUR.p !== p || CUR.s !== s) return;
+      const marks = AUDIO_WORDS.get(url) || [];
+      const m0 = s === c.a ? 0 : msAt(marks, c.pos[s - c.a]), m1 = s + 1 < c.b ? msAt(marks, c.pos[s + 1 - c.a]) : null;
+      const t0 = Math.max(0, (m0 || 0) / 1000 - 0.08), t1 = m1 == null ? Infinity : m1 / 1000 - 0.08, A = WORD_AUDIO;
+      if ('speechSynthesis' in window) speechSynthesis.cancel();
+      A.pause(); A.src = url; A.playbackRate = S.rate;
+      A.ontimeupdate = () => { if (A.currentTime >= t1) A.pause(); };
+      if (t0 > 0) A.addEventListener('loadedmetadata', () => { if (A.src === url) A.currentTime = t0; }, { once: true });
+      await A.play(); return;
+    } catch (e) { console.warn('voz de Edge:', e.message); }
+  }
+  sayText(text);
+}
 let PLAY = false, UTT = null, WAKE = null;
 // la última palabra tocada (sin estar leyendo): ▶ parte desde ahí
 let FROM = null, START_OFF = 0;
@@ -1566,6 +1587,7 @@ document.addEventListener('click', ev => {
   if (!PLAY && (CUR.p !== info.p || CUR.s !== info.si)) {
     hideTip(); setCursor(info.p, info.si, { scroll: '' }); setFrom(info.p, info.si, +w.dataset.o);
     if (S.trOnTap !== false) { TR_TAP = { p: info.p, s: info.si }; showTapTr(); }
+    if (S.speakSent !== false) saySentence(info.p, info.si);
     return;
   }
   // 3.er toque (la misma palabra con su traducción a la vista): la ficha con la explicación detallada
@@ -1832,7 +1854,7 @@ function checkSel(){
 }
 function hideSelBtn(){ $('selbtn').hidden = true; }
 $('selbtn').addEventListener('pointerdown', e => e.preventDefault());
-$('selbtn').onclick = () => { const s = $('selbtn')._sel; hideSelBtn(); getSelection()?.removeAllRanges(); if (s) explainPhrase(s); };
+$('selbtn').onclick = () => { const s = $('selbtn')._sel; hideSelBtn(); getSelection()?.removeAllRanges(); if (s) { if (S.speakSent !== false && !PLAY) sayText(s.text); explainPhrase(s); } };
 async function explainPhrase(sel, again = false){
   const { text, p, si, p2, si2 } = sel;
   hideTip();
@@ -2796,6 +2818,7 @@ function openSettings(){
       <div class="field"><label>Voz del navegador (${esc(LANGS[lang].name)})</label>${vs.length ? sel('vVoice', [['', lang === 'ko' && load('hab-set', {}).voice ? 'La misma de «Hablemos» (' + load('hab-set', {}).voice + ')' : 'La primera disponible'], ...[...vs].sort((a, b) => /natural|online|neural/i.test(b.name) - /natural|online|neural/i.test(a.name)).map(v => [v.name, (/natural|online|neural/i.test(v.name) ? '★ ' : '') + v.name + ' · ' + v.lang])], S.voices[lang] || '') + (vs.some(v => /natural|online/i.test(v.name)) ? '<div class="small">★ = voz natural (en Microsoft Edge, las «Online (Natural)» son las mismas de edge-tts, gratis).</div>' : '<div class="small">En <b>Microsoft Edge</b> el navegador trae voces naturales gratis («Online (Natural)»): abre Leamos en Edge y elígelas aquí.</div>') : '<div class="small">No hay voces de este idioma en el sistema; se usará la voz por defecto.</div>'}</div>
       <div class="field"><label>Velocidad: <b id="rateV">${S.rate}</b></label><input type="range" id="rRate" min="0.5" max="1.4" step="0.05" value="${S.rate}" style="width:100%"></div>
       <label class="check"><input type="checkbox" id="cSay" ${S.autoSpeakWord ? 'checked' : ''}><span>Decir la palabra al tocarla (si no está leyendo)</span></label>
+      <label class="check"><input type="checkbox" id="cSaySent" ${S.speakSent !== false ? 'checked' : ''}><span>Decir la oración al marcarla tocándola, o el trozo que seleccionas (solo eso, sin seguir leyendo)</span></label>
       <button class="btn sec" id="vTest">🔊 Probar</button></div>
     <div class="box"><h3>Simplificar</h3>
       <div class="field"><label>Pedidos simultáneos a la API</label><select id="sPar">${[5, 10, 20, 50, 100].map(n => `<option value="${n}" ${n === SIMP_PAR() ? 'selected' : ''}>${n}${n === 50 ? ' (por defecto)' : ''}</option>`).join('')}</select>
@@ -2850,6 +2873,7 @@ function openSettings(){
   on('vInstr', 'change', e => { S.ttsInstr = e.target.value.trim(); saveSet(); });
   on('rRate', 'input', e => { S.rate = +e.target.value; $('rateV').textContent = S.rate; saveSet(); });
   on('cSay', 'change', e => { S.autoSpeakWord = e.target.checked; saveSet(); });
+  on('cSaySent', 'change', e => { S.speakSent = e.target.checked; saveSet(); });
   on('vTest', 'click', () => sayText(lang === 'ko' ? '안녕하세요. 오늘은 무슨 책을 읽을까요?' : lang === 'en' ? 'Hello! What shall we read today?' : LANGS[lang].native, lang));
   on('rFs', 'input', e => { S.fs = +e.target.value; $('fsV').textContent = S.fs; applyLook(); saveSet(); });
   on('sTheme', 'change', e => { S.theme = e.target.value; applyLook(); saveSet(); });
