@@ -143,7 +143,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-21 · 68';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-21 · 69';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -1384,10 +1384,14 @@ async function saySentence(p, s){
       if (PLAY || CUR.p !== p || CUR.s !== s) return;
       const marks = AUDIO_WORDS.get(url) || [];
       const m0 = s === c.a ? 0 : msAt(marks, c.pos[s - c.a]), m1 = s + 1 < c.b ? msAt(marks, c.pos[s + 1 - c.a]) : null;
-      const t0 = Math.max(0, (m0 || 0) / 1000 - 0.08), t1 = m1 == null ? Infinity : m1 / 1000 - 0.08, A = WORD_AUDIO;
+      // (se corta un poco antes de la primera palabra de la siguiente: en la pausa entre las dos)
+      const t0 = Math.max(0, (m0 || 0) / 1000 - 0.08), t1 = m1 == null ? Infinity : m1 / 1000 - 0.22, A = WORD_AUDIO;
       if ('speechSynthesis' in window) speechSynthesis.cancel();
-      A.pause(); A.src = url; A.playbackRate = S.rate;
-      A.ontimeupdate = () => { if (A.currentTime >= t1) A.pause(); };
+      A.pause(); A.src = url; A.playbackRate = S.rate; A.ontimeupdate = null;
+      // timeupdate llega cada ~¼ s (se pasaba un poco): se mira en cada cuadro
+      const gen = (saySentence.gen = (saySentence.gen || 0) + 1);
+      const watch = () => { if (saySentence.gen !== gen || A.src !== url) return; if (A.currentTime >= t1) { A.pause(); return; } if (!A.paused || A.readyState < 3) requestAnimationFrame(watch); };
+      if (t1 < Infinity) requestAnimationFrame(watch);
       if (t0 > 0) A.addEventListener('loadedmetadata', () => { if (A.src === url) A.currentTime = t0; }, { once: true });
       await A.play(); return;
     } catch (e) { console.warn('voz de Edge:', e.message); }
