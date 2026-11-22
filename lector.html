@@ -143,7 +143,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-21 · 69';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-22 · 70';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -807,6 +807,7 @@ function simpSystem(src, lang, lvl){
     '- Usa EXACTAMENTE la forma de los NOMBRES Y TÉRMINOS que vienen en el pedido (siempre igual en todo el libro). Puedes usar esos términos clave aunque estén sobre el nivel.',
     '- Si un párrafo es un título, déjalo como título corto y solo en su párrafo.',
     '- Si vienen PALABRAS QUE EL LECTOR YA CONOCE, prefiérelas cuando sirvan.',
+    '- Si vienen PALABRAS QUE EL LECTOR ESTÁ APRENDIENDO, úsalas cada vez que tengan sentido y respeten el nivel: prefiere esa palabra o ese verbo antes que un sinónimo, para que el lector las vea seguido. Nunca las fuerces donde no encajan ni cambies la historia para meterlas.',
     '- Usa comillas en todos los diálogos.'
   ].join('\n');
 }
@@ -1932,6 +1933,11 @@ function knownWordsHint(lang){
   const d = lang === DLANG ? DICT : load(dictKey(lang), {});
   return Object.values(d).filter(e => scoreOf(e) >= 50 && !SKIP_POS.has(e.pos)).sort((a, b) => (b.last || 0) - (a.last || 0)).slice(0, 250).map(e => e.lemma).join(', ');
 }
+// las que estás aprendiendo (consultadas, sin llegar a 100 %): al simplificar se prefieren cuando encajan (opcional)
+function learningWordsHint(lang){
+  const d = lang === DLANG ? DICT : load(dictKey(lang), {});
+  return Object.values(d).filter(e => e.srs && !SKIP_POS.has(e.pos) && scoreOf(e) < 100 && !isNewWord(e)).sort((a, b) => (b.last || 0) - (a.last || 0)).slice(0, 150).map(e => e.lemma).join(', ');
+}
 const glossText = terms => (terms || []).map(t => `${t.src} → ${t.dst}${t.note ? ' (' + t.note + ')' : ''}`).join('; ');
 // un capítulo en trozos de hasta ~2500 caracteres o 40 párrafos (se simplifican en paralelo)
 function simpChunks(paras){
@@ -1951,7 +1957,8 @@ function chunkContext(paras, from, to){
 async function simplifyChunk(b, ver, model, chunk, known, terms, stats, ctx = {}){
   const lang = verLang(b, ver), lvl = verLvl(ver), sys = simpSystem(b.lang, lang, lvl);
   const head = `LIBRO: «${b.title}»${b.author ? ' de ' + b.author : ''}\nIDIOMA DE LA VERSIÓN: ${LANGS[lang].name}\nNIVEL: ${lvLabel(lang, lvl)}\n` +
-    (terms?.length ? `NOMBRES Y TÉRMINOS (usa exactamente esta forma): ${glossText(terms)}\n` : '') + (known ? `PALABRAS QUE EL LECTOR YA CONOCE: ${known}\n` : '');
+    (terms?.length ? `NOMBRES Y TÉRMINOS (usa exactamente esta forma): ${glossText(terms)}\n` : '') + (known?.known ? `PALABRAS QUE EL LECTOR YA CONOCE: ${known.known}\n` : '') +
+    (known?.learn ? `PALABRAS QUE EL LECTOR ESTÁ APRENDIENDO (úsalas cuando tengan sentido): ${known.learn}\n` : '');
   const user = head + (ctx.before ? `\nCONTEXTO ANTERIOR (original, no lo reescribas):\n${ctx.before}\n` : '') +
     `\nPÁRRAFOS (${chunk.length}):\n` + chunk.map((t, i) => `[${i + 1}] ${t}`).join('\n\n') +
     (ctx.after ? `\n\nCONTEXTO SIGUIENTE (original, no lo reescribas):\n${ctx.after}` : '');
@@ -2023,7 +2030,7 @@ async function simplifyBook(b, lvl, model, only = null){
   const job = { doneCh: 0, totalCh: chs.length, doneParts: 0, totalParts: 0, failed: 0, err: '' };
   SIMP_JOBS.set(key, job);
   await dbPut('books', b); refreshViews();
-  const known = knownWordsHint(verLang(b, lvl)), tasks = [], chapters = new Map();
+  const known = { known: knownWordsHint(verLang(b, lvl)), learn: S.simpLearn !== false ? learningWordsHint(verLang(b, lvl)) : '' }, tasks = [], chapters = new Map();
   // nombres y términos fijos (una vez por versión; se guardan con ella)
   if (!b.versions[lvl].glossary) {
     job.phase = 'nombres';  refreshViews();
@@ -2827,6 +2834,7 @@ function openSettings(){
     <div class="box"><h3>Simplificar</h3>
       <div class="field"><label>Pedidos simultáneos a la API</label><select id="sPar">${[5, 10, 20, 50, 100].map(n => `<option value="${n}" ${n === SIMP_PAR() ? 'selected' : ''}>${n}${n === 50 ? ' (por defecto)' : ''}</option>`).join('')}</select>
       <label class="check"><input type="checkbox" id="cCheck" ${S.simpCheck !== false ? 'checked' : ''}><span>Revisar el nivel: después de cada parte, el modelo barato busca palabras o gramática sobre el nivel y esos párrafos se reescriben (más fiel al nivel; cuesta ~35 % más).</span></label>
+      <label class="check"><input type="checkbox" id="cLearn" ${S.simpLearn !== false ? 'checked' : ''}><span>Al simplificar o traducir, usar las palabras que estoy aprendiendo cada vez que tengan sentido (sin salirse del nivel), para verlas más seguido.</span></label>
       <label class="check"><input type="checkbox" id="cCuts" ${S.showCuts !== false ? 'checked' : ''}><span>Mostrar con una línea punteada dónde se cortó el capítulo en partes al simplificar (para revisar si se pierde el hilo justo ahí).</span></label>
       <div class="small">Más pedidos a la vez = el libro se simplifica antes. Si tu cuenta tiene un límite bajo de pedidos por minuto, la API rechaza algunos y la app los reintenta (más lento); si ves fallas, baja este número.</div></div></div>
     <div class="box"><h3>Gutenberg y voz de Edge: tu intermediario (opcional)</h3>
@@ -2867,6 +2875,7 @@ function openSettings(){
   on('cTrTap', 'change', e => { S.trOnTap = e.target.checked; saveSet(); if (!S.trOnTap) { TR_TAP = null; showTapTr(); } });
   on('sPar', 'change', e => { S.simpPar = +e.target.value; saveSet(); });
   on('cCheck', 'change', e => { S.simpCheck = e.target.checked; saveSet(); });
+  on('cLearn', 'change', e => { S.simpLearn = e.target.checked; saveSet(); });
   on('cCuts', 'change', e => { S.showCuts = e.target.checked; saveSet(); if (BOOK && CH && !$('player').hidden) renderReaderKeep(); });
   for (const k of Object.keys(LANGS)) on('lv_' + k, 'change', e => { S.myLevel[k] = e.target.value; saveSet(); });
   on('vVoice', 'change', e => { S.voices[lang] = e.target.value; saveSet(); });
