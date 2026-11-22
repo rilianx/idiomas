@@ -143,7 +143,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-22 · 70';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-22 · 71';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -2456,6 +2456,7 @@ async function drawBook(id){
   const cost = m => { const c = simpCost(chars, lang, m); return c === null ? 'sin precio' : '~' + money(c); };
   const vers = Object.entries(b.versions || {}).sort((x, y) => verName(b, x[0]).localeCompare(verName(b, y[0])));
   const tl = S.simpLang && LANGS[S.simpLang] ? S.simpLang : lang, trn = tl !== lang;
+  const curCh = BOOK?.id === id && CH ? CH.ch : (b.pos?.ch || 0);   // el capítulo que estás leyendo (para «Rehacer el capítulo»)
   let h = `<div class="box"><div class="meta small">${esc(b.author || '')} · ${b.chapters.length} capítulos · ~${words.toLocaleString('es')} palabras</div>
     <div class="field"><label>Idioma del libro</label><select id="bLang">${Object.entries(LANGS).map(([k, L]) => `<option value="${k}" ${k === lang ? 'selected' : ''}>${L.native} · ${L.name}</option>`).join('')}</select></div>
     <div class="field"><label>Mi nivel en ${esc(LANGS[lang].name)}</label><select id="bMy">${CEFR.map(c => `<option ${c === my ? 'selected' : ''}>${c}</option>`).join('')}</select>
@@ -2476,7 +2477,7 @@ async function drawBook(id){
     const d = (v.done || []).filter(Boolean).length, job = SIMP_JOBS.get(`${id}|${lvl}`);
     h += `<div class="prog"><b>${esc(verName(b, lvl))}</b> <span class="small">${verKind(b, lvl)}</span> · ${d}/${b.chapters.length} capítulos · ${esc(mname(v.model))}${job ? ` · <span class="busy">${job.phase === 'nombres' ? 'preparando la lista de nombres…' : `preparando: ${job.doneParts}/${job.totalParts} partes, ${SIMP_PAR()} a la vez${job.fixed ? ` · ${job.fixed} párrafos reescritos por estar sobre el nivel` : ''}…`}</span>` : ''}
       <div class="bar"><i style="width:${job && job.totalParts ? 100 * job.doneParts / job.totalParts : 100 * d / b.chapters.length}%"></i></div>
-      <div class="row" style="margin-top:6px"><button class="btn sec" data-readv="${lvl}">Leer</button>${d < b.chapters.length && !job ? `<button class="btn sec" data-cont="${lvl}">Completar</button>` : ''}${!job ? `<button class="btn sec" data-redo="${lvl}">Rehacer</button>` : ''}<button class="btn sec" data-del="${lvl}">Borrar</button></div></div>`;
+      <div class="row" style="margin-top:6px"><button class="btn sec" data-readv="${lvl}">Leer</button>${d < b.chapters.length && !job ? `<button class="btn sec" data-cont="${lvl}">Completar</button>` : ''}${!job && v.done?.[curCh] ? `<button class="btn sec" data-redoch="${lvl}">↻ Rehacer el capítulo ${curCh + 1}</button>` : ''}${!job ? `<button class="btn sec" data-redo="${lvl}">Rehacer todo</button>` : ''}<button class="btn sec" data-del="${lvl}">Borrar</button></div></div>`;
   }
   h += `<p class="small">Reescribe cada párrafo con vocabulario y gramática del nivel elegido, sin cambiar la historia: en el mismo idioma (simplificar) o en otro (traducir y adaptar). Normalmente queda un párrafo por cada uno del original, pero el modelo puede juntar o dividir párrafos si la escena se entiende mejor; cada uno sabe de qué párrafos originales viene (en la lectura, ¶ muestra el original). Puedes hacerlo con todo el libro o ir capítulo por capítulo mientras lees.</p>
     <div class="field"><label>Idioma</label><select id="bTl">${Object.entries(LANGS).map(([k, L]) => `<option value="${k}" ${k === tl ? 'selected' : ''}>${L.native} · ${L.name}${k === lang ? ' (el del libro)' : ''}</option>`).join('')}</select></div>
@@ -2500,6 +2501,7 @@ async function drawBook(id){
   $('bSimpAll').onclick = () => { if (!KEYS[provOf(S.simpModel)]) { toast('Falta la clave de la API (⚙ Ajustes).'); return; } simplifyBook(b, verKey(b, tl, $('bTgt').value), S.simpModel); };
   $('bSimpRead').onclick = async () => { const lvl = verKey(b, tl, $('bTgt').value); b.versions[lvl] = b.versions[lvl] || { model: S.simpModel, lang: tl, done: [], date: Date.now() }; await dbPut('books', b); closePanel(); await openBook(id, lvl); };
   $('pbody').querySelectorAll('[data-readv]').forEach(x => x.onclick = () => { closePanel(); openBook(id, x.dataset.readv); });
+  $('pbody').querySelectorAll('[data-redoch]').forEach(x => x.onclick = async () => { closePanel(); await redoChapter(b, x.dataset.redoch, curCh); });
   $('pbody').querySelectorAll('[data-redo]').forEach(x => x.onclick = async () => {
     const v = x.dataset.redo;
     if (!confirm(`¿Rehacer la versión ${verName(b, v)}? Se borra lo hecho (y sus traducciones) y se vuelve a preparar todo el libro con ${mname(S.simpModel)}.`)) return;
