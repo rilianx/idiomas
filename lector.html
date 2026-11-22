@@ -143,7 +143,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-22 · 71';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-22 · 72';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -2030,7 +2030,7 @@ async function simplifyBook(b, lvl, model, only = null){
   const job = { doneCh: 0, totalCh: chs.length, doneParts: 0, totalParts: 0, failed: 0, err: '' };
   SIMP_JOBS.set(key, job);
   await dbPut('books', b); refreshViews();
-  const known = { known: knownWordsHint(verLang(b, lvl)), learn: S.simpLearn !== false ? learningWordsHint(verLang(b, lvl)) : '' }, tasks = [], chapters = new Map();
+  const known = { known: knownWordsHint(verLang(b, lvl)), learn: S.simpLearn === true ? learningWordsHint(verLang(b, lvl)) : '' }, tasks = [], chapters = new Map();
   // nombres y términos fijos (una vez por versión; se guardan con ella)
   if (!b.versions[lvl].glossary) {
     job.phase = 'nombres';  refreshViews();
@@ -2836,7 +2836,7 @@ function openSettings(){
     <div class="box"><h3>Simplificar</h3>
       <div class="field"><label>Pedidos simultáneos a la API</label><select id="sPar">${[5, 10, 20, 50, 100].map(n => `<option value="${n}" ${n === SIMP_PAR() ? 'selected' : ''}>${n}${n === 50 ? ' (por defecto)' : ''}</option>`).join('')}</select>
       <label class="check"><input type="checkbox" id="cCheck" ${S.simpCheck !== false ? 'checked' : ''}><span>Revisar el nivel: después de cada parte, el modelo barato busca palabras o gramática sobre el nivel y esos párrafos se reescriben (más fiel al nivel; cuesta ~35 % más).</span></label>
-      <label class="check"><input type="checkbox" id="cLearn" ${S.simpLearn !== false ? 'checked' : ''}><span>Al simplificar o traducir, usar las palabras que estoy aprendiendo cada vez que tengan sentido (sin salirse del nivel), para verlas más seguido.</span></label>
+      <label class="check"><input type="checkbox" id="cLearn" ${S.simpLearn === true ? 'checked' : ''}><span>Al simplificar o traducir, usar las palabras que estoy aprendiendo cada vez que tengan sentido (sin salirse del nivel), para verlas más seguido. Gasta más: la lista va en cada pedido.</span></label>
       <label class="check"><input type="checkbox" id="cCuts" ${S.showCuts !== false ? 'checked' : ''}><span>Mostrar con una línea punteada dónde se cortó el capítulo en partes al simplificar (para revisar si se pierde el hilo justo ahí).</span></label>
       <div class="small">Más pedidos a la vez = el libro se simplifica antes. Si tu cuenta tiene un límite bajo de pedidos por minuto, la API rechaza algunos y la app los reintenta (más lento); si ves fallas, baja este número.</div></div></div>
     <div class="box"><h3>Gutenberg y voz de Edge: tu intermediario (opcional)</h3>
