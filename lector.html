@@ -143,7 +143,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-24 · 74';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-24 · 75';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -2271,10 +2271,11 @@ async function kindleTranslate(b, ver, chapters, onProg){
   }
 }
 function kindleBody(c, lang){
-  return `<h2>${xesc(c.title)}</h2>\n` + c.paras.map(p => p.head ? `<h3>${xesc(p.sents.map(x => x.t).join(' '))}</h3>` :
-    `<p lang="${lang}">${p.sents.map(x => `<span class="s">${xesc(x.t)}</span>${x.es ? ` <span class="t" lang="es">${xesc(x.es)}</span>` : ''}`).join(' ')}</p>`).join('\n');
+  return `<h2>${xesc(c.title)}</h2>\n` + c.paras.filter(p => !(p.head && p.sents.map(x => x.t).join(' ').trim() === c.title.trim())).map(p => p.head ? `<h3>${xesc(p.sents.map(x => x.t).join(' '))}</h3>` :
+    `<div class="par">${p.sents.map(x => `<p class="s" lang="${lang}">${xesc(x.t)}</p>${x.es ? `<p class="t" lang="es">${xesc(x.es)}</p>` : ''}`).join('')}</div>`).join('\n');
 }
-const KINDLE_CSS = 'body{font-family:serif;line-height:1.5;margin:0 .3em}h2{margin:1.2em 0 .6em}p{margin:0 0 .8em;text-indent:0}.t{font-size:.62em;color:#555;font-family:sans-serif}';
+// cada oración en su línea y, debajo, su traducción en chico; los párrafos, separados por más espacio
+const KINDLE_CSS = 'body{font-family:serif;line-height:1.45;margin:0 .3em}h2{margin:1.2em 0 .6em}p{margin:0;text-indent:0}.par{margin:0 0 1.1em}.s{margin-top:.35em}.t{font-size:.65em;color:#555;font-family:sans-serif;line-height:1.3;margin:.1em 0 .25em}.s:lang(ko){word-break:keep-all}';
 function kindleEpub(b, ver, chapters){
   const one = chapters.length === 1 ? ` · ${chapters[0].ch + 1}. ${chapters[0].title}` : '';
   const lang = verLang(b, ver), title = `${b.title}${one}${ver !== 'o' ? ' · ' + verName(b, ver) : ''} (con traducción)`, id = 'leamos-' + b.id + '-' + ver + '-' + Date.now();
