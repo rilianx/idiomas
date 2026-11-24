@@ -143,7 +143,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-24 · 75';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-24 · 76';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -2270,20 +2270,31 @@ async function kindleTranslate(b, ver, chapters, onProg){
     onProg?.(Math.min(todo.length, i + 40), todo.length);
   }
 }
-function kindleBody(c, lang){
-  return `<h2>${xesc(c.title)}</h2>\n` + c.paras.filter(p => !(p.head && p.sents.map(x => x.t).join(' ').trim() === c.title.trim())).map(p => p.head ? `<h3>${xesc(p.sents.map(x => x.t).join(' '))}</h3>` :
-    `<div class="par">${p.sents.map(x => `<p class="s" lang="${lang}">${xesc(x.t)}</p>${x.es ? `<p class="t" lang="es">${xesc(x.es)}</p>` : ''}`).join('')}</div>`).join('\n');
+// notes: la traducción va como nota emergente (en Kindle, al tocar «es» después de la oración se abre en un recuadro)
+function kindleBody(c, lang, notes = false){
+  let n = 0; const asides = [];
+  const body = c.paras.filter(p => !(p.head && p.sents.map(x => x.t).join(' ').trim() === c.title.trim())).map(p => {
+    if (p.head) return `<h3>${xesc(p.sents.map(x => x.t).join(' '))}</h3>`;
+    if (!notes) return `<div class="par">${p.sents.map(x => `<p class="s" lang="${lang}">${xesc(x.t)}</p>${x.es ? `<p class="t" lang="es">${xesc(x.es)}</p>` : ''}`).join('')}</div>`;
+    return `<p class="pn" lang="${lang}">${p.sents.map(x => {
+      if (!x.es) return xesc(x.t);
+      const id = `c${c.ch}n${++n}`;
+      asides.push(`<aside epub:type="footnote" id="${id}"><p lang="es">${xesc(x.es)}</p></aside>`);
+      return `${xesc(x.t)}<a class="nr" epub:type="noteref" href="#${id}" id="r${id}"><sup>es</sup></a>`;
+    }).join(' ')}</p>`;
+  }).join('\n');
+  return `<h2>${xesc(c.title)}</h2>\n${body}${asides.length ? '\n' + asides.join('\n') : ''}`;
 }
 // cada oración en su línea y, debajo, su traducción en chico; los párrafos, separados por más espacio
-const KINDLE_CSS = 'body{font-family:serif;line-height:1.45;margin:0 .3em}h2{margin:1.2em 0 .6em}p{margin:0;text-indent:0}.par{margin:0 0 1.1em}.s{margin-top:.35em}.t{font-size:.65em;color:#555;font-family:sans-serif;line-height:1.3;margin:.1em 0 .25em}.s:lang(ko){word-break:keep-all}';
-function kindleEpub(b, ver, chapters){
+const KINDLE_CSS = 'body{font-family:serif;line-height:1.45;margin:0 .3em}h2{margin:1.2em 0 .6em}p{margin:0;text-indent:0}.par{margin:0 0 1.1em}.s{margin-top:.35em}.t{font-size:.65em;color:#555;font-family:sans-serif;line-height:1.3;margin:.1em 0 .25em}.s:lang(ko){word-break:keep-all}.pn{margin:0 0 .9em;line-height:1.6}a.nr{text-decoration:none;color:#666;font-family:sans-serif;font-size:.7em;padding:0 .25em}aside{font-size:.9em}';
+function kindleEpub(b, ver, chapters, notes = false){
   const one = chapters.length === 1 ? ` · ${chapters[0].ch + 1}. ${chapters[0].title}` : '';
   const lang = verLang(b, ver), title = `${b.title}${one}${ver !== 'o' ? ' · ' + verName(b, ver) : ''} (con traducción)`, id = 'leamos-' + b.id + '-' + ver + '-' + Date.now();
   const xhtml = (t, body) => `<?xml version="1.0" encoding="utf-8"?>\n<!DOCTYPE html>\n<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="${lang}" xml:lang="${lang}"><head><meta charset="utf-8"/><title>${xesc(t)}</title><link rel="stylesheet" type="text/css" href="style.css"/></head><body>${body}</body></html>`;
   const files = [['mimetype', 'application/epub+zip'],
     ['META-INF/container.xml', '<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>'],
     ['OEBPS/style.css', KINDLE_CSS]];
-  chapters.forEach((c, i) => files.push([`OEBPS/c${i + 1}.xhtml`, xhtml(c.title, kindleBody(c, lang))]));
+  chapters.forEach((c, i) => files.push([`OEBPS/c${i + 1}.xhtml`, xhtml(c.title, kindleBody(c, lang, notes))]));
   files.push(['OEBPS/nav.xhtml', xhtml('Índice', `<nav epub:type="toc" id="toc"><h1>Índice</h1><ol>${chapters.map((c, i) => `<li><a href="c${i + 1}.xhtml">${xesc(c.title)}</a></li>`).join('')}</ol></nav>`)]);
   files.push(['OEBPS/toc.ncx', `<?xml version="1.0" encoding="utf-8"?><ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><head><meta name="dtb:uid" content="${id}"/></head><docTitle><text>${xesc(title)}</text></docTitle><navMap>${chapters.map((c, i) => `<navPoint id="n${i + 1}" playOrder="${i + 1}"><navLabel><text>${xesc(c.title)}</text></navLabel><content src="c${i + 1}.xhtml"/></navPoint>`).join('')}</navMap></ncx>`]);
   files.push(['OEBPS/content.opf', `<?xml version="1.0" encoding="utf-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="uid">${id}</dc:identifier><dc:title>${xesc(title)}</dc:title><dc:language>${lang}</dc:language>${b.author ? `<dc:creator>${xesc(b.author)}</dc:creator>` : ''}<meta property="dcterms:modified">${new Date().toISOString().slice(0, 19)}Z</meta></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/><item id="css" href="style.css" media-type="text/css"/>${chapters.map((c, i) => `<item id="c${i + 1}" href="c${i + 1}.xhtml" media-type="application/xhtml+xml"/>`).join('')}</manifest><spine toc="ncx">${chapters.map((c, i) => `<itemref idref="c${i + 1}"/>`).join('')}</spine></package>`]);
@@ -2313,6 +2324,7 @@ async function openKindle(id){
     <p class="small">Crea un libro para leer en Kindle con la traducción de cada oración en letra chica, a continuación de la oración.</p>
     <div class="field"><label>Versión</label><select id="kVer">${vers.map(([v, l]) => `<option value="${v}" ${v === curV ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
     <div class="field"><label>Capítulos</label><select id="kChs"><option value="cur">Solo el que estoy leyendo: ${curCh + 1}. ${esc(b.chapters[curCh]?.title || '')}</option><option value="all">Todos los que estén listos</option></select></div>
+    <div class="field"><label>Traducción</label><select id="kStyle"><option value="below">Siempre a la vista: cada oración en su línea y la traducción chica debajo</option><option value="notes" ${S.kindleStyle === 'notes' ? 'selected' : ''}>Al tocar: «es» después de cada oración abre la traducción en un recuadro (nota emergente; solo EPUB)</option></select></div>
     <div class="field"><label>Formato</label><select id="kFmt"><option value="epub">EPUB (recomendado: el texto se acomoda a la pantalla del Kindle)</option><option value="pdf">PDF (se abre para imprimir → «Guardar como PDF»)</option></select></div>
     <div class="field"><label>Tu correo de Kindle (opcional)</label><input id="kMail" type="email" placeholder="nombre@kindle.com" value="${esc(S.kindleMail || '')}"><div class="small">En Amazon → Contenido y dispositivos → Preferencias → Envío de documentos personales. Tu correo tiene que estar en la lista de correos aprobados.</div></div>
     <div id="kInfo" class="small"></div>
@@ -2329,13 +2341,14 @@ async function openKindle(id){
   };
   ['kVer', 'kChs'].forEach(x => $(x).onchange = info); info();
   $('kMail').onchange = e => { S.kindleMail = e.target.value.trim(); saveSet(); };
+  $('kStyle').onchange = e => { S.kindleStyle = e.target.value; saveSet(); };
   $('kGo').onclick = async () => {
     if (!data) return;
     const v = $('kVer').value, btn = $('kGo'); btn.disabled = true;
     try {
       await kindleTranslate(b, v, data, (n, t) => { btn.textContent = `Traduciendo ${n}/${t}…`; });
       if ($('kFmt').value === 'pdf') { kindlePdf(b, v, data); btn.textContent = 'Crear y enviar'; btn.disabled = false; toast('En la ventana de impresión elige «Guardar como PDF» y luego envíalo a tu Kindle.'); return; }
-      const { blob, name } = kindleEpub(b, v, data);
+      const { blob, name } = kindleEpub(b, v, data, $('kStyle').value === 'notes');
       await kindleSend(blob, name);
     } catch (e) { toast('No se pudo crear: ' + errText(e)); }
     btn.textContent = 'Crear y enviar'; btn.disabled = false;
