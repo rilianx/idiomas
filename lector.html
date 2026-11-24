@@ -143,7 +143,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-24 · 84';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-24 · 85';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -2353,7 +2353,7 @@ function kindleReady(blob, name){
   const file = new File([blob], shareName(name), { type: blob.type });
   const can = !!navigator.canShare?.({ files: [file] });
   box.innerHTML = `<div class="form">✓ Listo: <b>${esc(name)}</b> (${Math.max(1, Math.round(blob.size / 1024))} KB)</div>
-    ${!can ? `<div class="small">El navegador de este celular no deja que una página comparta este tipo de archivo${/\.epub$/.test(name) ? ' (Chrome en Android no comparte EPUB)' : ''}. Para compartirlo con el menú del celular, elige <b>PDF</b> o <b>Texto</b> en «Formato»; o descarga el EPUB y súbelo en Send to Kindle.</div>` : ''}
+    ${!can ? `<div class="small">El navegador de este celular no deja que una página comparta este tipo de archivo${/\.epub$/.test(name) ? ' (Chrome en Android no comparte EPUB)' : ''}. Para compartirlo con el menú del celular, prueba con <b>PDF</b> o <b>Texto</b> en «Formato»; o descarga el EPUB y súbelo en Send to Kindle.</div>` : ''}
     <div class="row">${can ? `<button class="btn" id="kShare">📤 Compartir</button>` : ''}${!can && /\.epub$/.test(name) ? `<button class="btn sec" id="kStk">🌐 Descargar y abrir Send to Kindle</button>` : ''}<button class="btn sec" id="kDown">⬇ Descargar</button>${S.kindleMail ? `<button class="btn sec" id="kMailGo">✉ Correo a mi Kindle</button>` : ''}</div>`;
   if ($('kShare')) $('kShare').onclick = async () => {
     try { await navigator.share({ files: [file] }); }
@@ -2367,6 +2367,11 @@ function kindleReady(blob, name){
   if ($('kStk')) $('kStk').onclick = () => { downloadBlob(blob, shareName(name)); setTimeout(() => window.open('https://www.amazon.com/sendtokindle', '_blank'), 500); toast('En Send to Kindle toca «Seleccionar archivos» y elige el EPUB de Descargas.'); };
   if ($('kMailGo')) $('kMailGo').onclick = () => { downloadBlob(blob, shareName(name)); setTimeout(() => { location.href = `mailto:${encodeURIComponent(S.kindleMail)}?subject=${encodeURIComponent(name)}&body=${encodeURIComponent('Adjunta el archivo descargado: ' + name)}`; }, 600); };
   box.scrollIntoView({ block: 'nearest' });
+}
+// en HTML (una sola página; Kindle también lo acepta por correo), con la traducción como se haya elegido
+function kindleHtml(b, ver, chapters, notes = false){
+  const lang = verLang(b, ver);
+  return new Blob([`<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${xesc(b.title)}</title><style>${KINDLE_CSS}a.nr{text-decoration:none}</style></head><body>${chapters.map(c => kindleBody(c, lang, notes)).join('\n<mbp:pagebreak/>\n')}</body></html>`], { type: 'text/html' });
 }
 // en texto simple (lo único de libro que Chrome en Android deja compartir; Kindle también acepta .txt):
 // cada oración en su línea y su traducción debajo, con sangría
@@ -2392,7 +2397,7 @@ async function openKindle(id){
     <div class="field"><label>Versión</label><select id="kVer">${vers.map(([v, l]) => `<option value="${v}" ${v === curV ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
     <div class="field"><label>Capítulos</label><select id="kChs"><option value="cur">Solo el que estoy leyendo: ${curCh + 1}. ${esc(b.chapters[curCh]?.title || '')}</option><option value="all">Todos los que estén listos</option></select></div>
     <div class="field"><label>Traducción</label><select id="kStyle"><option value="below">Siempre a la vista: cada oración en su línea y la traducción chica debajo</option><option value="notes" ${S.kindleStyle === 'notes' ? 'selected' : ''}>Al tocar: «es» después de cada oración abre la traducción en un recuadro (nota emergente; solo EPUB)</option></select></div>
-    <div class="field"><label>Formato</label><select id="kFmt"><option value="epub">EPUB (recomendado: el texto se acomoda a la pantalla del Kindle)</option><option value="pdf">PDF (páginas fijas de 6×8 pulgadas; la traducción siempre a la vista)</option><option value="txt">Texto .txt (cada oración y su traducción debajo, sin formato)</option></select></div>
+    <div class="field"><label>Formato</label><select id="kFmt"><option value="epub">EPUB (recomendado: el texto se acomoda a la pantalla del Kindle)</option><option value="pdf">PDF (páginas fijas de 6×8 pulgadas; la traducción siempre a la vista)</option><option value="html">HTML (una página; el texto se acomoda como en EPUB)</option><option value="txt">Texto .txt (cada oración y su traducción debajo, sin formato)</option></select></div>
     <div class="field"><label>Tu correo de Kindle (opcional)</label><input id="kMail" type="email" placeholder="nombre@kindle.com" value="${esc(S.kindleMail || '')}"><div class="small">En Amazon → Contenido y dispositivos → Preferencias → Envío de documentos personales. Tu correo tiene que estar en la lista de correos aprobados.</div></div>
     <label class="check"><input type="checkbox" id="kRedo"><span>Volver a traducir todas las oraciones (si las traducciones quedaron corridas o mezcladas)</span></label>
     <div id="kInfo" class="small"></div>
@@ -2416,9 +2421,10 @@ async function openKindle(id){
     const v = $('kVer').value, btn = $('kGo'); btn.disabled = true;
     try {
       await kindleTranslate(b, v, data, (n, t) => { btn.textContent = `Traduciendo ${n}/${t}…`; }, $('kRedo').checked);
-      if ($('kFmt').value === 'txt') {
-        const one = data.length === 1 ? ` · ${data[0].ch + 1}. ${data[0].title}` : '';
-        kindleReady(kindleTxt(b, v, data), safeName(`${b.title}${one}${v !== 'o' ? ' · ' + verName(b, v) : ''} (con traducción)`) + '.txt');
+      if ($('kFmt').value === 'txt' || $('kFmt').value === 'html') {
+        const one = data.length === 1 ? ` · ${data[0].ch + 1}. ${data[0].title}` : '', base = safeName(`${b.title}${one}${v !== 'o' ? ' · ' + verName(b, v) : ''} (con traducción)`);
+        if ($('kFmt').value === 'txt') kindleReady(kindleTxt(b, v, data), base + '.txt');
+        else kindleReady(kindleHtml(b, v, data, $('kStyle').value === 'notes'), base + '.html');
         btn.textContent = 'Crear de nuevo'; btn.disabled = false; return;
       }
       if ($('kFmt').value === 'pdf') {
