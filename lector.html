@@ -143,7 +143,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-24 · 76';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-24 · 77';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -2253,24 +2253,32 @@ async function kindleChapters(b, ver, chs){
   }
   return out;
 }
-// las traducciones que falten, en pedidos de ~40 oraciones (quedan guardadas)
-async function kindleTranslate(b, ver, chapters, onProg){
+// las traducciones que falten (o todas, para rehacerlas), en pedidos de ~25 oraciones numeradas; cada una vuelve con
+// su número, así una oración juntada o saltada no corre las demás (las que falten se piden de nuevo en grupos chicos)
+const KTR_SCHEMA = obj({ items: { type: 'array', items: obj({ n: { type: 'integer' }, es: STR }) } });
+async function kindleTranslate(b, ver, chapters, onProg, all = false){
   const lang = verLang(b, ver), todo = [];
-  for (const c of chapters) for (const p of c.paras) if (!p.head) p.sents.forEach((x, si) => { if (!x.es && /[\p{L}\p{N}]/u.test(x.t)) todo.push({ p, si, x }); });
-  for (let i = 0; i < todo.length; i += 40) {
-    const part = todo.slice(i, i + 40);
-    const out = await askRetry(S.chatModel, `Traduce al español, de forma natural, oraciones numeradas y seguidas de un libro en ${LANGS[lang].name}. Devuelve en es una traducción por oración, en el mismo orden.`,
-      part.map((t, j) => `[${j + 1}] ${t.x.t}`).join('\n'), TR_SCHEMA, { effort: 'low', maxTokens: 8000, ms: 120000, kind: 'read', fast: true, retries: 6 });
-    part.forEach((t, j) => { t.x.es = out.es?.[j] || ''; });
+  for (const c of chapters) for (const p of c.paras) if (!p.head) p.sents.forEach((x, si) => { if ((all || !x.es) && /[\p{L}\p{N}]/u.test(x.t)) { x.es = ''; todo.push({ p, si, x }); } });
+  const sys = `Traduces al español, de forma natural y fiel, oraciones numeradas y seguidas de un libro en ${LANGS[lang].name}. Traduce CADA número por separado: una traducción por número, con ese mismo número en n. Nunca juntes dos oraciones en una ni partas una en dos, ni muevas texto de un número a otro, aunque una oración esté cortada (p. ej. un diálogo que sigue en la siguiente): tradúcela igual tal como viene. Usa las vecinas solo como contexto.`;
+  const run = async list => {
+    const out = await askRetry(S.chatModel, sys, list.map((t, j) => `[${j + 1}] ${t.x.t}`).join('\n'), KTR_SCHEMA, { effort: 'low', maxTokens: 9000, ms: 120000, kind: 'read', fast: true, retries: 6 });
+    const by = new Map((out.items || []).map(it => [Math.round(+it.n), String(it.es || '').trim()]));
+    list.forEach((t, j) => { const es = by.get(j + 1); if (es) t.x.es = es; });
+  };
+  let done = 0;
+  for (let i = 0; i < todo.length; i += 25) {
+    const part = todo.slice(i, i + 25);
+    await run(part);
+    const miss = part.filter(t => !t.x.es);
+    for (let k = 0; k < miss.length; k += 6) await run(miss.slice(k, k + 6)).catch(() => {});
     for (const p of new Set(part.map(t => t.p))) {
       const ana = ANA.get(p.k) || await dbGet('ana', p.k);
-      if (ana?.sents) { p.sents.forEach((x, si) => { if (ana.sents[si] && x.es && !ana.sents[si].es) ana.sents[si].es = x.es; }); ANA.set(p.k, ana); dbPut('ana', ana); }
+      if (ana?.sents) { p.sents.forEach((x, si) => { if (ana.sents[si] && x.es && (all || !ana.sents[si].es)) ana.sents[si].es = x.es; }); ANA.set(p.k, ana); dbPut('ana', ana); }
       else dbPut('expl', { k: p.k + '|tr', es: p.sents.map(x => x.es), date: Date.now() });
     }
-    onProg?.(Math.min(todo.length, i + 40), todo.length);
+    done += part.length; onProg?.(done, todo.length);
   }
 }
-// notes: la traducción va como nota emergente (en Kindle, al tocar «es» después de la oración se abre en un recuadro)
 function kindleBody(c, lang, notes = false){
   let n = 0; const asides = [];
   const body = c.paras.filter(p => !(p.head && p.sents.map(x => x.t).join(' ').trim() === c.title.trim())).map(p => {
@@ -2327,6 +2335,7 @@ async function openKindle(id){
     <div class="field"><label>Traducción</label><select id="kStyle"><option value="below">Siempre a la vista: cada oración en su línea y la traducción chica debajo</option><option value="notes" ${S.kindleStyle === 'notes' ? 'selected' : ''}>Al tocar: «es» después de cada oración abre la traducción en un recuadro (nota emergente; solo EPUB)</option></select></div>
     <div class="field"><label>Formato</label><select id="kFmt"><option value="epub">EPUB (recomendado: el texto se acomoda a la pantalla del Kindle)</option><option value="pdf">PDF (se abre para imprimir → «Guardar como PDF»)</option></select></div>
     <div class="field"><label>Tu correo de Kindle (opcional)</label><input id="kMail" type="email" placeholder="nombre@kindle.com" value="${esc(S.kindleMail || '')}"><div class="small">En Amazon → Contenido y dispositivos → Preferencias → Envío de documentos personales. Tu correo tiene que estar en la lista de correos aprobados.</div></div>
+    <label class="check"><input type="checkbox" id="kRedo"><span>Volver a traducir todas las oraciones (si las traducciones quedaron corridas o mezcladas)</span></label>
     <div id="kInfo" class="small"></div>
     <div class="row"><button class="btn" id="kGo">Crear y enviar</button></div></div>`;
   let data = null;
@@ -2335,18 +2344,18 @@ async function openKindle(id){
     const v = $('kVer').value, chs = chsOf();
     if (!chs.length) { $('kInfo').textContent = 'Ese capítulo todavía no está listo en esa versión.'; data = null; return; }
     data = await kindleChapters(b, v, chs);
-    const miss = data.flatMap(c => c.paras.filter(p => !p.head).flatMap(p => p.sents.filter(x => !x.es && /[\p{L}\p{N}]/u.test(x.t))));
+    const redo = $('kRedo').checked, miss = data.flatMap(c => c.paras.filter(p => !p.head).flatMap(p => p.sents.filter(x => (redo || !x.es) && /[\p{L}\p{N}]/u.test(x.t))));
     const chars = miss.reduce((a, x) => a + x.t.length, 0), pr = PRICES[S.chatModel], cost = pr ? (chars / 3) * (pr[0] + pr[1] * 1.3) / 1e6 : null;
-    $('kInfo').innerHTML = `${data.length} capítulo${data.length > 1 ? 's' : ''}. ` + (miss.length ? `Faltan ${miss.length} traducciones: se piden al modelo barato (${esc(mname(S.chatModel))}${cost !== null ? ', ~' + money(cost) : ''}) y quedan guardadas.` : 'Todas las traducciones ya están guardadas: no gasta nada.');
+    $('kInfo').innerHTML = `${data.length} capítulo${data.length > 1 ? 's' : ''}. ` + (miss.length ? `${redo ? 'Se traducen de nuevo' : 'Faltan'} ${miss.length} traducciones: se piden al modelo barato (${esc(mname(S.chatModel))}${cost !== null ? ', ~' + money(cost) : ''}) y quedan guardadas.` : 'Todas las traducciones ya están guardadas: no gasta nada.');
   };
-  ['kVer', 'kChs'].forEach(x => $(x).onchange = info); info();
+  ['kVer', 'kChs', 'kRedo'].forEach(x => $(x).onchange = info); info();
   $('kMail').onchange = e => { S.kindleMail = e.target.value.trim(); saveSet(); };
   $('kStyle').onchange = e => { S.kindleStyle = e.target.value; saveSet(); };
   $('kGo').onclick = async () => {
     if (!data) return;
     const v = $('kVer').value, btn = $('kGo'); btn.disabled = true;
     try {
-      await kindleTranslate(b, v, data, (n, t) => { btn.textContent = `Traduciendo ${n}/${t}…`; });
+      await kindleTranslate(b, v, data, (n, t) => { btn.textContent = `Traduciendo ${n}/${t}…`; }, $('kRedo').checked);
       if ($('kFmt').value === 'pdf') { kindlePdf(b, v, data); btn.textContent = 'Crear y enviar'; btn.disabled = false; toast('En la ventana de impresión elige «Guardar como PDF» y luego envíalo a tu Kindle.'); return; }
       const { blob, name } = kindleEpub(b, v, data, $('kStyle').value === 'notes');
       await kindleSend(blob, name);
