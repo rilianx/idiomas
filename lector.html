@@ -143,7 +143,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-24 · 79';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-24 · 80';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -2345,17 +2345,27 @@ function kindlePdf(b, ver, chapters){
 }
 // ya listo el archivo: botones para compartir (el menú del celular, que lo adjunta solo), descargar o abrir el correo.
 // (compartir necesita un toque nuevo: después de traducir y armar el archivo, el navegador ya no deja abrir el menú solo)
+// (para compartir, un nombre solo con letras simples: algunos celulares rechazan nombres con acentos, coreano o «·»)
+const shareName = n => { const m = n.match(/\.[a-z0-9]+$/i), ext = m ? m[0] : ''; return (n.slice(0, n.length - ext.length).normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'leamos') + ext; };
 function kindleReady(blob, name, alt){
   const box = $('kOut'); if (!box) return;
-  const file = new File([blob], name, { type: blob.type });
+  const file = new File([blob], shareName(name), { type: blob.type });
   // Android no deja compartir .epub: se ofrece el mismo libro en HTML, que Kindle también acepta
-  const altFile = alt && new File([alt.blob], alt.name, { type: alt.blob.type });
+  const altFile = alt && new File([alt.blob], shareName(alt.name), { type: alt.blob.type });
   const can = f => !!navigator.canShare?.({ files: [f] });
   const shareFile = can(file) ? file : altFile && can(altFile) ? altFile : null;
   box.innerHTML = `<div class="form">✓ Listo: <b>${esc(name)}</b> (${Math.max(1, Math.round(blob.size / 1024))} KB)</div>
     ${shareFile && shareFile !== file ? `<div class="small">Este navegador no deja compartir archivos EPUB: «Compartir» envía el mismo libro en HTML, que Kindle también acepta (sin notas emergentes).</div>` : ''}
     <div class="row">${shareFile ? `<button class="btn" id="kShare">📤 Compartir</button>` : ''}<button class="btn sec" id="kDown">⬇ Descargar</button>${S.kindleMail ? `<button class="btn sec" id="kMailGo">✉ Correo a mi Kindle</button>` : ''}</div>`;
-  if ($('kShare')) $('kShare').onclick = async () => { try { await navigator.share({ files: [shareFile], title: shareFile.name }); } catch (e) { if (e.name !== 'AbortError') toast('No se pudo compartir: ' + e.message); } };
+  if ($('kShare')) $('kShare').onclick = async () => {
+    try { await navigator.share({ files: [shareFile] }); }
+    catch (e) {
+      if (e.name === 'AbortError') return;   // (cerraste el menú)
+      // si el celular lo bloquea, se descarga y se dice por qué (para poder arreglarlo)
+      downloadBlob(blob, name);
+      toast(`El celular no dejó compartir (${e.name}: ${e.message}). Se descargó: envíalo desde Descargas o con «Correo a mi Kindle».`);
+    }
+  };
   $('kDown').onclick = () => downloadBlob(blob, name);
   if ($('kMailGo')) $('kMailGo').onclick = () => { downloadBlob(blob, name); setTimeout(() => { location.href = `mailto:${encodeURIComponent(S.kindleMail)}?subject=${encodeURIComponent(name)}&body=${encodeURIComponent('Adjunta el archivo descargado: ' + name)}`; }, 600); };
   box.scrollIntoView({ block: 'nearest' });
