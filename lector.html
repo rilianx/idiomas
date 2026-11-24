@@ -143,7 +143,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-24 · 77';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-24 · 78';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -2308,6 +2308,35 @@ function kindleEpub(b, ver, chapters, notes = false){
   files.push(['OEBPS/content.opf', `<?xml version="1.0" encoding="utf-8"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="uid">${id}</dc:identifier><dc:title>${xesc(title)}</dc:title><dc:language>${lang}</dc:language>${b.author ? `<dc:creator>${xesc(b.author)}</dc:creator>` : ''}<meta property="dcterms:modified">${new Date().toISOString().slice(0, 19)}Z</meta></metadata><manifest><item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/><item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/><item id="css" href="style.css" media-type="text/css"/>${chapters.map((c, i) => `<item id="c${i + 1}" href="c${i + 1}.xhtml" media-type="application/xhtml+xml"/>`).join('')}</manifest><spine toc="ncx">${chapters.map((c, i) => `<itemref idref="c${i + 1}"/>`).join('')}</spine></package>`]);
   return { blob: zipStore(files), name: safeName(title) + '.epub' };
 }
+// el PDF se arma en el navegador (cada página como imagen: sirve para cualquier alfabeto) con html2pdf, que se carga
+// solo al usarlo; así se puede compartir el archivo (en el celular, el menú de compartir lo adjunta solo)
+const H2P_URL = 'https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js';
+let H2P_LOAD = null;
+const loadH2P = () => window.html2pdf ? Promise.resolve(true) : (H2P_LOAD = H2P_LOAD || new Promise(ok => { const sc = document.createElement('script'); sc.src = H2P_URL; sc.onload = () => ok(true); sc.onerror = () => { H2P_LOAD = null; ok(false); }; document.head.appendChild(sc); }));
+async function kindlePdfBlob(b, ver, chapters, onProg){
+  if (!await loadH2P()) throw new Error('no se pudo cargar el generador de PDF (sin conexión)');
+  const lang = verLang(b, ver);
+  // la página: 6×8 pulgadas, letra grande; se arma por secciones (~10 párrafos) para no pasarse del tamaño de imagen
+  const host = document.createElement('div');
+  host.style.cssText = 'position:fixed;left:-10000px;top:0;width:5.2in;background:#fff;color:#000';
+  host.innerHTML = `<style>.kp{font-family:serif;font-size:15pt;line-height:1.45;color:#000}.kp h2{font-size:20pt;margin:0 0 .6em}.kp h3{font-size:16pt}.kp p{margin:0}.kp .par{margin:0 0 1em;page-break-inside:avoid}.kp .s{margin-top:.3em}.kp .t{font-size:.66em;color:#444;font-family:sans-serif;line-height:1.3;margin:.1em 0 .2em}.kp [lang=ko]{word-break:keep-all}</style>`;
+  document.body.appendChild(host);
+  const secs = [];
+  for (const c of chapters) {
+    const tmp = document.createElement('div'); tmp.innerHTML = kindleBody(c, lang);
+    let cur = null, n = 0;
+    for (const el of [...tmp.children]) {
+      if (!cur || n >= 10) { cur = document.createElement('div'); cur.className = 'kp'; cur.lang = lang; host.appendChild(cur); secs.push(cur); n = 0; }
+      cur.appendChild(el); n++;
+    }
+  }
+  try {
+    const opt = { margin: [0.4, 0.4, 0.45, 0.4], image: { type: 'jpeg', quality: 0.82 }, html2canvas: { scale: 2, backgroundColor: '#ffffff' }, jsPDF: { unit: 'in', format: [6, 8], orientation: 'portrait' }, pagebreak: { mode: ['css', 'legacy'], avoid: ['.par', 'h2', 'h3'] } };
+    let w = html2pdf().set(opt).from(secs[0]).toPdf();
+    secs.slice(1).forEach((el, i) => { w = w.get('pdf').then(pdf => { onProg?.(i + 1, secs.length); pdf.addPage(); }).from(el).toContainer().toCanvas().toPdf(); });
+    return await w.outputPdf('blob');
+  } finally { host.remove(); }
+}
 function kindlePdf(b, ver, chapters){
   const lang = verLang(b, ver), w = window.open('', '_blank');
   if (!w) { toast('El navegador bloqueó la ventana: permite las ventanas emergentes para Leamos.'); return false; }
@@ -2333,7 +2362,7 @@ async function openKindle(id){
     <div class="field"><label>Versión</label><select id="kVer">${vers.map(([v, l]) => `<option value="${v}" ${v === curV ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>
     <div class="field"><label>Capítulos</label><select id="kChs"><option value="cur">Solo el que estoy leyendo: ${curCh + 1}. ${esc(b.chapters[curCh]?.title || '')}</option><option value="all">Todos los que estén listos</option></select></div>
     <div class="field"><label>Traducción</label><select id="kStyle"><option value="below">Siempre a la vista: cada oración en su línea y la traducción chica debajo</option><option value="notes" ${S.kindleStyle === 'notes' ? 'selected' : ''}>Al tocar: «es» después de cada oración abre la traducción en un recuadro (nota emergente; solo EPUB)</option></select></div>
-    <div class="field"><label>Formato</label><select id="kFmt"><option value="epub">EPUB (recomendado: el texto se acomoda a la pantalla del Kindle)</option><option value="pdf">PDF (se abre para imprimir → «Guardar como PDF»)</option></select></div>
+    <div class="field"><label>Formato</label><select id="kFmt"><option value="epub">EPUB (recomendado: el texto se acomoda a la pantalla del Kindle)</option><option value="pdf">PDF (páginas fijas de 6×8 pulgadas; la traducción siempre a la vista)</option></select></div>
     <div class="field"><label>Tu correo de Kindle (opcional)</label><input id="kMail" type="email" placeholder="nombre@kindle.com" value="${esc(S.kindleMail || '')}"><div class="small">En Amazon → Contenido y dispositivos → Preferencias → Envío de documentos personales. Tu correo tiene que estar en la lista de correos aprobados.</div></div>
     <label class="check"><input type="checkbox" id="kRedo"><span>Volver a traducir todas las oraciones (si las traducciones quedaron corridas o mezcladas)</span></label>
     <div id="kInfo" class="small"></div>
@@ -2356,7 +2385,13 @@ async function openKindle(id){
     const v = $('kVer').value, btn = $('kGo'); btn.disabled = true;
     try {
       await kindleTranslate(b, v, data, (n, t) => { btn.textContent = `Traduciendo ${n}/${t}…`; }, $('kRedo').checked);
-      if ($('kFmt').value === 'pdf') { kindlePdf(b, v, data); btn.textContent = 'Crear y enviar'; btn.disabled = false; toast('En la ventana de impresión elige «Guardar como PDF» y luego envíalo a tu Kindle.'); return; }
+      if ($('kFmt').value === 'pdf') {
+        btn.textContent = 'Armando el PDF…';
+        const blob = await kindlePdfBlob(b, v, data, (n, t) => { btn.textContent = `Armando el PDF… ${n}/${t}`; });
+        const one = data.length === 1 ? ` · ${data[0].ch + 1}. ${data[0].title}` : '';
+        await kindleSend(new Blob([blob], { type: 'application/pdf' }), safeName(`${b.title}${one}${v !== 'o' ? ' · ' + verName(b, v) : ''} (con traducción)`) + '.pdf');
+        btn.textContent = 'Crear y enviar'; btn.disabled = false; return;
+      }
       const { blob, name } = kindleEpub(b, v, data, $('kStyle').value === 'notes');
       await kindleSend(blob, name);
     } catch (e) { toast('No se pudo crear: ' + errText(e)); }
