@@ -143,7 +143,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-24 · 80';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-24 · 81';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -2221,23 +2221,24 @@ function downloadBlob(blob, name){
    o se descarga y se abre el correo a tu dirección de Kindle para adjuntarlo. ---------- */
 const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
 const crc32 = u => { let c = 0xffffffff; for (let i = 0; i < u.length; i++) c = CRC_T[(c ^ u[i]) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
-// un .zip sin comprimir (lo justo para un EPUB; «mimetype» va primero)
+// un .zip sin comprimir (lo justo para un EPUB; «mimetype» va primero, sin marcas)
+const DOS_DATE = (() => { const d = new Date(); return ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate(); })();
 function zipStore(files){
   const enc = new TextEncoder(), parts = [], dir = []; let off = 0;
   for (const [name, data] of files) {
     const n = enc.encode(name), u = typeof data === 'string' ? enc.encode(data) : data, crc = crc32(u);
     const h = new DataView(new ArrayBuffer(30));
-    h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true); h.setUint32(14, crc, true); h.setUint32(18, u.length, true); h.setUint32(22, u.length, true); h.setUint16(26, n.length, true);
+    h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, name === 'mimetype' ? 0 : 0x0800, true); h.setUint16(12, DOS_DATE, true); h.setUint32(14, crc, true); h.setUint32(18, u.length, true); h.setUint32(22, u.length, true); h.setUint16(26, n.length, true);
     parts.push(h.buffer, n, u);
     const c = new DataView(new ArrayBuffer(46));
-    c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x0800, true); c.setUint32(16, crc, true); c.setUint32(20, u.length, true); c.setUint32(24, u.length, true); c.setUint16(28, n.length, true); c.setUint32(42, off, true);
+    c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, name === 'mimetype' ? 0 : 0x0800, true); c.setUint16(14, DOS_DATE, true); c.setUint32(16, crc, true); c.setUint32(20, u.length, true); c.setUint32(24, u.length, true); c.setUint16(28, n.length, true); c.setUint32(42, off, true);
     dir.push(c.buffer, n); off += 30 + n.length + u.length;
   }
   const size = dir.reduce((a, x) => a + (x.byteLength ?? x.length), 0), e = new DataView(new ArrayBuffer(22));
   e.setUint32(0, 0x06054b50, true); e.setUint16(8, files.length, true); e.setUint16(10, files.length, true); e.setUint32(12, size, true); e.setUint32(16, off, true);
   return new Blob([...parts, ...dir, e.buffer], { type: 'application/epub+zip' });
 }
-const xesc = t => String(t ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const xesc = t => String(t ?? '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 // los capítulos (texto de la versión, oraciones y su traducción guardada) para exportar
 async function kindleChapters(b, ver, chs){
   const lang = verLang(b, ver), out = [];
@@ -2297,7 +2298,7 @@ function kindleBody(c, lang, notes = false){
 const KINDLE_CSS = 'body{font-family:serif;line-height:1.45;margin:0 .3em}h2{margin:1.2em 0 .6em}p{margin:0;text-indent:0}.par{margin:0 0 1.1em}.s{margin-top:.35em}.t{font-size:.65em;color:#555;font-family:sans-serif;line-height:1.3;margin:.1em 0 .25em}.s:lang(ko){word-break:keep-all}.pn{margin:0 0 .9em;line-height:1.6}a.nr{text-decoration:none;color:#666;font-family:sans-serif;font-size:.7em;padding:0 .25em}aside{font-size:.9em}';
 function kindleEpub(b, ver, chapters, notes = false){
   const one = chapters.length === 1 ? ` · ${chapters[0].ch + 1}. ${chapters[0].title}` : '';
-  const lang = verLang(b, ver), title = `${b.title}${one}${ver !== 'o' ? ' · ' + verName(b, ver) : ''} (con traducción)`, id = 'leamos-' + b.id + '-' + ver + '-' + Date.now();
+  const lang = verLang(b, ver), title = `${b.title}${one}${ver !== 'o' ? ' · ' + verName(b, ver) : ''} (con traducción)`, id = 'urn:uuid:' + (crypto.randomUUID?.() || ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, c => (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> c / 4).toString(16)));
   const xhtml = (t, body) => `<?xml version="1.0" encoding="utf-8"?>\n<!DOCTYPE html>\n<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="${lang}" xml:lang="${lang}"><head><meta charset="utf-8"/><title>${xesc(t)}</title><link rel="stylesheet" type="text/css" href="style.css"/></head><body>${body}</body></html>`;
   const files = [['mimetype', 'application/epub+zip'],
     ['META-INF/container.xml', '<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>'],
@@ -2362,12 +2363,12 @@ function kindleReady(blob, name, alt){
     catch (e) {
       if (e.name === 'AbortError') return;   // (cerraste el menú)
       // si el celular lo bloquea, se descarga y se dice por qué (para poder arreglarlo)
-      downloadBlob(blob, name);
+      downloadBlob(blob, shareName(name));
       toast(`El celular no dejó compartir (${e.name}: ${e.message}). Se descargó: envíalo desde Descargas o con «Correo a mi Kindle».`);
     }
   };
-  $('kDown').onclick = () => downloadBlob(blob, name);
-  if ($('kMailGo')) $('kMailGo').onclick = () => { downloadBlob(blob, name); setTimeout(() => { location.href = `mailto:${encodeURIComponent(S.kindleMail)}?subject=${encodeURIComponent(name)}&body=${encodeURIComponent('Adjunta el archivo descargado: ' + name)}`; }, 600); };
+  $('kDown').onclick = () => downloadBlob(blob, shareName(name));
+  if ($('kMailGo')) $('kMailGo').onclick = () => { downloadBlob(blob, shareName(name)); setTimeout(() => { location.href = `mailto:${encodeURIComponent(S.kindleMail)}?subject=${encodeURIComponent(name)}&body=${encodeURIComponent('Adjunta el archivo descargado: ' + name)}`; }, 600); };
   box.scrollIntoView({ block: 'nearest' });
 }
 function kindleHtml(b, ver, chapters){
