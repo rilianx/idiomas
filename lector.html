@@ -143,7 +143,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-24 · 78';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-24 · 79';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -2343,14 +2343,27 @@ function kindlePdf(b, ver, chapters){
   w.document.write(`<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><title>${xesc(b.title)}</title><style>@page{size:6in 8in;margin:.45in .4in}${KINDLE_CSS}body{font-size:13pt}h2{page-break-before:always}h2:first-of-type{page-break-before:avoid}</style></head><body>${chapters.map(c => kindleBody(c, lang)).join('\n')}<script>onload=()=>setTimeout(()=>print(),300)<\/script></body></html>`);
   w.document.close(); return true;
 }
-async function kindleSend(blob, name){
+// ya listo el archivo: botones para compartir (el menú del celular, que lo adjunta solo), descargar o abrir el correo.
+// (compartir necesita un toque nuevo: después de traducir y armar el archivo, el navegador ya no deja abrir el menú solo)
+function kindleReady(blob, name, alt){
+  const box = $('kOut'); if (!box) return;
   const file = new File([blob], name, { type: blob.type });
-  if (navigator.canShare?.({ files: [file] })) {
-    try { await navigator.share({ files: [file], title: name }); return; } catch (e) { if (e.name === 'AbortError') return; }
-  }
-  downloadBlob(blob, name);
-  if (S.kindleMail) setTimeout(() => { location.href = `mailto:${encodeURIComponent(S.kindleMail)}?subject=${encodeURIComponent(name)}&body=${encodeURIComponent('Adjunta el archivo descargado: ' + name)}`; }, 600);
-  toast(S.kindleMail ? 'Descargado. Se abre el correo a tu Kindle: adjunta el archivo y envíalo.' : 'Descargado. Envíalo a tu dirección de Kindle (…@kindle.com) como archivo adjunto.');
+  // Android no deja compartir .epub: se ofrece el mismo libro en HTML, que Kindle también acepta
+  const altFile = alt && new File([alt.blob], alt.name, { type: alt.blob.type });
+  const can = f => !!navigator.canShare?.({ files: [f] });
+  const shareFile = can(file) ? file : altFile && can(altFile) ? altFile : null;
+  box.innerHTML = `<div class="form">✓ Listo: <b>${esc(name)}</b> (${Math.max(1, Math.round(blob.size / 1024))} KB)</div>
+    ${shareFile && shareFile !== file ? `<div class="small">Este navegador no deja compartir archivos EPUB: «Compartir» envía el mismo libro en HTML, que Kindle también acepta (sin notas emergentes).</div>` : ''}
+    <div class="row">${shareFile ? `<button class="btn" id="kShare">📤 Compartir</button>` : ''}<button class="btn sec" id="kDown">⬇ Descargar</button>${S.kindleMail ? `<button class="btn sec" id="kMailGo">✉ Correo a mi Kindle</button>` : ''}</div>`;
+  if ($('kShare')) $('kShare').onclick = async () => { try { await navigator.share({ files: [shareFile], title: shareFile.name }); } catch (e) { if (e.name !== 'AbortError') toast('No se pudo compartir: ' + e.message); } };
+  $('kDown').onclick = () => downloadBlob(blob, name);
+  if ($('kMailGo')) $('kMailGo').onclick = () => { downloadBlob(blob, name); setTimeout(() => { location.href = `mailto:${encodeURIComponent(S.kindleMail)}?subject=${encodeURIComponent(name)}&body=${encodeURIComponent('Adjunta el archivo descargado: ' + name)}`; }, 600); };
+  box.scrollIntoView({ block: 'nearest' });
+}
+function kindleHtml(b, ver, chapters){
+  const lang = verLang(b, ver), title = $('kOutTitle')?.value || b.title;
+  const html = `<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><title>${xesc(title)}</title><style>${KINDLE_CSS}</style></head><body>${chapters.map(c => kindleBody(c, lang)).join('\n<mbp:pagebreak/>\n')}</body></html>`;
+  return new Blob([html], { type: 'text/html' });
 }
 async function openKindle(id){
   const b = await dbGet('books', id); if (!b) return;
@@ -2366,7 +2379,7 @@ async function openKindle(id){
     <div class="field"><label>Tu correo de Kindle (opcional)</label><input id="kMail" type="email" placeholder="nombre@kindle.com" value="${esc(S.kindleMail || '')}"><div class="small">En Amazon → Contenido y dispositivos → Preferencias → Envío de documentos personales. Tu correo tiene que estar en la lista de correos aprobados.</div></div>
     <label class="check"><input type="checkbox" id="kRedo"><span>Volver a traducir todas las oraciones (si las traducciones quedaron corridas o mezcladas)</span></label>
     <div id="kInfo" class="small"></div>
-    <div class="row"><button class="btn" id="kGo">Crear y enviar</button></div></div>`;
+    <div class="row"><button class="btn" id="kGo">Crear</button></div><div id="kOut"></div></div>`;
   let data = null;
   const chsOf = () => { const v = $('kVer').value, all = $('kChs').value === 'all'; return b.chapters.map((_, i) => i).filter(i => (all || i === curCh) && (v === 'o' || b.versions[v]?.done?.[i])); };
   const info = async () => {
@@ -2389,13 +2402,13 @@ async function openKindle(id){
         btn.textContent = 'Armando el PDF…';
         const blob = await kindlePdfBlob(b, v, data, (n, t) => { btn.textContent = `Armando el PDF… ${n}/${t}`; });
         const one = data.length === 1 ? ` · ${data[0].ch + 1}. ${data[0].title}` : '';
-        await kindleSend(new Blob([blob], { type: 'application/pdf' }), safeName(`${b.title}${one}${v !== 'o' ? ' · ' + verName(b, v) : ''} (con traducción)`) + '.pdf');
-        btn.textContent = 'Crear y enviar'; btn.disabled = false; return;
+        kindleReady(new Blob([blob], { type: 'application/pdf' }), safeName(`${b.title}${one}${v !== 'o' ? ' · ' + verName(b, v) : ''} (con traducción)`) + '.pdf');
+        btn.textContent = 'Crear de nuevo'; btn.disabled = false; return;
       }
       const { blob, name } = kindleEpub(b, v, data, $('kStyle').value === 'notes');
-      await kindleSend(blob, name);
+      kindleReady(blob, name, { blob: kindleHtml(b, v, data), name: name.replace(/\.epub$/, '.html') });
     } catch (e) { toast('No se pudo crear: ' + errText(e)); }
-    btn.textContent = 'Crear y enviar'; btn.disabled = false;
+    btn.textContent = 'Crear de nuevo'; btn.disabled = false;
   };
 }
 async function exportBooks(ids, name){
