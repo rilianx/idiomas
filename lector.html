@@ -143,7 +143,7 @@ h3.para{font-size:calc(var(--fs) * 1.15);line-height:1.6;margin:1.2em 0 .7em}
    «Hablemos» en el mismo sitio), los libros en IndexedDB.
    ===================================================================== */
 
-const APP_VERSION = '2026-11-24 · 81';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
+const APP_VERSION = '2026-11-24 · 82';   // (subir en cada cambio: se ve en la biblioteca y en Ajustes)
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const DAY = 864e5;
 
@@ -2356,8 +2356,8 @@ function kindleReady(blob, name, alt){
   const can = f => !!navigator.canShare?.({ files: [f] });
   const shareFile = can(file) ? file : altFile && can(altFile) ? altFile : null;
   box.innerHTML = `<div class="form">✓ Listo: <b>${esc(name)}</b> (${Math.max(1, Math.round(blob.size / 1024))} KB)</div>
-    ${shareFile && shareFile !== file ? `<div class="small">Este navegador no deja compartir archivos EPUB: «Compartir» envía el mismo libro en HTML, que Kindle también acepta (sin notas emergentes).</div>` : ''}
-    <div class="row">${shareFile ? `<button class="btn" id="kShare">📤 Compartir</button>` : ''}<button class="btn sec" id="kDown">⬇ Descargar</button>${S.kindleMail ? `<button class="btn sec" id="kMailGo">✉ Correo a mi Kindle</button>` : ''}</div>`;
+    ${shareFile !== file ? `<div class="small">El navegador de este celular no deja que una página comparta archivos EPUB (es una restricción de Chrome en Android). Opciones: <b>compartirlo en HTML</b> (el mismo libro; Kindle también lo acepta, sin notas emergentes), o <b>descargar el EPUB y subirlo en Send to Kindle</b> (la página de Amazon se abre en el navegador), o descargarlo y compartirlo desde la app de Archivos o Descargas.</div>` : ''}
+    <div class="row">${shareFile ? `<button class="btn" id="kShare">📤 Compartir${shareFile !== file ? ' en HTML' : ''}</button>` : ''}${shareFile !== file ? `<button class="btn sec" id="kStk">🌐 Descargar y abrir Send to Kindle</button>` : ''}<button class="btn sec" id="kDown">⬇ Descargar</button>${S.kindleMail ? `<button class="btn sec" id="kMailGo">✉ Correo a mi Kindle</button>` : ''}</div>`;
   if ($('kShare')) $('kShare').onclick = async () => {
     try { await navigator.share({ files: [shareFile] }); }
     catch (e) {
@@ -2368,6 +2368,7 @@ function kindleReady(blob, name, alt){
     }
   };
   $('kDown').onclick = () => downloadBlob(blob, shareName(name));
+  if ($('kStk')) $('kStk').onclick = () => { downloadBlob(blob, shareName(name)); setTimeout(() => window.open('https://www.amazon.com/sendtokindle', '_blank'), 500); toast('En Send to Kindle toca «Seleccionar archivos» y elige el EPUB de Descargas.'); };
   if ($('kMailGo')) $('kMailGo').onclick = () => { downloadBlob(blob, shareName(name)); setTimeout(() => { location.href = `mailto:${encodeURIComponent(S.kindleMail)}?subject=${encodeURIComponent(name)}&body=${encodeURIComponent('Adjunta el archivo descargado: ' + name)}`; }, 600); };
   box.scrollIntoView({ block: 'nearest' });
 }
